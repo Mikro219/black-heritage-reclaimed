@@ -1,0 +1,14 @@
+{
+  "scene_id": "scene_02",
+  "fps": 24,
+  "resolution": [1920, 1080],
+  "audio": {
+    "narration": "audio/narration/scene_02.mp3",
+    "ambience": "audio/ambience/crowd.mp3",
+    "sfx_cues": []
+  },
+  "transitions": {
+    "accepts_input_after_frame": 12,
+    "next_scene": null
+  }
+}
