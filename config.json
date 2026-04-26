@@ -7,5 +7,8 @@
   "gesture_confirmation_frames": 4,
   "projector_audio_offset_ms": 40,
   "debug_overlay": false,
-  "start_scene": "scene_01"
+  "start_scene": "scene_01",
+  "keyboard_fallback_enabled": true,
+  "gesture_inactivity_timeout_ms": 20000,
+  "presence_timeout_ms": 8000
 }
