@@ -1,0 +1,11 @@
+{
+  "resolution": [1920, 1080],
+  "camera_index": 0,
+  "min_detection_confidence": 0.7,
+  "min_tracking_confidence": 0.6,
+  "gesture_cooldown_ms": 800,
+  "gesture_confirmation_frames": 4,
+  "projector_audio_offset_ms": 40,
+  "debug_overlay": false,
+  "start_scene": "scene_01"
+}
