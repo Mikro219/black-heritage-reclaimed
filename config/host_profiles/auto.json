@@ -1,0 +1,26 @@
+{
+  "profile_name": "auto",
+  "camera": {
+    "backend": "dshow",
+    "device_name_match": null,
+    "resolution": [1280, 720],
+    "fps": 30,
+    "fallback_index": 0
+  },
+  "microphone": {
+    "device_name_match": null,
+    "sample_rate": 16000,
+    "channels": 1,
+    "fallback_index": 0
+  },
+  "display": {
+    "fullscreen": false,
+    "resolution": [1920, 1080],
+    "projector_audio_offset_ms": 0
+  },
+  "performance": {
+    "mediapipe_complexity": 0,
+    "render_fps_cap": 30,
+    "debug_overlay": true
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "profile_name": "mini_pc_prod",
+  "camera": {
+    "backend": "dshow",
+    "device_name_match": "USB 2.0 Camera",
+    "resolution": [1280, 720],
+    "fps": 30,
+    "fallback_index": 0
+  },
+  "microphone": {
+    "device_name_match": "USB Audio Device",
+    "sample_rate": 16000,
+    "channels": 1,
+    "fallback_index": null
+  },
+  "display": {
+    "fullscreen": true,
+    "resolution": [1920, 1080],
+    "projector_audio_offset_ms": 50
+  },
+  "performance": {
+    "mediapipe_complexity": 1,
+    "render_fps_cap": 30,
+    "debug_overlay": false
+  }
+}
