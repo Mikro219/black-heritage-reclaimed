@@ -1,14 +1,45 @@
 {
   "resolution": [1920, 1080],
   "camera_index": 0,
-  "min_detection_confidence": 0.7,
-  "min_tracking_confidence": 0.6,
-  "gesture_cooldown_ms": 800,
-  "gesture_confirmation_frames": 4,
   "projector_audio_offset_ms": 40,
   "debug_overlay": false,
   "start_scene": "scene_01",
   "keyboard_fallback_enabled": true,
-  "gesture_inactivity_timeout_ms": 20000,
-  "presence_timeout_ms": 8000
+
+  "timing_defaults": {
+    "profile_standard": {
+      "reprompt_first_ms": 8000,
+      "reprompt_second_ms": 16000,
+      "auto_advance_ms": 30000
+    },
+    "profile_urgent": {
+      "reprompt_first_ms": 4000,
+      "reprompt_second_ms": 8000,
+      "auto_advance_ms": 15000
+    },
+    "oi_window_ms": 6000,
+    "voice_window_ms": 10000,
+    "presence_hold_ms": 500,
+    "extended_hold_ms": 1000
+  },
+
+  "detection_thresholds": {
+    "min_detection_confidence": 0.6,
+    "min_tracking_confidence": 0.5,
+    "shape_match_star": 0.65,
+    "shape_match_dipper": 0.50,
+    "rhythm_timing_tolerance": 0.25,
+    "trail_waypoint_match": 0.60,
+    "speed_multiplier_idle": 2.0,
+    "paddle_stroke_count": 4,
+    "gesture_cooldown_ms": 600,
+    "gesture_confirmation_frames": 3
+  },
+
+  "voice": {
+    "hum_rms_threshold": 0.02,
+    "hum_min_duration_ms": 500,
+    "whisper_rms_threshold": 0.008,
+    "whisper_volume_db_offset": -12
+  }
 }

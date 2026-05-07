@@ -1,8 +1,52 @@
 {
   "scene_id": "scene_XX",
+  "scene_title": "Scene Title",
   "artist": "felicia",
   "fps": 24,
   "resolution": [1920, 1080],
+  "timing_profile": "standard",
+
+  "dialogue_sequence": [
+    {
+      "cue": "AL-XX-001",
+      "audio": "AL-XX-001.wav"
+    },
+    {
+      "cue": "AL-XX-002",
+      "audio": "AL-XX-002.wav",
+      "render_event": "optional_render_event_name"
+    },
+    {
+      "cue": "AL-XX-003",
+      "audio": "AL-XX-003.wav",
+      "wait_for_interaction": true,
+      "interaction": {
+        "tier": "cg",
+        "id": "gesture_id",
+        "type": "presence_bilateral",
+        "params": {},
+        "reaction_audio": "AL-XX-003-RESP.wav",
+        "voice_alternative": {
+          "id": "voice_id",
+          "keywords": ["keyword"],
+          "mode": "keyword",
+          "tier": "cg_alternative"
+        }
+      }
+    },
+    {
+      "cue": "AL-XX-004",
+      "audio": "AL-XX-004.wav",
+      "interaction": {
+        "tier": "oi",
+        "id": "optional_gesture_id",
+        "type": "directional_point",
+        "params": {},
+        "reaction_audio": "AL-XX-004-RESP.wav"
+      }
+    }
+  ],
+
   "transitions": {
     "accepts_input_after_frame": 12,
     "next_scene": "scene_XX"
