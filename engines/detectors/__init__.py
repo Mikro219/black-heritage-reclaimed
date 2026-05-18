@@ -14,6 +14,7 @@ from .rules.mouth_proximity_tip import detect as mouth_proximity_tip
 from .rules.reach_and_close import detect as reach_and_close
 from .rules.point_target_held import detect as point_target_held
 from .rules.trail_follow import detect as trail_follow
+from .rules.directional_draw import detect as directional_draw
 
 REGISTRY = {
     "presence_bilateral": presence_bilateral,
@@ -32,4 +33,5 @@ REGISTRY = {
     "reach_and_close": reach_and_close,
     "point_target_held": point_target_held,
     "trail_follow": trail_follow,
+    "directional_draw": directional_draw,
 }

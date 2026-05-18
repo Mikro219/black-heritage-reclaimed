@@ -1,0 +1,65 @@
+{
+  "scene_id": "scene_03",
+  "scene_title": "Flying Geese",
+  "artist": "natasha",
+  "fps": 24,
+  "resolution": [1920, 1080],
+  "timing_profile": "standard",
+
+  "dialogue_sequence": [
+    {
+      "cue": "AL-03-001",
+      "audio": "AL-03-001.wav",
+      "interaction": {
+        "tier": "oi",
+        "id": "look_up",
+        "type": "presence_bilateral",
+        "params": { "y_threshold": "shoulder", "hold_ms": 300 }
+      }
+    },
+    { "cue": "AL-03-002", "audio": "AL-03-002.wav" },
+    { "cue": "AL-03-003", "audio": "AL-03-003.wav" },
+    {
+      "cue": "AL-03-004",
+      "audio": "AL-03-004.wav",
+      "wait_for_interaction": true,
+      "freeze_frame_page": 78,
+      "interaction": {
+        "tier": "cg",
+        "id": "shade_eyes",
+        "type": "directional_head_or_hand",
+        "params": { "direction": "right", "hold_ms": 300 }
+      }
+    },
+    {
+      "cue": "AL-03-005",
+      "audio": "AL-03-005.wav",
+      "render_event": "geese_wake_brighten"
+    },
+    {
+      "cue": "AL-03-006",
+      "audio": "AL-03-006.wav",
+      "freeze_frame_page": 84,
+      "interaction": {
+        "tier": "oi",
+        "id": "point_river_marker",
+        "type": "directional_point",
+        "params": { "directions": ["down"], "hold_ms": 500 },
+        "reaction_audio": "AL-03-006-RESP.wav"
+      }
+    },
+    {
+      "cue": "AL-03-007",
+      "audio": "AL-03-007.wav"
+    },
+    {
+      "cue": "AL-03-008",
+      "audio": "AL-03-008.wav"
+    },
+    { "cue": "AL-03-009", "audio": "AL-03-009.wav" }
+  ],
+
+  "transitions": {
+    "next_scene": "scene_04"
+  }
+}

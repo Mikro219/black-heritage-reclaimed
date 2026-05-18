@@ -1,0 +1,88 @@
+{
+  "scene_id": "scene_04",
+  "scene_title": "North Star",
+  "artist": "natasha",
+  "fps": 24,
+  "resolution": [1920, 1080],
+  "timing_profile": "standard",
+
+  "dialogue_sequence": [
+    { "cue": "AL-04-001", "audio": "AL-04-001.wav" },
+    { "cue": "AL-04-002", "audio": "AL-04-002.wav" },
+    { "cue": "AL-04-003", "audio": "AL-04-003.wav" },
+    { "cue": "AL-04-004", "audio": "AL-04-004.wav" },
+    { "cue": "AL-04-005", "audio": "AL-04-005.wav" },
+    { "cue": "AL-04-006", "audio": "AL-04-006.wav" },
+    {
+      "cue": "AL-04-007",
+      "audio": "AL-04-007.wav",
+      "wait_for_interaction": true,
+      "interaction": {
+        "tier": "cg",
+        "id": "trace_dipper",
+        "type": "directional_draw_chain",
+        "stroke_chain": [
+          { "freeze_page": 109, "direction": "left",    "next_page": 110 },
+          { "freeze_page": 111, "direction": "down",    "next_page": 112 },
+          { "freeze_page": 112, "direction": "right",   "next_page": 113 },
+          { "freeze_page": 113, "direction": "up",      "next_page": 116 },
+          { "freeze_page": 116, "direction": "up_left", "next_page": 117 },
+          { "freeze_page": 117, "direction": "up_left", "next_page": 118 },
+          { "freeze_page": 118, "direction": "up_left", "next_page": 119 }
+        ]
+      }
+    },
+    {
+      "cue": "AL-04-008",
+      "audio": "AL-04-008.wav",
+      "wait_for_interaction": true,
+      "freeze_frame_page": 120,
+      "interaction": {
+        "tier": "cg",
+        "id": "point_dipper_corner",
+        "type": "directional_point",
+        "params": { "directions": ["up", "right"], "hold_ms": 500 }
+      }
+    },
+    {
+      "cue": "AL-04-009",
+      "audio": "AL-04-009.wav",
+      "wait_for_interaction": true,
+      "interaction": {
+        "tier": "cg",
+        "id": "trace_star",
+        "type": "directional_draw_chain",
+        "stroke_chain": [
+          { "freeze_page": 122, "direction": "up_right", "next_page": 123 }
+        ]
+      }
+    },
+    {
+      "cue": "AL-04-010",
+      "audio": "AL-04-010.wav"
+    },
+    {
+      "cue": "AL-04-011",
+      "audio": "AL-04-011.wav",
+      "render_event": "star_pulses"
+    },
+    {
+      "cue": "AL-04-012",
+      "audio": "AL-04-012.wav",
+      "interaction": {
+        "tier": "oi",
+        "id": "point_north_star",
+        "type": "point_target_held",
+        "params": { "hold_ms": 1000 },
+        "reaction_audio": "AL-04-012-RESP.wav"
+      }
+    },
+    { "cue": "AL-04-013", "audio": "AL-04-013.wav" },
+    { "cue": "AL-04-014", "audio": "AL-04-014.wav" },
+    { "cue": "AL-04-015", "audio": "AL-04-015.wav" }
+  ],
+
+  "transitions": {
+    "next_scene": "scene_05"
+  }
+}

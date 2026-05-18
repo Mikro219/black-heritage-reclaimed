@@ -1,85 +1,444 @@
 """
-VoiceEngine — keyword spotting, hum detection, and whisper detection.
+VoiceEngine — Vosk keyword spotting, hum detection, and DSP routines.
 
-Routes detected voice events through the EventBus. The keyword spotter
-library is TBD (Vosk / Picovoice / openWakeWord); this stub defines the
-interface. Hum and whisper detection use RMS thresholding via DSP.
+Primary interface:
+    open_window(vi_config) -> window_id   Open a VI window scoped to a dialogue cue.
+    close_window(window_id)               Close a window early (e.g. on scene transition).
+    subscribe(callback)                   Register a callback(VoiceEvent) for direct consumers.
+    start() / stop()                      Lifecycle.
+    debug_info() -> dict                  For the debug overlay.
 
-Modes:
-  keyword  — string match against a list of keywords
-  hum      — any sustained vocal ≥ hum_min_duration_ms above hum_rms_threshold
-  whisper  — low-volume RMS between whisper_rms_threshold and hum_rms_threshold
+A single sounddevice input callback fans raw audio to two consumers:
+  1. Vosk KaldiRecognizer — grammar-constrained keyword spotting.
+  2. DSP layer — RMS-based hum detection (Scene 4).
+
+Multi-mode windows (e.g. Scene 4 AL-04-010 — hum OR "follow the gourd"):
+    Set mode="hum" in vi_config and also populate keywords. The window accepts
+    either trigger. If mode="keyword" (or "whisper"), only keyword matching fires.
+
+Whisper mode (Scene 6 "Shoofly"): implemented as plain keyword detection scoped
+to the AL-06-007 window. No additional RMS gating — per May 2026 PM call, the
+immersion cues visitor behaviour; any Vosk match during the window counts.
+
+Keywords detected outside an open window are logged at INFO for on-site analytics.
+
+Fallback to whisper.cpp (tiny.en / base.en) is documented but not built. Switch
+only if Vosk accuracy is insufficient after on-site grammar tuning — the interface
+boundary (open_window / subscribe) is designed so the swap requires no callers
+to change.
 """
 
+from __future__ import annotations
+
+import json
+import logging
+import queue
 import threading
 import time
-from typing import Optional
+import uuid
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Callable, Optional
 
+import sounddevice as sd
+
+try:
+    from vosk import KaldiRecognizer, Model as VoskModel
+    _VOSK_AVAILABLE = True
+except ImportError:
+    _VOSK_AVAILABLE = False
+
+log = logging.getLogger(__name__)
+
+VOSK_MODEL_PATH = Path(__file__).parent.parent / "models" / "vosk-model-small-en-us-0.15"
+
+_DEFAULT_GRAMMAR = [
+    "freedom", "go", "north", "follow the gourd",
+    "shoofly", "yes", "water", "ready", "now", "[unk]",
+]
+
+
+# ---------------------------------------------------------------------------
+# Data types
+# ---------------------------------------------------------------------------
+
+@dataclass
+class VoiceEvent:
+    window_id: str
+    vi_id: str
+    tier: str
+    trigger: str    # "keyword" | "hum"
+    matched: str    # the keyword text, or "hum"
+
+
+@dataclass
+class _Window:
+    window_id: str
+    vi_config: dict
+    open_time: float
+    window_ms: float
+    fired: bool = False
+
+
+# ---------------------------------------------------------------------------
+# Engine
+# ---------------------------------------------------------------------------
 
 class VoiceEngine:
-    def __init__(self, config: dict, event_bus: "EventBus"):
+    def __init__(self, config: dict, event_bus=None):
         self.config = config
         self.event_bus = event_bus
-        self._voice_cfg = config.get("voice", {})
-        self._active_vi: Optional[dict] = None
-        self._vi_open_time: Optional[float] = None
-        self._whisper_mode_active = False
-        self._input_locked = False
-        self._running = False
+        self._voice_cfg: dict = config.get("voice", {})
+        self._sample_rate: int = 16000
+        self._input_locked: bool = False
+        self._running: bool = False
         self._thread: Optional[threading.Thread] = None
+        self._mic_active: bool = False
 
-        self.event_bus.subscribe("dialogue_cue", self._on_dialogue_cue)
-        self.event_bus.subscribe("input_lock", self._on_input_lock)
+        # windows: window_id → _Window; protected by _lock
+        self._windows: dict[str, _Window] = {}
+        self._lock = threading.Lock()
 
-    def start(self):
+        # External subscribers called in addition to event_bus
+        self._subscribers: list[Callable[[VoiceEvent], None]] = []
+
+        # Global per-keyword debounce to prevent rapid double-fires
+        self._debounce: dict[str, float] = {}
+        self._debounce_ms: float = self._voice_cfg.get("debounce_ms", 1500)
+
+        # Hum detection: wall-clock timestamp when continuous hum began
+        self._hum_start: Optional[float] = None
+
+        # Audio queue between sounddevice callback and processing thread
+        self._audio_q: queue.Queue[bytes] = queue.Queue()
+
+        # Debug: last keyword/hum heard (cleared after 2s in debug_info)
+        self._last_heard: Optional[str] = None
+        self._last_heard_time: float = 0.0
+
+        # Vosk
+        self._recognizer: Optional[object] = None
+        self._init_vosk()
+
+        # Wire up event bus listeners if a bus was provided
+        if event_bus:
+            event_bus.subscribe("dialogue_cue", self._on_dialogue_cue)
+            event_bus.subscribe("input_lock", self._on_input_lock)
+
+    # -----------------------------------------------------------------------
+    # Public interface
+    # -----------------------------------------------------------------------
+
+    def open_window(self, vi_config: dict) -> str:
+        """Open a VI detection window. Returns an opaque window_id."""
+        window_id = str(uuid.uuid4())
+        timing = self.config.get("timing_defaults", {})
+        window_ms = vi_config.get("window_ms", timing.get("voice_window_ms", 10000))
+        win = _Window(
+            window_id=window_id,
+            vi_config=vi_config,
+            open_time=time.monotonic(),
+            window_ms=float(window_ms),
+        )
+        with self._lock:
+            self._windows[window_id] = win
+        log.info("VI window opened: id=%s vi_id=%s mode=%s keywords=%s",
+                 window_id[:8], vi_config.get("id"), vi_config.get("mode"), vi_config.get("keywords"))
+        return window_id
+
+    def close_window(self, window_id: str) -> None:
+        """Close a window early (scene transition, input lock, etc.)."""
+        with self._lock:
+            if window_id in self._windows:
+                del self._windows[window_id]
+                log.info("VI window closed early: id=%s", window_id[:8])
+
+    def subscribe(self, callback: Callable[[VoiceEvent], None]) -> None:
+        """Register a callback invoked whenever a VI fires. Used by the test CLI."""
+        self._subscribers.append(callback)
+
+    def start(self) -> None:
         self._running = True
-        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread = threading.Thread(target=self._run, daemon=True, name="VoiceEngine")
         self._thread.start()
 
-    def stop(self):
+    def stop(self) -> None:
         self._running = False
 
-    def _run(self):
-        # Stub: replace with real audio stream + spotter integration
-        while self._running:
-            time.sleep(0.05)
-            # TODO: read audio chunk, run RMS / keyword spotter, call _handle_detection
+    def debug_info(self) -> dict:
+        """Snapshot for the debug overlay — safe to call from the main thread."""
+        now = time.monotonic()
+        with self._lock:
+            active_win = next(iter(self._windows.values()), None)
+        age_ms = (now - self._last_heard_time) * 1000 if self._last_heard else None
+        last_heard = self._last_heard if (age_ms is not None and age_ms < 2000) else None
+        return {
+            "mic_active": self._mic_active,
+            "active_window": active_win.vi_config.get("id") if active_win else None,
+            "last_heard": last_heard,
+        }
 
-    def _handle_detection(self, mode: str, matched: str):
-        if self._input_locked or not self._active_vi:
+    # -----------------------------------------------------------------------
+    # Setup
+    # -----------------------------------------------------------------------
+
+    def _init_vosk(self) -> None:
+        if not _VOSK_AVAILABLE:
+            log.warning("vosk not installed — keyword detection disabled. Run: pip install vosk")
+            return
+        if not VOSK_MODEL_PATH.exists():
+            log.warning(
+                "Vosk model not found at %s — run scripts/setup_voice.py to download it.",
+                VOSK_MODEL_PATH,
+            )
+            return
+        grammar = self._voice_cfg.get("grammar") or _DEFAULT_GRAMMAR
+        model = VoskModel(str(VOSK_MODEL_PATH))
+        self._recognizer = KaldiRecognizer(model, self._sample_rate, json.dumps(grammar))
+        log.info("Vosk ready. Grammar: %s", grammar)
+
+    # -----------------------------------------------------------------------
+    # Audio loop (runs on dedicated thread)
+    # -----------------------------------------------------------------------
+
+    def _run(self) -> None:
+        mic_cfg = self.config.get("_profile", {}).get("microphone", {})
+        sample_rate: int = mic_cfg.get("sample_rate", self._sample_rate)
+        channels: int = mic_cfg.get("channels", 1)
+        device = mic_cfg.get("device_name_match") or None
+
+        def _callback(indata, frames, time_info, status):
+            self._audio_q.put(bytes(indata))
+
+        try:
+            with sd.RawInputStream(
+                samplerate=sample_rate,
+                channels=channels,
+                dtype="int16",
+                device=device,
+                callback=_callback,
+                blocksize=4000,
+            ):
+                self._mic_active = True
+                log.info("Mic open (device=%s rate=%d)", device or "default", sample_rate)
+                while self._running:
+                    try:
+                        chunk = self._audio_q.get(timeout=0.1)
+                    except queue.Empty:
+                        continue
+                    self._process_chunk(chunk)
+        except Exception as exc:
+            log.error("Audio stream error: %s", exc)
+        finally:
+            self._mic_active = False
+            log.info("Mic closed.")
+
+    def _process_chunk(self, chunk: bytes) -> None:
+        import math
+        import struct
+
+        # DSP: RMS for hum detection
+        samples = struct.unpack(f"{len(chunk) // 2}h", chunk)
+        rms = math.sqrt(sum(s * s for s in samples) / len(samples)) / 32768.0
+        self._check_hum(rms)
+
+        # Vosk keyword spotting
+        if self._recognizer and self._recognizer.AcceptWaveform(chunk):
+            result = json.loads(self._recognizer.Result())
+            text = result.get("text", "").strip().lower()
+            if text and text != "[unk]":
+                self._last_heard = text
+                self._last_heard_time = time.monotonic()
+                self._try_fire_windows("keyword", text)
+
+    # -----------------------------------------------------------------------
+    # Hum detection (DSP)
+    # -----------------------------------------------------------------------
+
+    def _check_hum(self, rms: float) -> None:
+        threshold: float = self._voice_cfg.get("hum_rms_threshold", 0.02)
+        min_dur_ms: float = self._voice_cfg.get("hum_min_duration_ms", 500)
+
+        if rms >= threshold:
+            if self._hum_start is None:
+                self._hum_start = time.monotonic()
+            elif (time.monotonic() - self._hum_start) * 1000 >= min_dur_ms:
+                self._hum_start = None  # reset so next sustained hum fires again
+                self._last_heard = "hum"
+                self._last_heard_time = time.monotonic()
+                self._try_fire_windows("hum", "hum")
+        else:
+            self._hum_start = None
+
+    # -----------------------------------------------------------------------
+    # Window matching and event emission
+    # -----------------------------------------------------------------------
+
+    def _try_fire_windows(self, mode: str, matched: str) -> None:
+        if self._input_locked:
             return
 
-        window_ms = self.config["timing_defaults"].get("voice_window_ms", 10000)
-        if self._vi_open_time:
-            elapsed = (time.monotonic() - self._vi_open_time) * 1000
-            if elapsed > window_ms:
-                self._active_vi = None
-                self._vi_open_time = None
-                return
+        now = time.monotonic()
+        to_fire: list[tuple[str, _Window]] = []
 
-        vi = self._active_vi
-        if mode != vi.get("mode"):
+        with self._lock:
+            # Expire stale windows
+            expired = [
+                wid for wid, w in self._windows.items()
+                if (now - w.open_time) * 1000 > w.window_ms
+            ]
+            for wid in expired:
+                log.info("VI window expired: id=%s vi_id=%s", wid[:8], self._windows[wid].vi_config.get("id"))
+                del self._windows[wid]
+
+            # Find the first matching, un-fired window
+            for wid, win in list(self._windows.items()):
+                if win.fired:
+                    continue
+                if not _window_matches(win.vi_config, mode, matched):
+                    continue
+                last_fired = self._debounce.get(matched, 0.0)
+                if (now - last_fired) * 1000 < self._debounce_ms:
+                    log.debug("VI debounced: matched=%r", matched)
+                    continue
+                self._debounce[matched] = now
+                win.fired = True
+                del self._windows[wid]
+                to_fire.append((wid, win))
+                break  # one event per detection
+
+        if not to_fire:
+            log.info("VI no match: mode=%s matched=%r (no open window or debounced)", mode, matched)
             return
 
-        keywords = vi.get("keywords", [])
-        if mode == "keyword" and matched.lower() not in [k.lower() for k in keywords]:
-            return
+        for wid, win in to_fire:
+            event = VoiceEvent(
+                window_id=wid,
+                vi_id=win.vi_config.get("id", ""),
+                tier=win.vi_config.get("tier", "reaction"),
+                trigger=mode,
+                matched=matched,
+            )
+            log.info("VI fired: vi_id=%s trigger=%s matched=%r tier=%s",
+                     event.vi_id, event.trigger, event.matched, event.tier)
+            self._emit(event)
 
-        self.event_bus.emit("vi_detected", {"voice_id": vi["id"], "tier": vi.get("tier")})
-        self._active_vi = None
-        self._vi_open_time = None
+    def _emit(self, event: VoiceEvent) -> None:
+        for cb in self._subscribers:
+            try:
+                cb(event)
+            except Exception as exc:
+                log.error("Subscriber error: %s", exc)
+        if self.event_bus:
+            self.event_bus.emit("vi_detected", {
+                "voice_id": event.vi_id,
+                "tier": event.tier,
+                "trigger": event.trigger,
+                "matched": event.matched,
+            })
 
-    def _on_dialogue_cue(self, data: dict):
+    # -----------------------------------------------------------------------
+    # Event bus listeners
+    # -----------------------------------------------------------------------
+
+    def _on_dialogue_cue(self, data: dict) -> None:
         cue = data.get("cue", {})
         interaction = cue.get("interaction", {})
-        voice_alt = interaction.get("voice_alternative")
-        voice_req = interaction.get("voice_required")
-        vi_target = voice_alt or voice_req
+        vi_target = interaction.get("voice_alternative") or interaction.get("voice_required")
         if vi_target:
-            self._active_vi = vi_target
-            self._vi_open_time = time.monotonic()
-            # Activate whisper mode only for whisper-mode VIs
-            self._whisper_mode_active = vi_target.get("mode") == "whisper"
+            self.open_window(vi_target)
 
-    def _on_input_lock(self, data: dict):
-        self._input_locked = data.get("locked", False)
+    def _on_input_lock(self, data: dict) -> None:
+        locked: bool = data.get("locked", False)
+        self._input_locked = locked
+        if locked:
+            with self._lock:
+                count = len(self._windows)
+                self._windows.clear()
+            if count:
+                log.info("Input locked — cleared %d open VI window(s).", count)
+
+
+# ---------------------------------------------------------------------------
+# Module-level helper (no self needed)
+# ---------------------------------------------------------------------------
+
+def _window_matches(vi_config: dict, mode: str, matched: str) -> bool:
+    """Return True if the detection (mode, matched) satisfies the window's vi_config.
+
+    Multi-mode rule: mode="hum" with a non-empty keywords list means the window
+    accepts either a hum OR a matching keyword — used for Scene 4 AL-04-010.
+    """
+    keywords = [k.lower() for k in vi_config.get("keywords", [])]
+    window_mode: str = vi_config.get("mode", "keyword")
+
+    if window_mode == "hum":
+        if mode == "hum":
+            return True
+        # Multi-mode: also accept a keyword match
+        return mode == "keyword" and matched.lower() in keywords
+
+    # keyword / whisper — whisper is plain keyword detection per May 2026 PM call
+    return mode == "keyword" and matched.lower() in keywords
+
+
+# ---------------------------------------------------------------------------
+# Test CLI  — python -m engines.voice_engine --test-scene 1
+# ---------------------------------------------------------------------------
+
+if __name__ == "__main__":
+    import argparse
+    import sys
+
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format="%(asctime)s %(levelname)-8s %(name)s: %(message)s",
+        stream=sys.stdout,
+    )
+
+    parser = argparse.ArgumentParser(description="VoiceEngine isolated test harness")
+    parser.add_argument("--test-scene", metavar="N", type=int, default=1,
+                        help="Scene number to simulate (default: 1)")
+    args = parser.parse_args()
+
+    config_path = Path(__file__).parent.parent / "config.json"
+    with open(config_path, encoding="utf-8") as f:
+        config = json.load(f)
+
+    engine = VoiceEngine(config)  # no event_bus — standalone mode
+
+    def _on_event(event: VoiceEvent) -> None:
+        print(f"\n{'='*60}")
+        print(f"  VOICE EVENT FIRED")
+        print(f"  vi_id   : {event.vi_id}")
+        print(f"  tier    : {event.tier}")
+        print(f"  trigger : {event.trigger}")
+        print(f"  matched : {event.matched!r}")
+        print(f"{'='*60}\n")
+
+    engine.subscribe(_on_event)
+    engine.start()
+
+    scene = args.test_scene
+
+    if scene == 1:
+        print("\n--- Scene 1 test: AL-01-007 'raise_hands / freedom' ---")
+        print("Listening passively for 3 seconds (nothing should fire yet)...\n")
+        time.sleep(3)
+
+        print("Opening AL-01-007 voice window (keyword='freedom', 10s window)...")
+        wid = engine.open_window({
+            "id": "freedom",
+            "keywords": ["freedom"],
+            "mode": "keyword",
+            "tier": "cg_alternative",
+            "window_ms": 10000,
+        })
+        print(f"Window open (id={wid[:8]}...). Say 'freedom' within 10 seconds.\n")
+        time.sleep(11)
+        print("Window expired. Test complete.")
+
+    else:
+        print(f"No test defined for scene {scene}. Supported: 1")
+
+    engine.stop()

@@ -36,7 +36,10 @@ class GestureEngine:
         self._oi_open_time: Optional[float] = None
         self._cooldown_until: float = 0.0
         self._last_landmarks = None
+        self._last_handedness = None
         self._input_locked = False
+        self._last_fired: Optional[str] = None
+        self._last_fired_time: float = 0.0
 
         self.event_bus.subscribe("cg_window_open", self._on_cg_window_open)
         self.event_bus.subscribe("oi_window_open", self._on_oi_window_open)
@@ -49,6 +52,7 @@ class GestureEngine:
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         results = self._hands.process(rgb)
         self._last_landmarks = results.multi_hand_landmarks
+        self._last_handedness = results.multi_handedness
 
         if not results.multi_hand_landmarks:
             return
@@ -95,10 +99,33 @@ class GestureEngine:
     def _emit_cg(self, gesture_id: str):
         cooldown = self._thresholds.get("gesture_cooldown_ms", 600) / 1000
         self._cooldown_until = time.monotonic() + cooldown
-        self.event_bus.emit("cg_detected", {"gesture_id": gesture_id})
+        # Directional detectors store their result in context["point_direction"]
+        choice = self._active_cg_context.get("point_direction")
+        label = f"CG:{gesture_id}" + (f"({choice})" if choice else "")
+        self._last_fired = label
+        self._last_fired_time = time.monotonic()
+        event = {"gesture_id": gesture_id}
+        if choice:
+            event["choice"] = choice
+        self.event_bus.emit("cg_detected", event)
 
     def _emit_oi(self, gesture_id: str):
+        self._last_fired = f"OI:{gesture_id}"
+        self._last_fired_time = time.monotonic()
         self.event_bus.emit("oi_detected", {"gesture_id": gesture_id})
+
+    def debug_info(self) -> dict:
+        now = time.monotonic()
+        last = self._last_fired if (now - self._last_fired_time) < 2.0 else None
+        cg = self._active_cg
+        oi = self._active_oi
+        recording = self._active_cg_context.get("shape_recording")
+        return {
+            "active_cg": f"{cg['id']} ({cg['type']})" if cg else None,
+            "active_oi": f"{oi['id']} ({oi['type']})" if oi else None,
+            "last_fired": last,
+            "recording_pts": len(recording) if recording else 0,
+        }
 
     def _dispatch(self, interaction: dict, results, context: dict) -> bool:
         detector_type = interaction.get("type")

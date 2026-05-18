@@ -3,7 +3,10 @@
   "camera": {
     "backend": "dshow",
     "device_name_match": null,
-    "resolution": [1280, 720],
+    "resolution": [
+      1280,
+      720
+    ],
     "fps": 30,
     "fallback_index": 0
   },
@@ -15,12 +18,78 @@
   },
   "display": {
     "fullscreen": false,
-    "resolution": [1280, 720],
+    "resolution": [
+      1280,
+      720
+    ],
     "projector_audio_offset_ms": 0
   },
   "performance": {
     "mediapipe_complexity": 0,
     "render_fps_cap": 30,
     "debug_overlay": true
+  },
+  "voice_tuning": {
+    "hum_rms_threshold": 0.02,
+    "hum_min_duration_ms": 500
+  },
+  "gesture_tuning": {
+    "reach_flask": {
+      "hold_ms": 450
+    },
+    "point_quilt_block": {
+      "hold_ms": 800
+    },
+    "point_path \u2014 LEFT": {
+      "hold_ms": 500
+    },
+    "point_path \u2014 RIGHT": {
+      "hold_ms": 500
+    },
+    "point_river_marker": {
+      "hold_ms": 500
+    },
+    "point_dipper_corner": {
+      "hold_ms": 500
+    },
+    "raise_hands": {
+      "hold_ms": 500
+    },
+    "look_up (bilateral raise)": {
+      "hold_ms": 300
+    },
+    "cup_ear_listen": {
+      "hold_ms": 500
+    },
+    "shade_eyes": {
+      "hold_ms": 300
+    },
+    "trace_dipper \u2014 stroke 1: LEFT": {
+      "window_ms": 400,
+      "min_displacement": 0.04
+    },
+    "trace_dipper \u2014 stroke 2: DOWN": {
+      "window_ms": 400,
+      "min_displacement": 0.04
+    },
+    "trace_dipper \u2014 stroke 3: RIGHT": {
+      "window_ms": 400,
+      "min_displacement": 0.04
+    },
+    "trace_dipper \u2014 stroke 4: UP": {
+      "window_ms": 400,
+      "min_displacement": 0.04
+    },
+    "trace_dipper \u2014 strokes 5-7: UP-LEFT": {
+      "window_ms": 400,
+      "min_displacement": 0.04
+    },
+    "trace_star \u2014 stroke 1: UP-RIGHT": {
+      "window_ms": 400,
+      "min_displacement": 0.04
+    },
+    "drink_gesture": {
+      "hold_ms": 400
+    }
   }
 }
