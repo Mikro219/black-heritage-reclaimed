@@ -27,6 +27,9 @@ import os
 import sys
 import time
 
+import collections
+import threading
+
 import cv2
 import mediapipe as mp
 import numpy as np
@@ -49,23 +52,27 @@ CONNECTIONS = [
 # ── Gesture roster ───────────────────────────────────────────────────────────
 # tune_key: which params key to increment with +/-  (None = no tuning)
 GESTURES = [
-    # ── directional_point ─────────────────────────────────────────────────
+    # ── forward_reach ─────────────────────────────────────────────────────
     dict(
         name="reach_flask",
         label="OI · Scene 1 · AL-01-002",
-        desc="Point in any direction (all 8 compass directions accepted)",
-        type="directional_point",
-        params={"directions": [], "hold_ms": 400},
-        tune_key="hold_ms", tune_step=50, accent=(0, 220, 255), highlights=[0, 8],
+        desc="Move hand toward screen (Z-approach) in upper-center region  |  +/-: area_growth_threshold  |  [/]: window_frames",
+        type="forward_reach",
+        params={"area_growth_threshold": 0.30, "window_frames": 12, "target_region": "upper_center"},
+        tune_key="area_growth_threshold", tune_step=0.05,
+        tune_key2="window_frames", tune_step2=1,
+        accent=(0, 220, 255), highlights=[0],
     ),
+    # ── forward_point ─────────────────────────────────────────────────────
     dict(
         name="point_quilt_block",
         label="OI · Scene 1 · AL-01-010",
-        desc="Point at top-left quilt block — any direction for tuning",
-        type="directional_point",
-        params={"directions": [], "hold_ms": 800},
+        desc="Extend index finger toward top-left quadrant, hold 500ms  |  +/-: hold_ms",
+        type="forward_point",
+        params={"target_region": "top_left_quadrant", "hold_ms": 500},
         tune_key="hold_ms", tune_step=50, accent=(0, 220, 255), highlights=[0, 8],
     ),
+    # ── directional_point ─────────────────────────────────────────────────
     dict(
         name="point_path — LEFT",
         label="CG · Scene 2 · AL-02-007",
@@ -87,19 +94,17 @@ GESTURES = [
     dict(
         name="point_river_marker",
         label="OI · Scene 3 · AL-03-006",
-        desc="Point DOWN at the river marker — tip must reach DOWN marker",
-        type="directional_point",
-        params={"directions": ["down"], "hold_ms": 500,
-                "target_x": 0.50, "target_y": 0.78, "proximity_threshold": 0.30},
+        desc="Extend index finger toward lower-third of screen (river), hold 500ms  |  +/-: hold_ms",
+        type="forward_point",
+        params={"target_region": "lower_third", "hold_ms": 500},
         tune_key="hold_ms", tune_step=50, accent=(0, 220, 255), highlights=[0, 8],
     ),
     dict(
         name="point_dipper_corner",
         label="CG · Scene 4 · AL-04-008",
-        desc="Point UP or RIGHT at the Big Dipper bowl corner",
-        type="directional_point",
-        params={"directions": ["up","right"], "hold_ms": 500,
-                "target_x": 0.70, "target_y": 0.25, "proximity_threshold": 0.30},
+        desc="Extend index finger toward top-right quadrant (dipper bowl corner), hold 500ms  |  +/-: hold_ms",
+        type="forward_point",
+        params={"target_region": "top_right_quadrant", "hold_ms": 500},
         tune_key="hold_ms", tune_step=50, accent=(80, 200, 255), highlights=[0, 8],
     ),
     # ── presence_bilateral ────────────────────────────────────────────────
@@ -123,18 +128,23 @@ GESTURES = [
     dict(
         name="cup_ear_listen",
         label="OI · Scene 2 · AL-02-005",
-        desc="Hand near ear (ear proximity), curled (2+ fingers bent)",
+        desc="Wrist near either ear — no curl required, either hand  |  +/-: hold_ms  |  [/]: ear_radius",
         type="directional_head_or_hand",
-        params={"direction": "ear", "require_curl": True, "hold_ms": 500},
-        tune_key="hold_ms", tune_step=50, accent=(200, 180, 255), highlights=[0, 4, 8, 12, 16, 20],
+        params={"direction": "ear", "hold_ms": 250, "ear_radius": 0.22},
+        tune_key="hold_ms", tune_step=50,
+        tune_key2="ear_radius", tune_step2=0.02,
+        accent=(200, 180, 255), highlights=[0],
     ),
+    # ── survey ────────────────────────────────────────────────────────────
     dict(
-        name="shade_eyes",
+        name="survey",
         label="CG · Scene 3 · AL-03-004",
-        desc="Wrist at brow/forehead height — hand shading eyes",
-        type="directional_head_or_hand",
-        params={"direction": "brow", "hold_ms": 300},
-        tune_key="hold_ms", tune_step=50, accent=(200, 180, 255), highlights=[0, 4, 8, 12, 16, 20],
+        desc="Raise hand to brow, then scan left↔right  |  +/-: scan_window_ms  |  [/]: min_x_delta",
+        type="survey",
+        params={"brow_y": 0.45, "hold_ms": 200, "scan_window_ms": 2000, "min_x_delta": 0.06},
+        tune_key="scan_window_ms", tune_step=100,
+        tune_key2="min_x_delta", tune_step2=0.01,
+        accent=(200, 180, 255), highlights=[0],
     ),
     # ── directional_draw (stroke chains) ─────────────────────────────────
     dict(
@@ -210,13 +220,13 @@ GESTURES = [
     dict(
         name="three_knock",
         label="CG · Scene 6 · AL-06-007",
-        desc="knock-knock...KNOCK  |  +/-: short_window_ms  |  [/]: long_min_ms",
+        desc="knock-knock...KNOCK (knuckle threshold, not wrist-delta)  |  +/-: short_window_ms  |  [/]: threshold_fraction",
         type="rhythm_bilateral",
         params={"short_window_ms": 500, "long_min_ms": 400, "long_max_ms": 1400,
-                "min_push": 0.04, "refractory_ms": 220},
+                "threshold_fraction": 0.30, "refractory_ms": 220},
         tune_key="short_window_ms", tune_step=50,
-        tune_key2="long_min_ms", tune_step2=50,
-        accent=(255, 100, 180), highlights=[0, 8],
+        tune_key2="threshold_fraction", tune_step2=0.05,
+        accent=(255, 100, 180), highlights=[0, 5],
     ),
     # ── speed_bilateral ───────────────────────────────────────────────────
     dict(
@@ -227,11 +237,101 @@ GESTURES = [
         params={"speed_multiplier": 2.0},
         tune_key=None, accent=(255, 80, 80), highlights=[0, 8],
     ),
+    # ── touch_head ────────────────────────────────────────────────────────
+    dict(
+        name="touch_temple",
+        label="CG · Scene 5 · AL-05-011  (one hand)",
+        desc="Touch crown of head (1 hand)  |  +/-: hold_ms",
+        type="touch_head",
+        params={"hands_required": 1, "hold_ms": 500},
+        tune_key="hold_ms", tune_step=50,
+        accent=(255, 220, 80), highlights=[0],
+    ),
+    dict(
+        name="hands_to_head",
+        label="CG · Scene 8 · AL-08-005  (two hands)",
+        desc="Both hands to crown — put on hat  |  +/-: hold_ms",
+        type="touch_head",
+        params={"hands_required": 2, "hold_ms": 500},
+        tune_key="hold_ms", tune_step=50,
+        accent=(255, 220, 80), highlights=[0],
+    ),
+    # ── arms_crossed ─────────────────────────────────────────────────────
+    dict(
+        name="arms_crossed",
+        label="CG · Scene 8 · AL-08-006",
+        desc="Both wrists cross body midline at torso height  |  +/-: hold_ms  |  [/]: dead_zone_frac",
+        type="arms_crossed",
+        params={"hold_ms": 500, "dead_zone_frac": 0.05},
+        tune_key="hold_ms", tune_step=50,
+        tune_key2="dead_zone_frac", tune_step2=0.01,
+        accent=(200, 120, 255), highlights=[0, 15, 16],
+    ),
+    # ── push_out ──────────────────────────────────────────────────────────
+    dict(
+        name="forward_push",
+        label="CG · Scene 10 · AL-10-009  (urgent)",
+        desc="Both hands thrust forward — bbox area growth bilateral  |  +/-: min_growth_pct  |  [/]: window_ms",
+        type="push_out",
+        params={"min_growth_pct": 50, "window_ms": 250},
+        tune_key="min_growth_pct", tune_step=5,
+        tune_key2="window_ms", tune_step2=25,
+        accent=(255, 80, 80), highlights=[0],
+    ),
+    dict(
+        name="launch_push",
+        label="CG · Scene 11 · AL-11-012  (deliberate)",
+        desc="Both hands launch forward — moderate velocity  |  +/-: min_growth_pct  |  [/]: window_ms",
+        type="push_out",
+        params={"min_growth_pct": 35, "window_ms": 400},
+        tune_key="min_growth_pct", tune_step=5,
+        tune_key2="window_ms", tune_step2=25,
+        accent=(255, 140, 60), highlights=[0],
+    ),
+    # ── run_arms ──────────────────────────────────────────────────────────
+    dict(
+        name="run_arms",
+        label="OI · Scene 10 · AL-10-010",
+        desc="Fast alternating arm pump — ≥3 cycles within 2s  |  +/-: window_ms  |  [/]: min_cycles",
+        type="run_arms",
+        params={"min_cycles": 3, "window_ms": 2000},
+        tune_key="window_ms", tune_step=100,
+        tune_key2="min_cycles", tune_step2=1,
+        accent=(255, 200, 40), highlights=[0, 15, 16],
+    ),
+    # ── unravel ───────────────────────────────────────────────────────────
+    dict(
+        name="unravel",
+        label="CG · Scene 11 · AL-11-011",
+        desc="Wrists wind around each other (rope) — ≥2 cycles  |  +/-: window_ms  |  [/]: min_amplitude_frac",
+        type="unravel",
+        params={"min_cycles": 2, "window_ms": 3000, "min_amplitude_frac": 0.10, "prox_frac": 0.25},
+        tune_key="window_ms", tune_step=200,
+        tune_key2="min_amplitude_frac", tune_step2=0.02,
+        accent=(80, 200, 255), highlights=[0, 15, 16],
+    ),
+    # ── paddle ────────────────────────────────────────────────────────────
+    dict(
+        name="paddle",
+        label="CG · Scene 11 · AL-11-013",
+        desc="Both wrists arc same side — 4 strokes shoulder→hip  |  +/-: min_strokes  |  [/]: sync_window_ms",
+        type="paddle",
+        params={"min_strokes": 4, "sync_window_ms": 400},
+        tune_key="min_strokes", tune_step=1,
+        tune_key2="sync_window_ms", tune_step2=50,
+        accent=(80, 255, 160), highlights=[0, 11, 12, 15, 16],
+    ),
 ]
 
 # ── Named thresholds (mirrors presence_bilateral.py) ────────────────────────
 _NAMED_Y = {"shoulder": 0.5, "head": 0.3, "waist": 0.7}
 _MOUTH_XY = (0.50, 0.78)
+
+# ── Global waist-line offset ─────────────────────────────────────────────────
+# Adjustable at runtime with W (raise) / S (lower) — step 0.01.
+# Stored in context["_waist_y_offset"] so detectors can read it.
+_WAIST_Y_OFFSET = 0.0
+_WAIST_STEP     = 0.01
 
 
 # ── Drawing helpers ───────────────────────────────────────────────────────────
@@ -519,11 +619,12 @@ def draw_knock_progress(frame, context, params, w, h, accent):
 
 
 def draw_head_or_hand_zones(frame, direction, w, h, accent,
-                            ear_positions=None, brow_y=None):
+                            ear_positions=None, brow_y=None, ear_radius=None):
     """Draw the active zone for directional_head_or_hand in player-perspective space.
 
     ear_positions: live pose-derived [(x,y), ...] in raw MediaPipe coords.
     brow_y: live pose-derived absolute Y threshold for brow direction.
+    ear_radius: normalised wrist-to-ear detection radius (default 0.22).
     """
     overlay = frame.copy()
     if direction == "right":
@@ -559,18 +660,164 @@ def draw_head_or_hand_zones(frame, direction, w, h, accent,
     elif direction == "ear":
         # Draw ear proximity circles — use live pose positions when available
         ear_pos = ear_positions if ear_positions is not None else [(0.15, 0.35), (0.85, 0.35)]
+        radius = ear_radius if ear_radius is not None else 0.22
         pose_label = "(pose)" if ear_positions is not None else "(estimated)"
         for ex, ey in ear_pos:
             epx = int((1 - ex) * w)  # mirrored
             epy = int(ey * h)
-            r = int(0.15 * w)
+            r = int(radius * w)
             cv2.circle(overlay, (epx, epy), r, accent, -1)
             cv2.circle(frame, (epx, epy), r, accent, 1, cv2.LINE_AA)
-            cv2.circle(frame, (epx, epy), 5, (80, 255, 200) if ear_positions else (120,120,120),
+            cv2.circle(frame, (epx, epy), 5, (80, 255, 200) if ear_positions else (120, 120, 120),
                        -1, cv2.LINE_AA)
-        cv2.putText(frame, f"EAR zones {pose_label} fingertip prox 0.15",
+        cv2.putText(frame, f"EAR zones {pose_label}  wrist prox {radius:.2f}",
                     (8, h - 80), cv2.FONT_HERSHEY_SIMPLEX, 0.45, accent, 1, cv2.LINE_AA)
     cv2.addWeighted(overlay, 0.12, frame, 0.88, 0, frame)
+
+
+def draw_forward_reach_info(frame, context, params, lm_list, w, h, accent):
+    """Overlay for forward_reach: target region + bbox-area growth indicator."""
+    overlay = frame.copy()
+    region_key = params.get("target_region", "upper_center")
+    _REACH_REGIONS = {
+        "upper_center": (0.30, 0.0, 0.70, 0.40),
+        "upper_left":   (0.0,  0.0, 0.50, 0.40),
+        "upper_right":  (0.50, 0.0, 1.0,  0.40),
+        "center":       (0.33, 0.33, 0.67, 0.67),
+    }
+    if region_key in _REACH_REGIONS:
+        x0, y0, x1, y1 = _REACH_REGIONS[region_key]
+        px0, py0 = int(x0 * w), int(y0 * h)
+        px1, py1 = int(x1 * w), int(y1 * h)
+        cv2.rectangle(overlay, (px0, py0), (px1, py1), accent, -1)
+        cv2.rectangle(frame, (px0, py0), (px1, py1), accent, 2, cv2.LINE_AA)
+        cv2.putText(frame, f"target: {region_key}", (px0 + 6, py0 + 20),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.50, accent, 1, cv2.LINE_AA)
+    cv2.addWeighted(overlay, 0.10, frame, 0.90, 0, frame)
+
+    # Bbox area growth bar
+    history = context.get("bbox_area_history", [])
+    threshold = params.get("area_growth_threshold", 0.30)
+    if len(history) >= 2:
+        oldest = history[0]
+        current = history[-1]
+        growth = (current / oldest - 1.0) if oldest > 1e-6 else 0.0
+        pct = min(max(growth / threshold, 0.0), 1.0)
+        bar_x, bar_y = 10, h // 2
+        bar_w = 220
+        cv2.rectangle(frame, (bar_x, bar_y), (bar_x + bar_w, bar_y + 14), (50, 50, 50), -1)
+        filled = int(pct * bar_w)
+        color = (0, 255, 80) if pct >= 1.0 else accent
+        if filled > 0:
+            cv2.rectangle(frame, (bar_x, bar_y), (bar_x + filled, bar_y + 14), color, -1)
+        cv2.rectangle(frame, (bar_x, bar_y), (bar_x + bar_w, bar_y + 14), (120, 120, 120), 1)
+        cv2.putText(frame, f"area growth {growth:+.2f} / {threshold:.2f}",
+                    (bar_x + bar_w + 8, bar_y + 11),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, color if pct >= 1.0 else (200, 200, 200), 1, cv2.LINE_AA)
+
+    # Show wrist position dot
+    if lm_list:
+        wrist = lm_list[0].landmark[0]
+        wx = int((1 - wrist.x) * w)
+        wy = int(wrist.y * h)
+        cv2.circle(frame, (wx, wy), 10, accent, 2, cv2.LINE_AA)
+        cv2.putText(frame, "wrist", (wx + 12, wy + 4),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, accent, 1, cv2.LINE_AA)
+
+
+def draw_forward_point_info(frame, params, lm_list, w, h, accent):
+    """Overlay for forward_point: target quadrant + finger extension indicator."""
+    overlay = frame.copy()
+    region_key = params.get("target_region", "")
+    _POINT_REGIONS = {
+        "top_left_quadrant":  (0.0, 0.0, 0.5, 0.5),
+        "top_right_quadrant": (0.5, 0.0, 1.0, 0.5),
+        "lower_third":        (0.0, 0.67, 1.0, 1.0),
+        "center":             (0.25, 0.25, 0.75, 0.75),
+    }
+    if region_key in _POINT_REGIONS:
+        x0, y0, x1, y1 = _POINT_REGIONS[region_key]
+        px0, py0 = int(x0 * w), int(y0 * h)
+        px1, py1 = int(x1 * w), int(y1 * h)
+        cv2.rectangle(overlay, (px0, py0), (px1, py1), accent, -1)
+        cv2.rectangle(frame, (px0, py0), (px1, py1), accent, 2, cv2.LINE_AA)
+        cv2.putText(frame, f"target: {region_key}", (px0 + 6, py0 + 22),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.50, accent, 1, cv2.LINE_AA)
+    cv2.addWeighted(overlay, 0.10, frame, 0.90, 0, frame)
+
+    # Finger extension indicator per hand
+    for hand in lm_list:
+        lm = hand.landmark
+        wrist, tip, mcp = lm[0], lm[8], lm[5]
+        wrist_tip_sq = (tip.x - wrist.x) ** 2 + (tip.y - wrist.y) ** 2
+        wrist_mcp_sq = (mcp.x - wrist.x) ** 2 + (mcp.y - wrist.y) ** 2
+        extended = wrist_tip_sq > wrist_mcp_sq
+
+        # Draw tip dot: bright if extended, dim if curled
+        tx_px = int((1 - tip.x) * w)
+        ty_px = int(tip.y * h)
+        dot_color = accent if extended else (80, 80, 80)
+        cv2.circle(frame, (tx_px, ty_px), 9, dot_color, -1, cv2.LINE_AA)
+        cv2.circle(frame, (tx_px, ty_px), 11, (255, 255, 255), 1, cv2.LINE_AA)
+        ext_label = "extended" if extended else "CURLED"
+        cv2.putText(frame, ext_label, (tx_px + 14, ty_px + 4),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.50, dot_color, 1, cv2.LINE_AA)
+        cv2.putText(frame, f"tip px={tip.x:.2f} py={tip.y:.2f}",
+                    (tx_px + 14, ty_px + 20),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.40, (160, 160, 160), 1, cv2.LINE_AA)
+        break  # first hand only
+
+
+def draw_survey_info(frame, context, params, lm_list, w, h, accent):
+    """Overlay for survey: brow threshold line + phase indicator + scan direction."""
+    brow_y = params.get("brow_y", 0.45)
+    min_x_delta = params.get("min_x_delta", 0.06)
+    phase = context.get("survey_phase", 0)
+
+    # Brow threshold line
+    by_px = int(brow_y * h)
+    cv2.line(frame, (0, by_px), (w, by_px), accent, 1, cv2.LINE_AA)
+    cv2.putText(frame, f"brow_y={brow_y:.2f}  (wrist must be ABOVE this line)",
+                (8, by_px - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.45, accent, 1, cv2.LINE_AA)
+
+    # Phase label
+    phase_labels = {0: "Phase 0: waiting for wrist above brow",
+                    1: "Phase 1: holding at brow — scan will open",
+                    2: "Phase 2: SCAN  ← move wrist left/right →",
+                    3: "FIRED"}
+    phase_color = {0: (120, 120, 120), 1: (255, 200, 80), 2: accent, 3: (0, 255, 80)}
+    label = phase_labels.get(phase, f"Phase {phase}")
+    color = phase_color.get(phase, accent)
+    cv2.putText(frame, label, (8, by_px + 22),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 1, cv2.LINE_AA)
+
+    # Scan direction arrows when in phase 2
+    if phase == 2:
+        cx, cy = w // 2, by_px - 40
+        arrow_len = int(min_x_delta * w) + 20
+        cv2.arrowedLine(frame, (cx, cy), (cx - arrow_len, cy), accent, 2, cv2.LINE_AA, tipLength=0.3)
+        cv2.arrowedLine(frame, (cx, cy), (cx + arrow_len, cy), accent, 2, cv2.LINE_AA, tipLength=0.3)
+        cv2.putText(frame, f"min_x_delta={min_x_delta:.2f}", (cx - 50, cy - 10),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.42, (160, 160, 160), 1, cv2.LINE_AA)
+        # Show last scan direction
+        last_dir = context.get("scan_last_direction")
+        if last_dir:
+            cv2.putText(frame, f"last scan dir: {last_dir}",
+                        (8, by_px + 46), cv2.FONT_HERSHEY_SIMPLEX, 0.50, accent, 1, cv2.LINE_AA)
+
+    # Live wrist Y indicator
+    if lm_list:
+        wy = lm_list[0].landmark[0].y
+        wx_px = int((1 - lm_list[0].landmark[0].x) * w)
+        wy_px = int(wy * h)
+        above = wy < brow_y
+        dot_color = accent if above else (80, 80, 80)
+        cv2.circle(frame, (wx_px, wy_px), 8, dot_color, -1, cv2.LINE_AA)
+        cv2.line(frame, (wx_px - 14, wy_px), (wx_px + 14, wy_px),
+                 (80, 80, 80), 1, cv2.LINE_AA)
+        cv2.putText(frame, f"wrist.y={wy:.3f} {'✓ above' if above else 'below'}",
+                    (wx_px + 14, wy_px + 4),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.42, dot_color, 1, cv2.LINE_AA)
 
 
 # ── Text / panel helpers ─────────────────────────────────────────────────────
@@ -652,6 +899,11 @@ def _inject_pose_params(gtype: str, params: dict, pose_lm) -> dict:
             eye_y = (pose_lm[2].y + pose_lm[5].y) / 2
             p["brow_y"] = eye_y + 0.04
 
+    elif gtype == "survey":
+        # Inject live brow_y from eye level — same derivation as directional_head_or_hand brow
+        eye_y = (pose_lm[2].y + pose_lm[5].y) / 2
+        p["brow_y"] = eye_y + 0.04
+
     elif gtype == "presence_bilateral":
         threshold_name = params.get("y_threshold", "")
         if threshold_name == "shoulder":
@@ -662,6 +914,200 @@ def _inject_pose_params(gtype: str, params: dict, pose_lm) -> dict:
             p["y_threshold"] = (pose_lm[2].y + pose_lm[5].y) / 2
 
     return p
+
+
+def draw_touch_head_info(frame, context, params, lm_list, pose_lm, w, h, accent):
+    """Show crown target circle and wrist proximity dots."""
+    import math as _math
+    if pose_lm is not None:
+        ear_l, ear_r = pose_lm[7],  pose_lm[8]
+        sh_l,  sh_r  = pose_lm[11], pose_lm[12]
+        head_cx = (ear_l.x + ear_r.x) / 2
+        head_cy = (ear_l.y + ear_r.y) / 2
+        shoulder_y = (sh_l.y + sh_r.y) / 2
+        ear_sh = shoulder_y - head_cy
+        crown_y = head_cy - 0.4 * max(ear_sh, 0.05)
+        crown_x = head_cx
+        sh_width = abs(sh_l.x - sh_r.x)
+        radius = max(0.15 * sh_width, 0.07)
+    else:
+        crown_x, crown_y, radius = 0.50, 0.10, 0.10
+    # Mirror X for display
+    cx_px = int((1 - crown_x) * w)
+    cy_px = int(crown_y * h)
+    r_px  = int(radius * w)
+    cv2.circle(frame, (cx_px, cy_px), r_px, accent, 2, cv2.LINE_AA)
+    cv2.putText(frame, "crown", (cx_px - 22, cy_px - r_px - 6),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.45, accent, 1, cv2.LINE_AA)
+    # Draw wrist dots with IN/OUT colour
+    if lm_list:
+        for hand in lm_list:
+            wx, wy = hand.landmark[0].x, hand.landmark[0].y
+            dist = _math.hypot(wx - crown_x, wy - crown_y)
+            color = accent if dist < radius else (200, 80, 80)
+            px, py = int((1 - wx) * w), int(wy * h)
+            cv2.circle(frame, (px, py), 8, color, -1)
+
+
+def draw_arms_crossed_info(frame, context, pose_lm, w, h, accent):
+    """Show midline, shoulder/hip band, and wrist crossing status."""
+    if pose_lm is None:
+        return
+    sh_l, sh_r  = pose_lm[11], pose_lm[12]
+    hip_l, hip_r = pose_lm[23], pose_lm[24]
+    lw, rw       = pose_lm[15], pose_lm[16]
+
+    midline_x  = (sh_l.x + sh_r.x) / 2
+    shoulder_y = (sh_l.y + sh_r.y) / 2
+    hip_y      = (hip_l.y + hip_r.y) / 2
+
+    # Midline (mirrored)
+    mx_px = int((1 - midline_x) * w)
+    sy_px = int(shoulder_y * h)
+    hy_px = int(hip_y * h)
+    cv2.line(frame, (mx_px, sy_px), (mx_px, hy_px), accent, 2, cv2.LINE_AA)
+    cv2.putText(frame, "midline", (mx_px + 4, sy_px - 6),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.42, accent, 1, cv2.LINE_AA)
+    # Shoulder / hip bands
+    cv2.line(frame, (0, sy_px), (w, sy_px), (100, 100, 100), 1)
+    cv2.line(frame, (0, hy_px), (w, hy_px), (100, 100, 100), 1)
+
+    sh_width = abs(sh_l.x - sh_r.x)
+    dz = 0.05 * max(sh_width, 0.10)
+    crossed_l = lw.x < (midline_x - dz)
+    crossed_r = rw.x > (midline_x + dz)
+
+    for pose_lm_idx, label, crossed in [(15, "L", crossed_l), (16, "R", crossed_r)]:
+        lm = pose_lm[pose_lm_idx]
+        color = accent if crossed else (200, 80, 80)
+        px, py = int((1 - lm.x) * w), int(lm.y * h)
+        cv2.circle(frame, (px, py), 10, color, -1)
+        cv2.putText(frame, label, (px - 6, py + 5),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1, cv2.LINE_AA)
+
+
+def draw_push_out_info(frame, context, params, lm_list, w, h, accent):
+    """Show per-hand area growth progress bars."""
+    histories = context.get("push_area_history", [[], []])
+    min_growth = params.get("min_growth_pct", 50) / 100.0
+    for i, history in enumerate(histories[:2]):
+        if len(history) < 2:
+            ratio = 0.0
+        else:
+            oldest = history[0][1]
+            current = history[-1][1]
+            ratio = (current / oldest - 1.0) if oldest > 1e-6 else 0.0
+        pct = min(max(ratio / min_growth, 0.0), 1.0)
+        bar_x = 12 + i * 180
+        bar_y = h - 60
+        cv2.rectangle(frame, (bar_x, bar_y), (bar_x + 150, bar_y + 18), (60, 60, 60), -1)
+        cv2.rectangle(frame, (bar_x, bar_y), (bar_x + int(150 * pct), bar_y + 18), accent, -1)
+        label = f"H{i}: {ratio:+.0%}"
+        cv2.putText(frame, label, (bar_x, bar_y - 5),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.42, accent, 1, cv2.LINE_AA)
+
+
+def draw_run_arms_info(frame, context, params, pose_lm, w, h, accent):
+    """Show waist line and alternating-state counters."""
+    if pose_lm is None:
+        return
+    hip_l, hip_r = pose_lm[23], pose_lm[24]
+    waist_y = (hip_l.y + hip_r.y) / 2 + context.get("_waist_y_offset", _WAIST_Y_OFFSET)
+    wy_px = int(waist_y * h)
+    cv2.line(frame, (0, wy_px), (w, wy_px), accent, 2, cv2.LINE_AA)
+    offset_val = context.get("_waist_y_offset", _WAIST_Y_OFFSET)
+    offset_str = f"  offset={offset_val:+.2f}  [W/S to adjust]" if offset_val != 0.0 else "  [W/S to adjust]"
+    cv2.putText(frame, f"waist{offset_str}", (10, wy_px - 6),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.45, accent, 1, cv2.LINE_AA)
+
+    transitions = context.get("run_alt_transitions", [])
+    min_cycles = params.get("min_cycles", 3)
+    required = min_cycles * 2
+    cv2.putText(frame, f"transitions: {len(transitions)}/{required}",
+                (10, wy_px + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.55, accent, 1, cv2.LINE_AA)
+
+    # Wrist markers
+    for idx, label in [(15, "L"), (16, "R")]:
+        lm = pose_lm[idx]
+        above = lm.y < waist_y
+        color = (80, 200, 80) if above else (200, 120, 80)
+        px, py = int((1 - lm.x) * w), int(lm.y * h)
+        cv2.circle(frame, (px, py), 10, color, -1)
+        cv2.putText(frame, label, (px - 5, py + 5),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 0), 1, cv2.LINE_AA)
+
+
+def draw_unravel_info(frame, context, params, pose_lm, w, h, accent):
+    """Show diff-signal oscillation bar and wrist proximity indicator."""
+    if pose_lm is None:
+        return
+    sh_l, sh_r   = pose_lm[11], pose_lm[12]
+    hip_l, hip_r = pose_lm[23], pose_lm[24]
+    lw, rw       = pose_lm[15], pose_lm[16]
+
+    shoulder_y = (sh_l.y + sh_r.y) / 2
+    hip_y      = (hip_l.y + hip_r.y) / 2
+    import math as _math
+    wrist_dist = _math.hypot(lw.x - rw.x, lw.y - rw.y)
+    sh_width   = abs(sh_l.x - sh_r.x)
+    prox_ok    = wrist_dist < params.get("prox_frac", 0.25) * max(sh_width, 0.10)
+
+    # Shoulder / hip bands
+    cv2.line(frame, (0, int(shoulder_y * h)), (w, int(shoulder_y * h)), (100, 100, 100), 1)
+    cv2.line(frame, (0, int(hip_y * h)),      (w, int(hip_y * h)),      (100, 100, 100), 1)
+
+    # Wrist dots
+    for idx in [15, 16]:
+        lm = pose_lm[idx]
+        color = accent if prox_ok else (200, 80, 80)
+        px, py = int((1 - lm.x) * w), int(lm.y * h)
+        cv2.circle(frame, (px, py), 10, color, -1)
+
+    # Zero-crossing count
+    history = context.get("unravel_diff_history", [])
+    diffs = [d for _, d in history]
+    crossings = sum(1 for i in range(1, len(diffs)) if (diffs[i-1] > 0) != (diffs[i] > 0))
+    min_cycles = params.get("min_cycles", 2)
+    cv2.putText(frame, f"prox: {'OK' if prox_ok else 'FAR'}  crossings: {crossings}/{min_cycles*2}",
+                (12, h - 40), cv2.FONT_HERSHEY_SIMPLEX, 0.55, accent, 1, cv2.LINE_AA)
+
+
+def draw_paddle_info(frame, context, params, pose_lm, w, h, accent):
+    """Show midline, stroke count, and same-side status."""
+    if pose_lm is None:
+        return
+    sh_l, sh_r   = pose_lm[11], pose_lm[12]
+    hip_l, hip_r = pose_lm[23], pose_lm[24]
+    lw, rw       = pose_lm[15], pose_lm[16]
+
+    midline_x  = (sh_l.x + sh_r.x) / 2
+    shoulder_y = (sh_l.y + sh_r.y) / 2
+    waist_y    = (hip_l.y + hip_r.y) / 2 + _WAIST_Y_OFFSET
+
+    mx_px = int((1 - midline_x) * w)
+    sy_px = int(shoulder_y * h)
+    wy_px = int(waist_y * h)
+
+    cv2.line(frame, (mx_px, 0), (mx_px, h), (80, 80, 80), 1)
+    cv2.line(frame, (0, sy_px), (w, sy_px), accent, 1)
+    cv2.line(frame, (0, wy_px), (w, wy_px), accent, 1)
+    cv2.putText(frame, "shoulder", (4, sy_px - 4),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.40, accent, 1, cv2.LINE_AA)
+    offset_str = f"  offset={_WAIST_Y_OFFSET:+.2f}" if _WAIST_Y_OFFSET != 0.0 else ""
+    cv2.putText(frame, f"waist{offset_str}", (4, wy_px - 4),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.40, accent, 1, cv2.LINE_AA)
+
+    locked_side   = context.get("paddle_side", "—")
+    stroke_count  = context.get("paddle_stroke_count", 0)
+    min_strokes   = params.get("min_strokes", 4)
+    cv2.putText(frame, f"side: {locked_side}  strokes: {stroke_count}/{min_strokes}",
+                (12, h - 40), cv2.FONT_HERSHEY_SIMPLEX, 0.55, accent, 1, cv2.LINE_AA)
+
+    for idx in [15, 16]:
+        lm = pose_lm[idx]
+        color = accent if locked_side and locked_side != "—" else (140, 140, 140)
+        px, py = int((1 - lm.x) * w), int(lm.y * h)
+        cv2.circle(frame, (px, py), 10, color, -1)
 
 
 def draw_pose_markers(frame, pose_lm, w, h):
@@ -724,6 +1170,7 @@ def open_camera(config_path):
 
 
 def main():
+    global _WAIST_Y_OFFSET
     parser = argparse.ArgumentParser(description="BHR gesture tuner")
     parser.add_argument(
         "--profile", default="laptop_dev",
@@ -735,9 +1182,9 @@ def main():
 
     profile_name = args.profile or "laptop_dev"
     profile_path = os.path.join(ROOT, "config", "host_profiles", f"{profile_name}.json")
+    config_path = os.path.join(ROOT, "config.json")
     _load_tune_params(GESTURES, profile_path)
 
-    config_path = os.path.join(ROOT, "config.json")
     cap = open_camera(config_path)
     if not cap.isOpened():
         print("[tuner] Failed to open camera.", file=sys.stderr)
@@ -795,9 +1242,15 @@ def main():
         live_params = _inject_pose_params(gtype, params, pose_lm)
 
         # ── Run detector ──────────────────────────────────────────────────
+        # Inject pose landmarks so body-relative detectors (touch_head, arms_crossed,
+        # run_arms, unravel, paddle) can read context["_pose_lm"] the same way
+        # the runtime's gesture_engine does.
+        context["_pose_lm"] = pose_lm
+        context["_waist_y_offset"] = _WAIST_Y_OFFSET
+
         detector_fn = REGISTRY.get(gtype)
         fired = False
-        if detector_fn and lm_list:
+        if detector_fn:
             fired = detector_fn(lm_list, live_params, context)
 
         if fired:
@@ -811,7 +1264,16 @@ def main():
         draw_pose_markers(frame, pose_lm, w, h)
 
         # ── Gesture-specific overlays ─────────────────────────────────────
-        if gtype == "directional_point":
+        if gtype == "forward_reach":
+            draw_forward_reach_info(frame, context, live_params, lm_list, w, h, accent)
+
+        elif gtype == "forward_point":
+            draw_forward_point_info(frame, live_params, lm_list, w, h, accent)
+
+        elif gtype == "survey":
+            draw_survey_info(frame, context, live_params, lm_list, w, h, accent)
+
+        elif gtype == "directional_point":
             accepted = set(live_params.get("directions", ["left","right","up","down"]))
             draw_target_marker(frame, accepted, w, h, accent)
             t_x = live_params.get("target_x")
@@ -828,7 +1290,6 @@ def main():
                 draw_direction_arrow(frame, lm_list, w, h, accepted, accent)
 
         elif gtype == "presence_bilateral":
-            # Use live_params so the threshold line reflects the pose-derived shoulder Y
             y_thresh = live_params.get("y_threshold", 0)
             draw_bilateral_threshold(frame, y_thresh, w, h, accent)
 
@@ -839,8 +1300,10 @@ def main():
             direction = live_params.get("direction", "right")
             ear_pos = live_params.get("ear_positions")
             brow_y_val = live_params.get("brow_y")
+            ear_r = live_params.get("ear_radius")
             draw_head_or_hand_zones(frame, direction, w, h, accent,
-                                    ear_positions=ear_pos, brow_y=brow_y_val)
+                                    ear_positions=ear_pos, brow_y=brow_y_val,
+                                    ear_radius=ear_r)
 
         elif gtype == "mouth_proximity_tip":
             draw_mouth_marker(frame, w, h, accent, context,
@@ -850,6 +1313,24 @@ def main():
 
         elif gtype == "rhythm_bilateral":
             draw_knock_progress(frame, context, live_params, w, h, accent)
+
+        elif gtype == "touch_head":
+            draw_touch_head_info(frame, context, live_params, lm_list, pose_lm, w, h, accent)
+
+        elif gtype == "arms_crossed":
+            draw_arms_crossed_info(frame, context, pose_lm, w, h, accent)
+
+        elif gtype == "push_out":
+            draw_push_out_info(frame, context, live_params, lm_list, w, h, accent)
+
+        elif gtype == "run_arms":
+            draw_run_arms_info(frame, context, live_params, pose_lm, w, h, accent)
+
+        elif gtype == "unravel":
+            draw_unravel_info(frame, context, live_params, pose_lm, w, h, accent)
+
+        elif gtype == "paddle":
+            draw_paddle_info(frame, context, live_params, pose_lm, w, h, accent)
 
         # ── FIRED flash ───────────────────────────────────────────────────
         if time.monotonic() - fired_at < 1.0:
@@ -880,7 +1361,67 @@ def main():
         state_lines = []
         hold_ms = live_params.get("hold_ms") or live_params.get("window_ms")
 
-        if gtype == "directional_point":
+        if gtype == "forward_reach":
+            history = context.get("bbox_area_history", [])
+            threshold = live_params.get("area_growth_threshold", 0.30)
+            if len(history) >= 2:
+                oldest, current = history[0], history[-1]
+                growth = (current / oldest - 1.0) if oldest > 1e-6 else 0.0
+                pct = min(max(growth / threshold, 0.0), 1.0)
+                ok = growth >= threshold
+                state_lines.append((f"area growth: {growth:+.3f}  threshold: {threshold:.2f}  {'FIRE' if ok else '...'}",
+                                     accent if ok else (200, 200, 200)))
+            else:
+                pct = 0.0
+                state_lines.append((f"history: {len(history)}/{live_params.get('window_frames', 12)} frames",
+                                     (120, 120, 120)))
+            fired_flag = context.get("forward_reach_fired", False)
+            state_lines.append((f"fired_flag: {'FIRED — reset (R) to retry' if fired_flag else 'waiting'}",
+                                 accent if fired_flag else (120, 120, 120)))
+            state_lines.append(("growth progress:", (200, 200, 200)))
+
+        elif gtype == "forward_point":
+            pct = hold_progress(context, "forward_point_since", hold_ms or 500)
+            since = context.get("forward_point_since")
+            region_key = live_params.get("target_region", "")
+            state_lines.append((f"region: {region_key}", (200, 200, 200)))
+            if lm_list:
+                lm = lm_list[0].landmark
+                wrist, tip, mcp = lm[0], lm[8], lm[5]
+                wrist_tip_sq = (tip.x - wrist.x) ** 2 + (tip.y - wrist.y) ** 2
+                wrist_mcp_sq = (mcp.x - wrist.x) ** 2 + (mcp.y - wrist.y) ** 2
+                extended = wrist_tip_sq > wrist_mcp_sq
+                px, py = 1.0 - tip.x, tip.y
+                state_lines.append((f"index extended: {'YES' if extended else 'NO'}  tip: px={px:.2f} py={py:.2f}",
+                                     accent if extended else (200, 80, 80)))
+            state_lines.append((f"on target since: {'YES' if since else 'no'}",
+                                 accent if since else (120, 120, 120)))
+            state_lines.append(("hold progress:", (200, 200, 200)))
+
+        elif gtype == "survey":
+            phase = context.get("survey_phase", 0)
+            phase_labels = {0: "waiting for wrist above brow",
+                            1: "holding at brow",
+                            2: "scanning ← →",
+                            3: "DONE"}
+            pct = phase / 3.0
+            state_lines.append((f"phase {phase}: {phase_labels.get(phase, '?')}",
+                                 accent if phase > 0 else (120, 120, 120)))
+            brow_y_live = live_params.get("brow_y", 0.45)
+            pose_src = "pose" if pose_lm else "fixed"
+            state_lines.append((f"brow_y={brow_y_live:.3f} ({pose_src})  min_x_delta={live_params.get('min_x_delta', 0.06):.2f}",
+                                 (160, 200, 160) if pose_lm else (120, 120, 120)))
+            if phase == 2:
+                last_dir = context.get("scan_last_direction")
+                seg_start = context.get("scan_segment_start_x")
+                if lm_list and seg_start is not None:
+                    cur_x = lm_list[0].landmark[0].x
+                    delta = abs(cur_x - seg_start)
+                    state_lines.append((f"scan dx={delta:.3f}  last_dir: {last_dir or '—'}",
+                                         accent if delta >= live_params.get("min_x_delta", 0.06) else (200, 200, 200)))
+            state_lines.append(("phase progress:", (200, 200, 200)))
+
+        elif gtype == "directional_point":
             since_key = "point_direction_since"
             pct = hold_progress(context, since_key, hold_ms or 500)
             dir_now = context.get("point_direction", "--")
@@ -928,16 +1469,32 @@ def main():
         elif gtype == "directional_head_or_hand":
             since = context.get("directional_since")
             pct = hold_progress(context, "directional_since", hold_ms or 500)
+            direction = live_params.get("direction", "up")
             state_lines.append((f"matched: {'YES' if since else 'no'}", accent if since else (120,120,120)))
-            if live_params.get("require_curl") and lm_list:
-                lm0 = lm_list[0].landmark
-                TIP_PIP = [(8,6),(12,10),(16,14),(20,18)]
-                curl_count = sum(1 for ti, pi in TIP_PIP if lm0[ti].y >= lm0[pi].y)
-                curl_ok = curl_count >= 2
-                state_lines.append((f"curl: {curl_count}/4  {'OK' if curl_ok else 'need 2+ curled'}",
-                                     accent if curl_ok else (200, 80, 80)))
-            pose_src = "pose" if pose_lm else "fixed"
-            state_lines.append((f"coords: {pose_src}", (160, 200, 160) if pose_lm else (120,120,120)))
+            if direction == "ear" and lm_list:
+                ear_pos = live_params.get("ear_positions", [(0.15, 0.35), (0.85, 0.35)])
+                ear_radius = live_params.get("ear_radius", 0.22)
+                best_dist = float("inf")
+                for hand in lm_list:
+                    wx, wy = hand.landmark[0].x, hand.landmark[0].y
+                    for ex, ey in ear_pos:
+                        d = math.hypot(wx - ex, wy - ey)
+                        best_dist = min(best_dist, d)
+                in_range = best_dist < ear_radius
+                state_lines.append((f"wrist→ear: {best_dist:.3f}  radius={ear_radius:.2f}  {'IN' if in_range else 'OUT'}",
+                                     accent if in_range else (200, 80, 80)))
+                pose_src = "pose" if pose_lm else "fixed"
+                state_lines.append((f"ear positions: {pose_src}", (160, 200, 160) if pose_lm else (120,120,120)))
+            else:
+                if live_params.get("require_curl") and lm_list:
+                    lm0 = lm_list[0].landmark
+                    TIP_PIP = [(8,6),(12,10),(16,14),(20,18)]
+                    curl_count = sum(1 for ti, pi in TIP_PIP if lm0[ti].y >= lm0[pi].y)
+                    curl_ok = curl_count >= 2
+                    state_lines.append((f"curl: {curl_count}/4  {'OK' if curl_ok else 'need 2+ curled'}",
+                                         accent if curl_ok else (200, 80, 80)))
+                pose_src = "pose" if pose_lm else "fixed"
+                state_lines.append((f"coords: {pose_src}", (160, 200, 160) if pose_lm else (120,120,120)))
             state_lines.append(("hold progress:", (200, 200, 200)))
 
         elif gtype == "mouth_proximity_tip":
@@ -988,11 +1545,160 @@ def main():
             else:
                 state_lines.append((f"short_window={short_window_ms}ms  long_min={long_min_ms}ms  long_max={long_max_ms}ms",
                                      (120, 120, 120)))
-            min_push = live_params.get("min_push", 0.04)
+            threshold_fraction = live_params.get("threshold_fraction", 0.30)
             refrac = live_params.get("refractory_ms", 220)
-            state_lines.append((f"min_push={min_push:.3f}  refractory={refrac}ms",
+            knuckle_below = context.get("knuckle_below_threshold", False)
+            state_lines.append((f"threshold_fraction={threshold_fraction:.2f}  refractory={refrac}ms",
                                  (120, 120, 120)))
+            # Show live knuckle vs threshold distance if we have hands
+            if lm_list:
+                lm = lm_list[0].landmark
+                wrist_y = lm[0].y
+                hand_top_y = min(lm[i].y for i in range(21))
+                hand_height = max(wrist_y - hand_top_y, 0.05)
+                threshold_y = wrist_y - threshold_fraction * hand_height
+                knuckle_y = lm[5].y
+                dist = knuckle_y - threshold_y
+                state_lines.append((f"knuckle_y={knuckle_y:.3f}  thresh_y={threshold_y:.3f}  delta={dist:+.3f}  {'BELOW' if knuckle_below else 'above'}",
+                                     accent if knuckle_below else (200, 200, 200)))
             state_lines.append(("progress:", (200, 200, 200)))
+
+        elif gtype == "touch_head":
+            since = context.get("touch_head_since")
+            pct = hold_progress(context, "touch_head_since", hold_ms or 500)
+            hands_req = live_params.get("hands_required", 1)
+            state_lines.append((f"hands_required: {hands_req}", (200, 200, 200)))
+            pose_src = "pose" if pose_lm else "fixed"
+            state_lines.append((f"crown geometry: {pose_src}", (160, 200, 160) if pose_lm else (120, 120, 120)))
+            if lm_list and pose_lm:
+                from engines.detectors.rules.touch_head import _crown_and_radius
+                cx, cy, r = _crown_and_radius(pose_lm)
+                import math as _m
+                in_region = sum(1 for hand in lm_list
+                                if _m.hypot(hand.landmark[0].x - cx, hand.landmark[0].y - cy) < r)
+                state_lines.append((f"wrists in region: {in_region}/{hands_req}",
+                                     accent if in_region >= hands_req else (200, 80, 80)))
+            state_lines.append((f"holding: {'YES' if since else 'no'}",
+                                 accent if since else (120, 120, 120)))
+            state_lines.append(("hold progress:", (200, 200, 200)))
+
+        elif gtype == "arms_crossed":
+            since = context.get("arms_crossed_since")
+            pct = hold_progress(context, "arms_crossed_since", hold_ms or 500)
+            if pose_lm:
+                sh_l, sh_r   = pose_lm[11], pose_lm[12]
+                hip_l, hip_r = pose_lm[23], pose_lm[24]
+                lw, rw       = pose_lm[15], pose_lm[16]
+                midline_x    = (sh_l.x + sh_r.x) / 2
+                sh_width     = abs(sh_l.x - sh_r.x)
+                dz           = live_params.get("dead_zone_frac", 0.05) * max(sh_width, 0.10)
+                crossed_l    = lw.x < (midline_x - dz)
+                crossed_r    = rw.x > (midline_x + dz)
+                shoulder_y   = (sh_l.y + sh_r.y) / 2
+                hip_y        = (hip_l.y + hip_r.y) / 2
+                l_torso      = shoulder_y <= lw.y <= hip_y
+                r_torso      = shoulder_y <= rw.y <= hip_y
+                state_lines.append((f"L crossed: {'YES' if crossed_l else 'no'}  R crossed: {'YES' if crossed_r else 'no'}",
+                                     accent if (crossed_l and crossed_r) else (200, 80, 80)))
+                state_lines.append((f"L torso: {'YES' if l_torso else 'no'}  R torso: {'YES' if r_torso else 'no'}",
+                                     accent if (l_torso and r_torso) else (200, 80, 80)))
+                state_lines.append((f"midline_x={midline_x:.3f}  dead_zone={dz:.3f}", (160, 160, 160)))
+            else:
+                state_lines.append(("POSE NONE — cannot fire", (200, 80, 80)))
+            state_lines.append(("hold progress:", (200, 200, 200)))
+
+        elif gtype == "push_out":
+            fired_flag = context.get("push_fired", False)
+            histories = context.get("push_area_history", [[], []])
+            min_growth = live_params.get("min_growth_pct", 50) / 100.0
+            pct = 0.0
+            for i, h_list in enumerate(histories[:2]):
+                if len(h_list) >= 2:
+                    oldest = h_list[0][1]
+                    current = h_list[-1][1]
+                    ratio = (current / oldest - 1.0) if oldest > 1e-6 else 0.0
+                    ok = ratio >= min_growth
+                    pct = max(pct, min(ratio / min_growth, 1.0))
+                    state_lines.append((f"H{i}: growth={ratio:+.1%}  need={min_growth:.0%}  {'OK' if ok else '...'}",
+                                         accent if ok else (200, 200, 200)))
+                else:
+                    state_lines.append((f"H{i}: {len(h_list)} samples (filling window)",
+                                         (120, 120, 120)))
+            state_lines.append((f"fired_flag: {'FIRED — reset (R) to retry' if fired_flag else 'waiting'}",
+                                 accent if fired_flag else (120, 120, 120)))
+            state_lines.append(("bilateral growth progress:", (200, 200, 200)))
+
+        elif gtype == "run_arms":
+            transitions = context.get("run_alt_transitions", [])
+            min_cycles = live_params.get("min_cycles", 3)
+            required = min_cycles * 2
+            pct = min(len(transitions) / required, 1.0) if required > 0 else 0.0
+            state_lines.append((f"transitions: {len(transitions)}/{required}",
+                                 accent if len(transitions) >= required else (200, 200, 200)))
+            alt_state = context.get("run_prev_alt_state")
+            if pose_lm:
+                waist_y = (pose_lm[23].y + pose_lm[24].y) / 2 + _WAIST_Y_OFFSET
+                lw, rw = pose_lm[15], pose_lm[16]
+                above_l = lw.y < waist_y
+                above_r = rw.y < waist_y
+                state_lines.append((f"L {'above' if above_l else 'below'}  R {'above' if above_r else 'below'}  waist_y={waist_y:.3f} (offset={_WAIST_Y_OFFSET:+.2f})",
+                                     accent if (above_l != above_r) else (120, 120, 120)))
+            else:
+                state_lines.append(("POSE NONE — cannot fire", (200, 80, 80)))
+            state_lines.append(("cycle progress:", (200, 200, 200)))
+
+        elif gtype == "unravel":
+            history = context.get("unravel_diff_history", [])
+            diffs = [d for _, d in history]
+            crossings = sum(1 for i in range(1, len(diffs)) if (diffs[i-1] > 0) != (diffs[i] > 0))
+            min_cycles = live_params.get("min_cycles", 2)
+            pct = min(crossings / max(min_cycles * 2, 1), 1.0)
+            state_lines.append((f"zero-crossings: {crossings}/{min_cycles*2}",
+                                 accent if crossings >= min_cycles * 2 else (200, 200, 200)))
+            if pose_lm:
+                sh_l, sh_r = pose_lm[11], pose_lm[12]
+                lw, rw = pose_lm[15], pose_lm[16]
+                import math as _m
+                wrist_dist = _m.hypot(lw.x - rw.x, lw.y - rw.y)
+                sh_width = abs(sh_l.x - sh_r.x)
+                prox_ok = wrist_dist < live_params.get("prox_frac", 0.25) * max(sh_width, 0.10)
+                state_lines.append((f"wrist_dist={wrist_dist:.3f}  prox: {'OK' if prox_ok else 'FAR'}",
+                                     accent if prox_ok else (200, 80, 80)))
+                if diffs:
+                    amp = max(diffs) - min(diffs)
+                    hip_y = (pose_lm[23].y + pose_lm[24].y) / 2
+                    sh_hip = max(hip_y - (sh_l.y + sh_r.y) / 2, 0.10)
+                    min_amp = live_params.get("min_amplitude_frac", 0.10) * sh_hip
+                    state_lines.append((f"p-p amp={amp:.3f}  need={min_amp:.3f}  {'OK' if amp >= min_amp else '...'}",
+                                         accent if amp >= min_amp else (200, 80, 80)))
+            else:
+                state_lines.append(("POSE NONE — cannot fire", (200, 80, 80)))
+            state_lines.append(("winding progress:", (200, 200, 200)))
+
+        elif gtype == "paddle":
+            stroke_count = context.get("paddle_stroke_count", 0)
+            min_strokes  = live_params.get("min_strokes", 4)
+            pct = min(stroke_count / min_strokes, 1.0) if min_strokes > 0 else 0.0
+            locked_side  = context.get("paddle_side", None)
+            state_lines.append((f"side locked: {locked_side or 'detecting...'}",
+                                 accent if locked_side else (120, 120, 120)))
+            state_lines.append((f"strokes: {stroke_count}/{min_strokes}",
+                                 accent if stroke_count >= min_strokes else (200, 200, 200)))
+            if pose_lm:
+                sh_l, sh_r = pose_lm[11], pose_lm[12]
+                lw, rw = pose_lm[15], pose_lm[16]
+                midline_x = (sh_l.x + sh_r.x) / 2
+                l_side = "left" if lw.x < midline_x else "right"
+                r_side = "left" if rw.x < midline_x else "right"
+                same = l_side == r_side
+                state_lines.append((f"L={l_side} R={r_side}  same_side: {'YES' if same else 'NO — RESET'}",
+                                     accent if same else (200, 80, 80)))
+                phase_l = context.get("paddle_phase_l", "—")
+                phase_r = context.get("paddle_phase_r", "—")
+                state_lines.append((f"phase_L={phase_l}  phase_R={phase_r}", (160, 160, 200)))
+            else:
+                state_lines.append(("POSE NONE — cannot fire", (200, 80, 80)))
+            state_lines.append(("stroke progress:", (200, 200, 200)))
 
         else:
             # Generic: dump any scalar context values
@@ -1059,6 +1765,14 @@ def main():
             _adjust_tune_param(GESTURES[gesture_idx], 2, -1)
             context = {}
             _save_tune_params(GESTURES, profile_path)
+        elif key == ord('w'):  # W — raise waist line (smaller y = higher on screen)
+            _WAIST_Y_OFFSET = round(_WAIST_Y_OFFSET - _WAIST_STEP, 3)
+            context = {}
+            print(f"[tuner] waist_y_offset={_WAIST_Y_OFFSET:+.3f}")
+        elif key == ord('s'):  # S — lower waist line
+            _WAIST_Y_OFFSET = round(_WAIST_Y_OFFSET + _WAIST_STEP, 3)
+            context = {}
+            print(f"[tuner] waist_y_offset={_WAIST_Y_OFFSET:+.3f}")
 
     cap.release()
     hands.close()
@@ -1066,19 +1780,20 @@ def main():
     cv2.destroyAllWindows()
 
 
-def _load_tune_params(gestures: list, profile_path: str):
-    """Apply saved gesture_tuning values from a host profile to the GESTURES list."""
-    if not os.path.exists(profile_path):
+def _load_tune_params(gestures: list, profile_path: str) -> None:
+    """Apply saved tuning values from the host profile's gesture_tuning section."""
+    tuning: dict = {}
+    if os.path.exists(profile_path):
+        try:
+            with open(profile_path) as f:
+                profile = json.load(f)
+            tuning = profile.get("gesture_tuning", {})
+        except Exception as e:
+            print(f"[tuner] Could not read {profile_path}: {e}", file=sys.stderr)
+    else:
         print(f"[tuner] Profile not found: {profile_path} — using built-in defaults",
               file=sys.stderr)
-        return
-    try:
-        with open(profile_path) as f:
-            profile = json.load(f)
-    except Exception as e:
-        print(f"[tuner] Could not read {profile_path}: {e}", file=sys.stderr)
-        return
-    tuning = profile.get("gesture_tuning", {})
+
     applied = 0
     for gesture in gestures:
         saved = tuning.get(gesture["name"], {})
@@ -1086,12 +1801,13 @@ def _load_tune_params(gestures: list, profile_path: str):
             if key in gesture["params"]:
                 gesture["params"][key] = val
                 applied += 1
+
     print(f"[tuner] {os.path.basename(profile_path)}: "
-          f"{applied} tuning override(s) loaded from gesture_tuning")
+          f"{applied} tuning override(s) loaded")
 
 
-def _save_tune_params(gestures: list, profile_path: str):
-    """Write current tunable params back to the host profile's gesture_tuning section."""
+def _save_tune_params(gestures: list, profile_path: str) -> None:
+    """Write current tunable params to the host profile's gesture_tuning section."""
     if not profile_path:
         return
     try:
@@ -1099,8 +1815,8 @@ def _save_tune_params(gestures: list, profile_path: str):
             profile = json.load(f)
     except Exception as e:
         print(f"[tuner] Could not read profile for save: {e}", file=sys.stderr)
-        return
-    tuning = {}
+        profile = {}
+    tuning: dict = {}
     for gesture in gestures:
         saved = {}
         for key in filter(None, [gesture.get("tune_key"), gesture.get("tune_key2")]):
@@ -1112,7 +1828,7 @@ def _save_tune_params(gestures: list, profile_path: str):
     try:
         with open(profile_path, "w") as f:
             json.dump(profile, f, indent=2)
-        print(f"[tuner] Saved to {os.path.basename(profile_path)}")
+        print(f"[tuner] Saved gesture params → {os.path.basename(profile_path)}")
     except Exception as e:
         print(f"[tuner] Could not save profile: {e}", file=sys.stderr)
 

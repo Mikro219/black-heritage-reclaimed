@@ -15,6 +15,15 @@ from .rules.reach_and_close import detect as reach_and_close
 from .rules.point_target_held import detect as point_target_held
 from .rules.trail_follow import detect as trail_follow
 from .rules.directional_draw import detect as directional_draw
+from .rules.forward_reach import detect as forward_reach
+from .rules.forward_point import detect as forward_point
+from .rules.survey import detect as survey
+from .rules.touch_head import detect as touch_head
+from .rules.arms_crossed import detect as arms_crossed
+from .rules.push_out import detect as push_out
+from .rules.run_arms import detect as run_arms
+from .rules.unravel import detect as unravel
+from .rules.paddle import detect as paddle
 
 REGISTRY = {
     "presence_bilateral": presence_bilateral,
@@ -34,4 +43,13 @@ REGISTRY = {
     "point_target_held": point_target_held,
     "trail_follow": trail_follow,
     "directional_draw": directional_draw,
+    "forward_reach": forward_reach,
+    "forward_point": forward_point,
+    "survey": survey,
+    "touch_head": touch_head,
+    "arms_crossed": arms_crossed,
+    "push_out": push_out,
+    "run_arms": run_arms,
+    "unravel": unravel,
+    "paddle": paddle,
 }

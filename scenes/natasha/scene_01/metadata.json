@@ -17,8 +17,8 @@
       "optional_interactions": [
         {
           "id": "reach_flask",
-          "type": "directional_point",
-          "params": { "directions": ["left", "right", "up", "down"], "hold_ms": 400 },
+          "type": "forward_reach",
+          "params": { "area_growth_threshold": 0.30, "window_frames": 12, "target_region": "upper_center" },
           "freeze_frame_page": 12,
           "next_page_on_success": 13,
           "window_ms": 6000
@@ -87,8 +87,8 @@
       "interaction": {
         "tier": "oi",
         "id": "point_quilt_block",
-        "type": "point_target_held",
-        "params": { "hold_ms": 800, "target_region": "top_left" },
+        "type": "forward_point",
+        "params": { "target_region": "top_left_quadrant", "hold_ms": 500 },
         "reaction_audio": "AL-01-010-RESP.wav"
       }
     },

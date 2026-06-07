@@ -8,14 +8,29 @@ Pattern:  knock — knock ... KNOCK
   later than long_max_ms after knock 2.
   Any timing violation resets the sequence to zero.
 
+Knock geometry (raised threshold):
+  A knock fires when the index MCP knuckle (lm5) descends below a threshold line
+  positioned 30% above the wrist toward the top of the hand bounding box.
+  This is more lenient than the old "knuckle below wrist" check — a shallower
+  forward thrust now counts as a knock.
+
+  threshold_y = wrist_y - 0.30 * hand_height
+  where hand_height = max(wrist_y - hand_top_y, 0.05)  (0.05 floor prevents
+  degenerate case when the hand bbox is nearly flat)
+
+  A knock event fires on the TRANSITION from above-threshold to below-threshold.
+  The knuckle must reset above the threshold before the next knock can register.
+
 Params:
   short_window_ms (int): max gap allowed between knock 1 and knock 2. Default 500.
   long_min_ms (int): minimum gap required between knock 2 and knock 3. Default 400.
   long_max_ms (int): maximum gap allowed between knock 2 and knock 3. Default 1400.
-  min_push (float): minimum wrist Y delta (downward) to register one knock. Default 0.04.
+  threshold_fraction (float): fraction of hand height above wrist that sets the
+                              threshold line. Default 0.30. Increase to fire on
+                              even shallower motions; decrease to require more dip.
   refractory_ms (int): minimum time between any two detected knocks. Default 220.
 
-Context keys: knock_count, knock_times, knock_refractory_until, prev_wrist_y
+Context keys: knock_count, knock_times, knock_refractory_until, knuckle_below_threshold
 """
 
 import time
@@ -26,29 +41,36 @@ def detect(landmarks, params: dict, context: dict) -> bool:
         context["knock_count"] = 0
         context["knock_times"] = []
         context["knock_refractory_until"] = 0.0
-        context["prev_wrist_y"] = None
+        context["knuckle_below_threshold"] = False
 
     if not landmarks:
         return False
 
-    short_window_ms = params.get("short_window_ms", 500)
-    long_min_ms     = params.get("long_min_ms",     400)
-    long_max_ms     = params.get("long_max_ms",     1400)
-    min_push        = params.get("min_push",         0.04)
-    refractory_ms   = params.get("refractory_ms",   220)
+    short_window_ms    = params.get("short_window_ms",    500)
+    long_min_ms        = params.get("long_min_ms",         400)
+    long_max_ms        = params.get("long_max_ms",        1400)
+    threshold_fraction = params.get("threshold_fraction",  0.30)
+    refractory_ms      = params.get("refractory_ms",       220)
 
     now = time.monotonic()
 
-    # ── Detect a knock event ────────────────────────────────────────────────
-    wrist_y = landmarks[0].landmark[0].y
-    prev_y = context["prev_wrist_y"]
-    context["prev_wrist_y"] = wrist_y
+    # ── Detect a knock event (geometric threshold) ──────────────────────────
+    lm = landmarks[0].landmark
+    wrist_y   = lm[0].y
+    knuckle_y = lm[5].y  # index MCP
+    hand_top_y = min(lm[i].y for i in range(21))
+    hand_height = max(wrist_y - hand_top_y, 0.05)
+    threshold_y = wrist_y - threshold_fraction * hand_height
+
+    # "below threshold" means the knuckle has descended past the threshold line
+    knuckle_below = knuckle_y >= threshold_y
+    prev_below = context["knuckle_below_threshold"]
+    context["knuckle_below_threshold"] = knuckle_below
 
     new_knock = False
-    if prev_y is not None and now >= context["knock_refractory_until"]:
-        if wrist_y - prev_y >= min_push:   # downward thrust
-            new_knock = True
-            context["knock_refractory_until"] = now + refractory_ms / 1000.0
+    if knuckle_below and not prev_below and now >= context["knock_refractory_until"]:
+        new_knock = True
+        context["knock_refractory_until"] = now + refractory_ms / 1000.0
 
     # ── Timeout checks (run before processing new knock) ────────────────────
     count = context["knock_count"]

@@ -30,12 +30,14 @@
     "debug_overlay": true
   },
   "voice_tuning": {
-    "hum_rms_threshold": 0.02,
-    "hum_min_duration_ms": 500
+    "hum_rms_threshold": 0.008,
+    "hum_min_duration_ms": 400,
+    "whisper_max_volume_dbfs": -20.0
   },
   "gesture_tuning": {
     "reach_flask": {
-      "hold_ms": 450
+      "area_growth_threshold": 0.3,
+      "window_frames": 12
     },
     "point_quilt_block": {
       "hold_ms": 800
@@ -59,10 +61,12 @@
       "hold_ms": 300
     },
     "cup_ear_listen": {
-      "hold_ms": 500
+      "hold_ms": 500,
+      "ear_radius": 0.22
     },
-    "shade_eyes": {
-      "hold_ms": 300
+    "survey": {
+      "scan_window_ms": 2000,
+      "min_x_delta": 0.06
     },
     "trace_dipper \u2014 stroke 1: LEFT": {
       "window_ms": 400,
@@ -90,6 +94,40 @@
     },
     "drink_gesture": {
       "hold_ms": 400
+    },
+    "three_knock": {
+      "short_window_ms": 500,
+      "threshold_fraction": 0.3
+    },
+    "touch_temple": {
+      "hold_ms": 500
+    },
+    "hands_to_head": {
+      "hold_ms": 500
+    },
+    "arms_crossed": {
+      "hold_ms": 500,
+      "dead_zone_frac": 0.05
+    },
+    "forward_push": {
+      "min_growth_pct": 50,
+      "window_ms": 250
+    },
+    "launch_push": {
+      "min_growth_pct": 35,
+      "window_ms": 400
+    },
+    "run_arms": {
+      "window_ms": 2000,
+      "min_cycles": 3
+    },
+    "unravel": {
+      "window_ms": 3000,
+      "min_amplitude_frac": 0.9
+    },
+    "paddle": {
+      "min_strokes": 3,
+      "sync_window_ms": 400
     }
   }
 }

@@ -26,9 +26,9 @@
       "freeze_frame_page": 78,
       "interaction": {
         "tier": "cg",
-        "id": "shade_eyes",
-        "type": "directional_head_or_hand",
-        "params": { "direction": "right", "hold_ms": 300 }
+        "id": "survey",
+        "type": "survey",
+        "params": { "brow_y": 0.45, "hold_ms": 200, "scan_window_ms": 2000, "min_x_delta": 0.06 }
       }
     },
     {
@@ -43,8 +43,8 @@
       "interaction": {
         "tier": "oi",
         "id": "point_river_marker",
-        "type": "directional_point",
-        "params": { "directions": ["down"], "hold_ms": 500 },
+        "type": "forward_point",
+        "params": { "target_region": "lower_third", "hold_ms": 500 },
         "reaction_audio": "AL-03-006-RESP.wav"
       }
     },

@@ -16,9 +16,10 @@ Multi-mode windows (e.g. Scene 4 AL-04-010 — hum OR "follow the gourd"):
     Set mode="hum" in vi_config and also populate keywords. The window accepts
     either trigger. If mode="keyword" (or "whisper"), only keyword matching fires.
 
-Whisper mode (Scene 6 "Shoofly"): implemented as plain keyword detection scoped
-to the AL-06-007 window. No additional RMS gating — per May 2026 PM call, the
-immersion cues visitor behaviour; any Vosk match during the window counts.
+Whisper mode (Scene 6 "Shoofly"): per-cue upper volume bound via max_volume_dbfs.
+Set max_volume_dbfs: -25 on the shoofly cue to reject normal-volume speech (only a
+true whispered "shoofly" passes). Any other VI cue that omits max_volume_dbfs gets
+no upper bound — the hum check and all other cues are unaffected.
 
 Keywords detected outside an open window are logged at INFO for on-site analytics.
 
@@ -237,9 +238,12 @@ class VoiceEngine:
         import math
         import struct
 
-        # DSP: RMS for hum detection
+        # DSP: RMS + peak amplitude for hum detection and volume gating
         samples = struct.unpack(f"{len(chunk) // 2}h", chunk)
         rms = math.sqrt(sum(s * s for s in samples) / len(samples)) / 32768.0
+        peak = max(abs(s) for s in samples) / 32768.0
+        # Convert peak to dBFS (−inf guard: clamp below −120 dB)
+        peak_dbfs = 20.0 * math.log10(peak) if peak > 1e-6 else -120.0
         self._check_hum(rms)
 
         # Vosk keyword spotting
@@ -249,7 +253,7 @@ class VoiceEngine:
             if text and text != "[unk]":
                 self._last_heard = text
                 self._last_heard_time = time.monotonic()
-                self._try_fire_windows("keyword", text)
+                self._try_fire_windows("keyword", text, peak_dbfs=peak_dbfs)
 
     # -----------------------------------------------------------------------
     # Hum detection (DSP)
@@ -266,7 +270,7 @@ class VoiceEngine:
                 self._hum_start = None  # reset so next sustained hum fires again
                 self._last_heard = "hum"
                 self._last_heard_time = time.monotonic()
-                self._try_fire_windows("hum", "hum")
+                self._try_fire_windows("hum", "hum", peak_dbfs=0.0)
         else:
             self._hum_start = None
 
@@ -274,7 +278,7 @@ class VoiceEngine:
     # Window matching and event emission
     # -----------------------------------------------------------------------
 
-    def _try_fire_windows(self, mode: str, matched: str) -> None:
+    def _try_fire_windows(self, mode: str, matched: str, peak_dbfs: float = 0.0) -> None:
         if self._input_locked:
             return
 
@@ -296,6 +300,18 @@ class VoiceEngine:
                 if win.fired:
                     continue
                 if not _window_matches(win.vi_config, mode, matched):
+                    continue
+                # Per-cue upper volume bound: reject keyword matches that are too loud.
+                # Cue metadata takes precedence; falls back to config voice.whisper_max_volume_dbfs
+                # when the cue's mode is "whisper" and no per-cue value is set.
+                max_vol = win.vi_config.get("max_volume_dbfs")
+                if max_vol is None and win.vi_config.get("mode") == "whisper":
+                    max_vol = self._voice_cfg.get("whisper_max_volume_dbfs")
+                if max_vol is not None and mode == "keyword" and peak_dbfs > max_vol:
+                    log.info(
+                        "VI rejected (too loud): vi_id=%s matched=%r peak_dbfs=%.1f max=%.1f",
+                        win.vi_config.get("id"), matched, peak_dbfs, max_vol,
+                    )
                     continue
                 last_fired = self._debounce.get(matched, 0.0)
                 if (now - last_fired) * 1000 < self._debounce_ms:

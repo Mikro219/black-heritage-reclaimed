@@ -1,0 +1,64 @@
+{
+  "scene_id": "scene_08",
+  "scene_title": "Bow Tie / Hourglass",
+  "artist": "natasha",
+  "fps": 24,
+  "resolution": [1920, 1080],
+  "timing_profile": "standard",
+
+  "dialogue_sequence": [
+    { "cue": "AL-08-001", "audio": "AL-08-001.wav", "render_event": "hamilton_establishing" },
+    { "cue": "AL-08-002", "audio": "AL-08-002.wav" },
+    { "cue": "AL-08-003", "audio": "AL-08-003.wav" },
+    { "cue": "AL-08-004", "audio": "AL-08-004.wav" },
+    {
+      "cue": "AL-08-005",
+      "audio": "AL-08-005.wav",
+      "wait_for_interaction": true,
+      "render_event": "hat_appears",
+      "interaction": {
+        "tier": "cg",
+        "id": "hands_to_head",
+        "type": "touch_head",
+        "params": { "hands_required": 2, "hold_ms": 500 }
+      }
+    },
+    {
+      "cue": "AL-08-006",
+      "audio": "AL-08-006.wav",
+      "wait_for_interaction": true,
+      "render_event": "coat_appears",
+      "interaction": {
+        "tier": "cg",
+        "id": "arms_crossed",
+        "type": "arms_crossed",
+        "params": { "hold_ms": 500, "dead_zone_frac": 0.05 }
+      }
+    },
+    { "cue": "AL-08-007", "audio": "AL-08-007.wav" },
+    { "cue": "AL-08-008", "audio": "AL-08-008.wav" },
+    { "cue": "AL-08-009", "audio": "AL-08-009.wav" },
+    {
+      "cue": "AL-08-010",
+      "audio": "AL-08-010.wav",
+      "interaction": {
+        "tier": "vi",
+        "id": "say_ready",
+        "voice_required": {
+          "id": "ready",
+          "keywords": ["ready"],
+          "mode": "keyword",
+          "tier": "reaction",
+          "window_ms": 10000
+        },
+        "reaction_audio": "AL-08-010-RESP.wav",
+        "no_response_audio": "AL-08-011.wav"
+      }
+    },
+    { "cue": "AL-08-012", "audio": "AL-08-012.wav", "render_event": "patrol_doesnt_turn" }
+  ],
+
+  "transitions": {
+    "next_scene": "scene_09"
+  }
+}

@@ -40,8 +40,8 @@
       "interaction": {
         "tier": "cg",
         "id": "point_dipper_corner",
-        "type": "directional_point",
-        "params": { "directions": ["up", "right"], "hold_ms": 500 }
+        "type": "forward_point",
+        "params": { "target_region": "top_right_quadrant", "hold_ms": 500 }
       }
     },
     {

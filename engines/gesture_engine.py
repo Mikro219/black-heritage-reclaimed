@@ -29,6 +29,19 @@ class GestureEngine:
             min_tracking_confidence=self._thresholds.get("min_tracking_confidence", 0.5),
         )
 
+        # Pose at complexity 0 (fastest). Used by body-relative detectors for shoulder/hip/ear geometry.
+        # Future optimisation: scene-gate pose processing when no active cue needs it.
+        self._mp_pose = mp.solutions.pose
+        self._pose = self._mp_pose.Pose(
+            model_complexity=0,
+            enable_segmentation=False,
+            min_detection_confidence=0.5,
+            min_tracking_confidence=0.5,
+        )
+        self._last_pose_lm = None
+        self._last_pose_time: float = 0.0
+        self._pose_stale_s: float = 0.5  # stale if no valid update for >500ms
+
         self._active_cg: Optional[dict] = None
         self._active_cg_context: dict = {}
         self._active_oi: Optional[dict] = None
@@ -54,10 +67,22 @@ class GestureEngine:
         self._last_landmarks = results.multi_hand_landmarks
         self._last_handedness = results.multi_handedness
 
-        if not results.multi_hand_landmarks:
+        pose_results = self._pose.process(rgb)
+        now = time.monotonic()
+        if pose_results.pose_landmarks:
+            self._last_pose_lm = pose_results.pose_landmarks.landmark
+            self._last_pose_time = now
+
+        # Pose-primary detectors (arms_crossed, run_arms, unravel, paddle) can fire
+        # without hand landmarks. Only require hands for detectors that explicitly need them.
+        _POSE_PRIMARY = {"arms_crossed", "run_arms", "unravel", "paddle"}
+        has_hands = bool(results.multi_hand_landmarks)
+        active_cg_type = self._active_cg.get("type", "") if self._active_cg else ""
+        needs_dispatch = has_hands or active_cg_type in _POSE_PRIMARY
+
+        if not needs_dispatch:
             return
 
-        now = time.monotonic()
         if now < self._cooldown_until:
             return
 
@@ -120,11 +145,19 @@ class GestureEngine:
         cg = self._active_cg
         oi = self._active_oi
         recording = self._active_cg_context.get("shape_recording")
+        pose_age = now - self._last_pose_time
+        if self._last_pose_lm and pose_age < self._pose_stale_s:
+            pose_status = "OK"
+        elif self._last_pose_lm:
+            pose_status = f"STALE({pose_age:.1f}s)"
+        else:
+            pose_status = "NONE"
         return {
             "active_cg": f"{cg['id']} ({cg['type']})" if cg else None,
             "active_oi": f"{oi['id']} ({oi['type']})" if oi else None,
             "last_fired": last,
             "recording_pts": len(recording) if recording else 0,
+            "pose_status": pose_status,
         }
 
     def _dispatch(self, interaction: dict, results, context: dict) -> bool:
@@ -134,7 +167,12 @@ class GestureEngine:
         detector_fn = REGISTRY.get(detector_type)
         if detector_fn is None:
             return False
+        # Inject current pose landmarks under reserved context key.
+        # Body-relative detectors read context["_pose_lm"]; existing detectors ignore it.
+        pose_age = time.monotonic() - self._last_pose_time
+        context["_pose_lm"] = self._last_pose_lm if pose_age < self._pose_stale_s else None
         return detector_fn(landmarks, params, context)
 
     def close(self):
         self._hands.close()
+        self._pose.close()

@@ -1,0 +1,89 @@
+{
+  "scene_id": "scene_11",
+  "scene_title": "The Conestogo",
+  "artist": "natasha",
+  "fps": 24,
+  "resolution": [1920, 1080],
+  "timing_profile": "standard",
+
+  "dialogue_sequence": [
+    { "cue": "AL-11-001", "audio": "AL-11-001.wav", "render_event": "lantern_fully_open" },
+    { "cue": "AL-11-002", "audio": "AL-11-002.wav" },
+    { "cue": "AL-11-003", "audio": "AL-11-003.wav" },
+    { "cue": "AL-11-004", "audio": "AL-11-004.wav" },
+    { "cue": "AL-11-005", "audio": "AL-11-005.wav" },
+    { "cue": "AL-11-006", "audio": "AL-11-006.wav" },
+    { "cue": "AL-11-007", "audio": "AL-11-007.wav" },
+    { "cue": "AL-11-008", "audio": "AL-11-008.wav", "render_event": "road_lit_behind" },
+    { "cue": "AL-11-009", "audio": "AL-11-009.wav" },
+    { "cue": "AL-11-010", "audio": "AL-11-010.wav" },
+    {
+      "cue": "AL-11-011",
+      "audio": "AL-11-011.wav",
+      "wait_for_interaction": true,
+      "render_event": "boat_releases",
+      "interaction": {
+        "tier": "cg",
+        "id": "unravel",
+        "type": "unravel",
+        "params": { "min_cycles": 2, "window_ms": 3000, "min_amplitude_frac": 0.10, "prox_frac": 0.25 }
+      }
+    },
+    {
+      "cue": "AL-11-012",
+      "audio": "AL-11-012.wav",
+      "wait_for_interaction": true,
+      "render_event": "crossing_begins",
+      "interaction": {
+        "tier": "cg",
+        "id": "launch_push",
+        "type": "push_out",
+        "params": { "min_growth_pct": 35, "window_ms": 400 }
+      }
+    },
+    {
+      "cue": "AL-11-013",
+      "audio": "AL-11-013.wav",
+      "wait_for_interaction": true,
+      "render_event": "stars_reflect",
+      "interaction": {
+        "tier": "cg",
+        "id": "paddle",
+        "type": "paddle",
+        "params": { "min_strokes": 4, "sync_window_ms": 400 }
+      }
+    },
+    { "cue": "AL-11-014", "audio": "AL-11-014.wav" },
+    { "cue": "AL-11-015", "audio": "AL-11-015.wav", "render_event": "current_rises" },
+    { "cue": "AL-11-016", "audio": "AL-11-016.wav" },
+    {
+      "cue": "AL-11-017",
+      "audio": "AL-11-017.wav",
+      "wait_for_interaction": true,
+      "render_event": "boat_reaches_shore",
+      "interaction": {
+        "tier": "cg",
+        "id": "reach_shore",
+        "type": "forward_reach",
+        "params": { "area_growth_threshold": 0.25, "window_frames": 10, "target_region": "lower_third" }
+      }
+    },
+    { "cue": "AL-11-018", "audio": "AL-11-018.wav", "render_event": "world_opens" },
+    {
+      "cue": "AL-11-019",
+      "audio": "AL-11-019.wav",
+      "interaction": {
+        "tier": "oi",
+        "id": "spread_arms",
+        "type": "presence_bilateral",
+        "params": { "y_threshold": "shoulder", "hold_ms": 500 },
+        "reaction_audio": "AL-11-019-RESP.wav"
+      }
+    },
+    { "cue": "AL-11-020", "audio": "AL-11-020.wav", "render_event": "quilt_reappears" }
+  ],
+
+  "transitions": {
+    "next_scene": "final_address"
+  }
+}

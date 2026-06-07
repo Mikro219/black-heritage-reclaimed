@@ -20,7 +20,7 @@
         "tier": "oi",
         "id": "cup_ear_listen",
         "type": "directional_head_or_hand",
-        "params": { "direction": "right" },
+        "params": { "direction": "ear", "hold_ms": 250 },
         "reaction_audio": "AL-02-005-RESP.wav"
       }
     },
