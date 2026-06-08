@@ -64,7 +64,7 @@ def detect(landmarks, params: dict, context: dict) -> bool:
 
     midline_x      = (sh_l.x + sh_r.x) / 2
     shoulder_y     = (sh_l.y + sh_r.y) / 2
-    hip_y          = (hip_l.y + hip_r.y) / 2 + context.get("_waist_y_offset", 0.0)
+    hip_y          = (hip_l.y + hip_r.y) / 2 + params.get("waist_y_offset", 0.0)
 
     # Same-side check
     current_side = _wrist_side(lw.x, rw.x, midline_x)

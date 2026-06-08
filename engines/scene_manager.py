@@ -1,4 +1,9 @@
 """
+LEGACY — dialogue-cue-driven runtime.
+In the shot-driven runtime (ShotSequencePlayer + --shot-player flag), SceneManager
+is not used. It is kept for the old narration-driven path and for its dev-preview
+mode (DEV_SCENES stubs + storyboard placeholder rendering).
+
 SceneManager — owns scene transitions and the top-level state machine.
 
 States:

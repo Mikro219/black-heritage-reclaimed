@@ -52,6 +52,7 @@ class RenderEngine:
         self._freeze_on_page_index: Optional[int] = None
         self._freeze_on_page_target: Optional[int] = None  # PDF page for debug
 
+        self.event_bus.subscribe("shot_load", self._on_shot_load)
         self.event_bus.subscribe("scene_load", self._on_scene_load)
         self.event_bus.subscribe("dev_frames_load", self._on_dev_frames_load)
         self.event_bus.subscribe("render_event", self._on_render_event)
@@ -189,6 +190,34 @@ class RenderEngine:
     # ------------------------------------------------------------------
     # Scene / frame loading
     # ------------------------------------------------------------------
+
+    def _on_shot_load(self, data: dict):
+        shot = data.get("shot")
+        if shot is None:
+            return
+        self._fps = getattr(shot, "fps", 24)
+        self._frame_index = 0
+        self._frames = []
+        self._pending_load_paths = []
+        self._freeze_active = False
+        self._freeze_frame_index = None
+        self._current_freeze_page = None
+        self._freeze_on_page_index = None
+        self._freeze_on_page_target = None
+        self._page_to_frame_index = {}
+        self._last_frame_time = time.monotonic()
+
+        frames_dir = getattr(shot, "frames_dir", None)
+        if frames_dir is None or getattr(shot, "assets_pending", True):
+            return
+
+        from pathlib import Path
+        d = Path(frames_dir)
+        image_exts = {".png", ".jpg", ".jpeg"}
+        paths = sorted(str(p) for p in d.iterdir() if p.suffix.lower() in image_exts)
+        self._pending_load_paths = paths
+        self._pending_load_fps = self._fps
+        print(f"[RenderEngine] shot_load: queued {len(paths)} frames at {self._fps} fps")
 
     def _on_scene_load(self, data: dict):
         metadata = data.get("metadata", {})
@@ -393,6 +422,14 @@ class RenderEngine:
 
         if narration_debug is not None:
             lines.append(("", (0, 0, 0)))
+            # SHOT: overlay — populated by ShotSequencePlayer.debug_info()
+            shot_id      = narration_debug.get("shot_id")
+            shot_state   = narration_debug.get("shot_state")
+            shot_elapsed = narration_debug.get("shot_elapsed_s")
+            if shot_id is not None:
+                elapsed_str = f" ({shot_elapsed}s)" if shot_elapsed is not None else ""
+                lines.append((f"SHOT: {shot_id} [{shot_state or '?'}]{elapsed_str}",
+                               (160, 255, 200)))
             nstate = narration_debug.get("state", "?")
             cue = narration_debug.get("cue_code") or "--"
             waiting_id = narration_debug.get("waiting_id")

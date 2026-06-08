@@ -123,8 +123,9 @@ class VoiceEngine:
 
         # Wire up event bus listeners if a bus was provided
         if event_bus:
-            event_bus.subscribe("dialogue_cue", self._on_dialogue_cue)
-            event_bus.subscribe("input_lock", self._on_input_lock)
+            event_bus.subscribe("dialogue_cue",   self._on_dialogue_cue)
+            event_bus.subscribe("vi_chain_step",  self._on_vi_chain_step)  # shot-driven model
+            event_bus.subscribe("input_lock",     self._on_input_lock)
 
     # -----------------------------------------------------------------------
     # Public interface
@@ -358,11 +359,39 @@ class VoiceEngine:
     # -----------------------------------------------------------------------
 
     def _on_dialogue_cue(self, data: dict) -> None:
+        """
+        Legacy path: opens VI windows from NarrationEngine dialogue_cue events.
+        Used when running the old SceneManager-based runtime.
+        In the shot-driven model, VI windows are opened via _on_vi_chain_step instead.
+        """
         cue = data.get("cue", {})
         interaction = cue.get("interaction", {})
         vi_target = interaction.get("voice_alternative") or interaction.get("voice_required")
         if vi_target:
             self.open_window(vi_target)
+
+    def _on_vi_chain_step(self, data: dict) -> None:
+        """
+        Shot-driven model: opens a VI window when ShotSequencePlayer arms a voice
+        chain step.  The step dict has {type, keyword, required, mode?}.
+
+        Replaces the dialogue_cue → voice_alternative/voice_required path for shots
+        wired in the new shot-driven runtime.
+        """
+        step = data.get("step", {})
+        keyword = step.get("keyword", "").strip()
+        if not keyword:
+            return
+        required = bool(step.get("required", False))
+        vi_config = {
+            "id":         keyword,
+            "keywords":   [keyword],
+            "mode":       step.get("mode", "keyword"),
+            "tier":       "cg_required" if required else "cg_alternative",
+            "window_ms":  self.config.get("timing_defaults", {}).get("voice_window_ms", 10000),
+        }
+        self.open_window(vi_config)
+        log.info("VI window opened via vi_chain_step: keyword=%r required=%s", keyword, required)
 
     def _on_input_lock(self, data: dict) -> None:
         locked: bool = data.get("locked", False)

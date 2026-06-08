@@ -29,6 +29,9 @@ Params:
                               threshold line. Default 0.30. Increase to fire on
                               even shallower motions; decrease to require more dip.
   refractory_ms (int): minimum time between any two detected knocks. Default 220.
+  wrist_y_offset (float): shifts the threshold line up (negative) or down (positive)
+                          in normalised screen coords. Default 0.0. Tune with W/S in
+                          gesture_tuner.py; persisted to host profile.
 
 Context keys: knock_count, knock_times, knock_refractory_until, knuckle_below_threshold
 """
@@ -51,6 +54,7 @@ def detect(landmarks, params: dict, context: dict) -> bool:
     long_max_ms        = params.get("long_max_ms",        1400)
     threshold_fraction = params.get("threshold_fraction",  0.30)
     refractory_ms      = params.get("refractory_ms",       220)
+    wrist_y_offset     = params.get("wrist_y_offset",      0.0)
 
     now = time.monotonic()
 
@@ -60,7 +64,7 @@ def detect(landmarks, params: dict, context: dict) -> bool:
     knuckle_y = lm[5].y  # index MCP
     hand_top_y = min(lm[i].y for i in range(21))
     hand_height = max(wrist_y - hand_top_y, 0.05)
-    threshold_y = wrist_y - threshold_fraction * hand_height
+    threshold_y = wrist_y - threshold_fraction * hand_height + wrist_y_offset
 
     # "below threshold" means the knuckle has descended past the threshold line
     knuckle_below = knuckle_y >= threshold_y

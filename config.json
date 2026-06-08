@@ -1,11 +1,13 @@
 {
-  "resolution": [1920, 1080],
+  "resolution": [
+    1920,
+    1080
+  ],
   "camera_index": 0,
   "projector_audio_offset_ms": 40,
   "debug_overlay": false,
   "start_scene": "scene_01",
   "keyboard_fallback_enabled": true,
-
   "timing_defaults": {
     "profile_standard": {
       "reprompt_first_ms": 8000,
@@ -22,34 +24,54 @@
     "presence_hold_ms": 500,
     "extended_hold_ms": 1000
   },
-
   "detection_thresholds": {
     "min_detection_confidence": 0.6,
     "min_tracking_confidence": 0.5,
     "shape_match_star": 0.65,
-    "shape_match_dipper": 0.50,
+    "shape_match_dipper": 0.5,
     "rhythm_timing_tolerance": 0.25,
-    "trail_waypoint_match": 0.60,
+    "trail_waypoint_match": 0.6,
     "speed_multiplier_idle": 2.0,
     "paddle_stroke_count": 4,
     "gesture_cooldown_ms": 600,
     "gesture_confirmation_frames": 3
   },
-
   "voice": {
     "hum_rms_threshold": 0.02,
     "hum_min_duration_ms": 500,
+    "whisper_max_volume_dbfs": -25.0,
     "whisper_rms_threshold": 0.008,
     "whisper_volume_db_offset": -12,
-    "grammar": ["freedom", "go", "north", "follow the gourd", "shoofly", "yes", "water", "ready", "now", "[unk]"]
+    "grammar": [
+      "freedom",
+      "go",
+      "north",
+      "follow the gourd",
+      "shoofly",
+      "yes",
+      "water",
+      "ready",
+      "now",
+      "[unk]"
+    ]
   },
-
   "feedback_layer": {
-    "default_cg": { "visual": "warm_pulse", "audio": "soft_tap", "duration_ms": 300 },
-    "default_oi": { "visual": "warm_pulse", "audio": null, "duration_ms": 250 },
-    "emphasized": { "visual": "warm_pulse_long", "audio": "soft_breath", "duration_ms": 600 }
+    "default_cg": {
+      "visual": "warm_pulse",
+      "audio": "soft_tap",
+      "duration_ms": 300
+    },
+    "default_oi": {
+      "visual": "warm_pulse",
+      "audio": null,
+      "duration_ms": 250
+    },
+    "emphasized": {
+      "visual": "warm_pulse_long",
+      "audio": "soft_breath",
+      "duration_ms": 600
+    }
   },
-
   "audio_mix": {
     "reaction_duck_volume": 0.3,
     "reaction_duck_attack_ms": 100,

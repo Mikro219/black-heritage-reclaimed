@@ -1,4 +1,9 @@
 """
+LEGACY — dialogue-cue-driven runtime.
+In the shot-driven runtime (ShotSequencePlayer), this engine is no longer the master
+clock. Audio playback is handled by NarrationAdapter (shot_audio_lines events).
+This file is kept for the SceneManager-based runtime path (invoked without --shot-player).
+
 NarrationEngine — master clock for the dialogue-cue-driven runtime.
 
 Owns the dialogue_sequence for the current scene. Plays each AL-XX-YYY

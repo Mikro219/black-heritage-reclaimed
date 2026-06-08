@@ -29,11 +29,9 @@ class GestureEngine:
             min_tracking_confidence=self._thresholds.get("min_tracking_confidence", 0.5),
         )
 
-        # Pose at complexity 0 (fastest). Used by body-relative detectors for shoulder/hip/ear geometry.
-        # Future optimisation: scene-gate pose processing when no active cue needs it.
         self._mp_pose = mp.solutions.pose
         self._pose = self._mp_pose.Pose(
-            model_complexity=0,
+            model_complexity=1,
             enable_segmentation=False,
             min_detection_confidence=0.5,
             min_tracking_confidence=0.5,

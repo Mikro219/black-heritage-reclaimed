@@ -47,7 +47,7 @@ def detect(landmarks, params: dict, context: dict) -> bool:
     hip_l, hip_r = pose_lm[23], pose_lm[24]
     lw, rw       = pose_lm[15], pose_lm[16]
 
-    waist_y      = (hip_l.y + hip_r.y) / 2 + context.get("_waist_y_offset", 0.0)
+    waist_y      = (hip_l.y + hip_r.y) / 2 + params.get("waist_y_offset", 0.0)
     left_above   = lw.y < waist_y
     right_above  = rw.y < waist_y
 

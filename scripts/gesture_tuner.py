@@ -26,10 +26,6 @@ import math
 import os
 import sys
 import time
-
-import collections
-import threading
-
 import cv2
 import mediapipe as mp
 import numpy as np
@@ -220,10 +216,10 @@ GESTURES = [
     dict(
         name="three_knock",
         label="CG · Scene 6 · AL-06-007",
-        desc="knock-knock...KNOCK (knuckle threshold, not wrist-delta)  |  +/-: short_window_ms  |  [/]: threshold_fraction",
+        desc="knock-knock...KNOCK (knuckle threshold)  |  +/-: short_window_ms  |  [/]: threshold_fraction  |  W/S: wrist_y_offset",
         type="rhythm_bilateral",
         params={"short_window_ms": 500, "long_min_ms": 400, "long_max_ms": 1400,
-                "threshold_fraction": 0.30, "refractory_ms": 220},
+                "threshold_fraction": 0.30, "refractory_ms": 220, "wrist_y_offset": 0.0},
         tune_key="short_window_ms", tune_step=50,
         tune_key2="threshold_fraction", tune_step2=0.05,
         accent=(255, 100, 180), highlights=[0, 5],
@@ -292,9 +288,9 @@ GESTURES = [
     dict(
         name="run_arms",
         label="OI · Scene 10 · AL-10-010",
-        desc="Fast alternating arm pump — ≥3 cycles within 2s  |  +/-: window_ms  |  [/]: min_cycles",
+        desc="Fast alternating arm pump — ≥3 cycles within 2s  |  +/-: window_ms  |  [/]: min_cycles  |  W/S: waist_y_offset",
         type="run_arms",
-        params={"min_cycles": 3, "window_ms": 2000},
+        params={"min_cycles": 3, "window_ms": 2000, "waist_y_offset": 0.0},
         tune_key="window_ms", tune_step=100,
         tune_key2="min_cycles", tune_step2=1,
         accent=(255, 200, 40), highlights=[0, 15, 16],
@@ -314,9 +310,9 @@ GESTURES = [
     dict(
         name="paddle",
         label="CG · Scene 11 · AL-11-013",
-        desc="Both wrists arc same side — 4 strokes shoulder→hip  |  +/-: min_strokes  |  [/]: sync_window_ms",
+        desc="Both wrists arc same side — 4 strokes shoulder→waist  |  +/-: min_strokes  |  [/]: sync_window_ms  |  W/S: waist_y_offset",
         type="paddle",
-        params={"min_strokes": 4, "sync_window_ms": 400},
+        params={"min_strokes": 4, "sync_window_ms": 400, "waist_y_offset": 0.0},
         tune_key="min_strokes", tune_step=1,
         tune_key2="sync_window_ms", tune_step2=50,
         accent=(80, 255, 160), highlights=[0, 11, 12, 15, 16],
@@ -327,11 +323,7 @@ GESTURES = [
 _NAMED_Y = {"shoulder": 0.5, "head": 0.3, "waist": 0.7}
 _MOUTH_XY = (0.50, 0.78)
 
-# ── Global waist-line offset ─────────────────────────────────────────────────
-# Adjustable at runtime with W (raise) / S (lower) — step 0.01.
-# Stored in context["_waist_y_offset"] so detectors can read it.
-_WAIST_Y_OFFSET = 0.0
-_WAIST_STEP     = 0.01
+_WAIST_STEP = 0.01  # W/S key step for waist_y_offset
 
 
 # ── Drawing helpers ───────────────────────────────────────────────────────────
@@ -1012,10 +1004,10 @@ def draw_run_arms_info(frame, context, params, pose_lm, w, h, accent):
     if pose_lm is None:
         return
     hip_l, hip_r = pose_lm[23], pose_lm[24]
-    waist_y = (hip_l.y + hip_r.y) / 2 + context.get("_waist_y_offset", _WAIST_Y_OFFSET)
+    waist_y = (hip_l.y + hip_r.y) / 2 + params.get("waist_y_offset", 0.0)
     wy_px = int(waist_y * h)
     cv2.line(frame, (0, wy_px), (w, wy_px), accent, 2, cv2.LINE_AA)
-    offset_val = context.get("_waist_y_offset", _WAIST_Y_OFFSET)
+    offset_val = params.get("waist_y_offset", 0.0)
     offset_str = f"  offset={offset_val:+.2f}  [W/S to adjust]" if offset_val != 0.0 else "  [W/S to adjust]"
     cv2.putText(frame, f"waist{offset_str}", (10, wy_px - 6),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.45, accent, 1, cv2.LINE_AA)
@@ -1080,9 +1072,10 @@ def draw_paddle_info(frame, context, params, pose_lm, w, h, accent):
     hip_l, hip_r = pose_lm[23], pose_lm[24]
     lw, rw       = pose_lm[15], pose_lm[16]
 
-    midline_x  = (sh_l.x + sh_r.x) / 2
-    shoulder_y = (sh_l.y + sh_r.y) / 2
-    waist_y    = (hip_l.y + hip_r.y) / 2 + _WAIST_Y_OFFSET
+    midline_x    = (sh_l.x + sh_r.x) / 2
+    shoulder_y   = (sh_l.y + sh_r.y) / 2
+    waist_offset = params.get("waist_y_offset", 0.0)
+    waist_y      = (hip_l.y + hip_r.y) / 2 + waist_offset
 
     mx_px = int((1 - midline_x) * w)
     sy_px = int(shoulder_y * h)
@@ -1093,7 +1086,7 @@ def draw_paddle_info(frame, context, params, pose_lm, w, h, accent):
     cv2.line(frame, (0, wy_px), (w, wy_px), accent, 1)
     cv2.putText(frame, "shoulder", (4, sy_px - 4),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.40, accent, 1, cv2.LINE_AA)
-    offset_str = f"  offset={_WAIST_Y_OFFSET:+.2f}" if _WAIST_Y_OFFSET != 0.0 else ""
+    offset_str = f"  offset={waist_offset:+.2f}" if waist_offset != 0.0 else ""
     cv2.putText(frame, f"waist{offset_str}", (4, wy_px - 4),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.40, accent, 1, cv2.LINE_AA)
 
@@ -1170,7 +1163,6 @@ def open_camera(config_path):
 
 
 def main():
-    global _WAIST_Y_OFFSET
     parser = argparse.ArgumentParser(description="BHR gesture tuner")
     parser.add_argument(
         "--profile", default="laptop_dev",
@@ -1199,7 +1191,7 @@ def main():
 
     mp_pose = mp.solutions.pose
     pose = mp_pose.Pose(
-        model_complexity=0,          # fastest; plenty accurate for landmark positions
+        model_complexity=1,
         enable_segmentation=False,
         min_detection_confidence=0.5,
         min_tracking_confidence=0.5,
@@ -1246,7 +1238,6 @@ def main():
         # run_arms, unravel, paddle) can read context["_pose_lm"] the same way
         # the runtime's gesture_engine does.
         context["_pose_lm"] = pose_lm
-        context["_waist_y_offset"] = _WAIST_Y_OFFSET
 
         detector_fn = REGISTRY.get(gtype)
         fired = False
@@ -1313,6 +1304,20 @@ def main():
 
         elif gtype == "rhythm_bilateral":
             draw_knock_progress(frame, context, live_params, w, h, accent)
+            if lm_list:
+                lm = lm_list[0].landmark
+                wrist_y_raw = lm[0].y
+                hand_top_y = min(lm[i].y for i in range(21))
+                hand_height = max(wrist_y_raw - hand_top_y, 0.05)
+                tf = live_params.get("threshold_fraction", 0.30)
+                wo = live_params.get("wrist_y_offset", 0.0)
+                thresh_y = wrist_y_raw - tf * hand_height + wo
+                ty_px = int(thresh_y * h)
+                cv2.line(frame, (0, ty_px), (w, ty_px), accent, 1, cv2.LINE_AA)
+                offset_str = f"  offset={wo:+.3f}  [W/S]" if wo != 0.0 else "  [W/S to adjust]"
+                cv2.putText(frame, f"knock threshold{offset_str}",
+                            (8, ty_px - 6), cv2.FONT_HERSHEY_SIMPLEX,
+                            0.45, accent, 1, cv2.LINE_AA)
 
         elif gtype == "touch_head":
             draw_touch_head_info(frame, context, live_params, lm_list, pose_lm, w, h, accent)
@@ -1637,11 +1642,12 @@ def main():
                                  accent if len(transitions) >= required else (200, 200, 200)))
             alt_state = context.get("run_prev_alt_state")
             if pose_lm:
-                waist_y = (pose_lm[23].y + pose_lm[24].y) / 2 + _WAIST_Y_OFFSET
+                _wo = live_params.get("waist_y_offset", 0.0)
+                waist_y = (pose_lm[23].y + pose_lm[24].y) / 2 + _wo
                 lw, rw = pose_lm[15], pose_lm[16]
                 above_l = lw.y < waist_y
                 above_r = rw.y < waist_y
-                state_lines.append((f"L {'above' if above_l else 'below'}  R {'above' if above_r else 'below'}  waist_y={waist_y:.3f} (offset={_WAIST_Y_OFFSET:+.2f})",
+                state_lines.append((f"L {'above' if above_l else 'below'}  R {'above' if above_r else 'below'}  waist_y={waist_y:.3f} (offset={_wo:+.2f})",
                                      accent if (above_l != above_r) else (120, 120, 120)))
             else:
                 state_lines.append(("POSE NONE — cannot fire", (200, 80, 80)))
@@ -1765,14 +1771,22 @@ def main():
             _adjust_tune_param(GESTURES[gesture_idx], 2, -1)
             context = {}
             _save_tune_params(GESTURES, profile_path)
-        elif key == ord('w'):  # W — raise waist line (smaller y = higher on screen)
-            _WAIST_Y_OFFSET = round(_WAIST_Y_OFFSET - _WAIST_STEP, 3)
+        elif key == ord('w'):  # W — raise offset line (smaller y = higher on screen)
+            _cur_g = GESTURES[gesture_idx]
+            for _ok in ("waist_y_offset", "wrist_y_offset"):
+                if _ok in _cur_g["params"]:
+                    _cur_g["params"][_ok] = round(_cur_g["params"][_ok] - _WAIST_STEP, 3)
+                    print(f"[tuner] {_cur_g['name']}: {_ok}={_cur_g['params'][_ok]:+.3f}")
             context = {}
-            print(f"[tuner] waist_y_offset={_WAIST_Y_OFFSET:+.3f}")
-        elif key == ord('s'):  # S — lower waist line
-            _WAIST_Y_OFFSET = round(_WAIST_Y_OFFSET + _WAIST_STEP, 3)
+            _save_tune_params(GESTURES, profile_path)
+        elif key == ord('s'):  # S — lower offset line
+            _cur_g = GESTURES[gesture_idx]
+            for _ok in ("waist_y_offset", "wrist_y_offset"):
+                if _ok in _cur_g["params"]:
+                    _cur_g["params"][_ok] = round(_cur_g["params"][_ok] + _WAIST_STEP, 3)
+                    print(f"[tuner] {_cur_g['name']}: {_ok}={_cur_g['params'][_ok]:+.3f}")
             context = {}
-            print(f"[tuner] waist_y_offset={_WAIST_Y_OFFSET:+.3f}")
+            _save_tune_params(GESTURES, profile_path)
 
     cap.release()
     hands.close()
@@ -1818,10 +1832,7 @@ def _save_tune_params(gestures: list, profile_path: str) -> None:
         profile = {}
     tuning: dict = {}
     for gesture in gestures:
-        saved = {}
-        for key in filter(None, [gesture.get("tune_key"), gesture.get("tune_key2")]):
-            if key in gesture["params"]:
-                saved[key] = gesture["params"][key]
+        saved = dict(gesture["params"])
         if saved:
             tuning[gesture["name"]] = saved
     profile["gesture_tuning"] = tuning

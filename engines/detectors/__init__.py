@@ -4,7 +4,6 @@ from .rules.directional_point import detect as directional_point
 from .rules.directional_head_or_hand import detect as directional_head_or_hand
 from .rules.bilateral_sweep import detect as bilateral_sweep
 from .rules.bilateral_lower import detect as bilateral_lower
-from .rules.shape_match import detect as shape_match
 from .rules.rhythm_bilateral import detect as rhythm_bilateral
 from .rules.speed_bilateral import detect as speed_bilateral
 from .rules.bilateral_alternating import detect as bilateral_alternating
@@ -32,7 +31,6 @@ REGISTRY = {
     "directional_head_or_hand": directional_head_or_hand,
     "bilateral_sweep": bilateral_sweep,
     "bilateral_lower": bilateral_lower,
-    "shape_match": shape_match,
     "rhythm_bilateral": rhythm_bilateral,
     "speed_bilateral": speed_bilateral,
     "bilateral_alternating": bilateral_alternating,
