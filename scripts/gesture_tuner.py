@@ -299,11 +299,11 @@ GESTURES = [
     dict(
         name="unravel",
         label="CG · Scene 11 · AL-11-011",
-        desc="Wrists wind around each other (rope) — ≥2 cycles  |  +/-: window_ms  |  [/]: min_amplitude_frac",
+        desc="Wrists wind around each other (rope) — ≥2 cycles  |  +/-: window_ms  |  [/]: prox_frac (↑ = more lenient overlap)",
         type="unravel",
         params={"min_cycles": 2, "window_ms": 3000, "min_amplitude_frac": 0.10, "prox_frac": 0.25},
         tune_key="window_ms", tune_step=200,
-        tune_key2="min_amplitude_frac", tune_step2=0.02,
+        tune_key2="prox_frac", tune_step2=0.05,
         accent=(80, 200, 255), highlights=[0, 15, 16],
     ),
     # ── paddle ────────────────────────────────────────────────────────────
@@ -1663,12 +1663,20 @@ def main():
                                  accent if crossings >= min_cycles * 2 else (200, 200, 200)))
             if pose_lm:
                 sh_l, sh_r = pose_lm[11], pose_lm[12]
-                lw, rw = pose_lm[15], pose_lm[16]
+                # Mirror detector: prefer hand wrists, fall back to pose
+                if len(lm_list) >= 2:
+                    _sh = sorted(lm_list, key=lambda h: h.landmark[0].x)
+                    lw = _sh[0].landmark[0]
+                    rw = _sh[1].landmark[0]
+                    wrist_src = "hand"
+                else:
+                    lw, rw = pose_lm[15], pose_lm[16]
+                    wrist_src = "pose"
                 import math as _m
                 wrist_dist = _m.hypot(lw.x - rw.x, lw.y - rw.y)
                 sh_width = abs(sh_l.x - sh_r.x)
                 prox_ok = wrist_dist < live_params.get("prox_frac", 0.25) * max(sh_width, 0.10)
-                state_lines.append((f"wrist_dist={wrist_dist:.3f}  prox: {'OK' if prox_ok else 'FAR'}",
+                state_lines.append((f"wrist_dist={wrist_dist:.3f}  prox: {'OK' if prox_ok else 'FAR'}  [{wrist_src}]",
                                      accent if prox_ok else (200, 80, 80)))
                 if diffs:
                     amp = max(diffs) - min(diffs)
@@ -1818,6 +1826,15 @@ def _load_tune_params(gestures: list, profile_path: str) -> None:
 
     print(f"[tuner] {os.path.basename(profile_path)}: "
           f"{applied} tuning override(s) loaded")
+
+    # Explicitly confirm offset params so resets are visible on startup.
+    _OFFSET_KEYS = ("waist_y_offset", "wrist_y_offset")
+    for gesture in gestures:
+        for key in _OFFSET_KEYS:
+            if key in gesture["params"]:
+                val = gesture["params"][key]
+                tag = f"{val:+.3f}" if val != 0.0 else "0.000 (default)"
+                print(f"[tuner]   {gesture['name']}.{key} = {tag}")
 
 
 def _save_tune_params(gestures: list, profile_path: str) -> None:

@@ -3,13 +3,17 @@ unravel — both wrists wind around each other in opposite phase (winding rope).
 
 Used by: AL-11-011 unravel (Scene 11 CG, ≥2 cycles).
 
-Tracks the difference signal  diff(t) = left_wrist.y - right_wrist.y  using
-Pose landmarks. When the wrists rotate around each other the diff signal
-oscillates, crossing zero as one wrist rises above the other and back.
+Tracks the difference signal  diff(t) = left_wrist.y - right_wrist.y.
+When the wrists rotate around each other the diff signal oscillates,
+crossing zero as one wrist rises above the other and back.
+
+Wrist positions come from hand landmarks (index 0 of each hand) when both
+hands are visible — more accurate than Pose wrists for fine motion. Falls
+back to Pose wrists (landmarks 15/16) when fewer than 2 hands are detected.
+Hands are sorted by x so left/right assignment is stable across frames.
 
 Body geometry (Pose landmarks, read from context["_pose_lm"]):
   11 (left_shoulder),  12 (right_shoulder)  → shoulder_width, shoulder_y
-  15 (left_wrist),     16 (right_wrist)     → tracked wrists
   23 (left_hip),       24 (right_hip)       → hip_y
 
 Proximity constraint: wrists must stay within prox_frac * shoulder_width
@@ -55,12 +59,20 @@ def detect(landmarks, params: dict, context: dict) -> bool:
 
     sh_l, sh_r     = pose_lm[11], pose_lm[12]
     hip_l, hip_r   = pose_lm[23], pose_lm[24]
-    lw, rw         = pose_lm[15], pose_lm[16]
 
     shoulder_width = abs(sh_l.x - sh_r.x)
     shoulder_y     = (sh_l.y + sh_r.y) / 2
     hip_y          = (hip_l.y + hip_r.y) / 2
     sh_hip_dist    = max(hip_y - shoulder_y, 0.10)
+
+    # Hand wrist landmarks (point 0) are more accurate than Pose wrists for
+    # fine oscillation tracking. Fall back to pose when < 2 hands visible.
+    if len(landmarks) >= 2:
+        sorted_hands = sorted(landmarks, key=lambda h: h.landmark[0].x)
+        lw = sorted_hands[0].landmark[0]
+        rw = sorted_hands[1].landmark[0]
+    else:
+        lw, rw = pose_lm[15], pose_lm[16]
 
     import math as _math
     # Proximity check: wrists close to each other
