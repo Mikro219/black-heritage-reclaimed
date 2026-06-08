@@ -1,0 +1,22 @@
+﻿{
+    "shot":  "04",
+    "kind":  "interactive",
+    "assigned_to":  "elayna",
+    "audio_lines":  [
+
+                    ],
+    "segments":  {
+        "intro":      [1, 277],
+        "idle_loop":  [],
+        "resolution": []
+    },
+    "interaction":  "TODO",
+    "fallback":  {
+                     "timeout_s":  30,
+                     "reprompt_s":  [
+                                        8,
+                                        16
+                                    ],
+                     "on_timeout":  "auto_advance"
+                 }
+}
