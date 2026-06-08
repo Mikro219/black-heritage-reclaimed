@@ -1,0 +1,18 @@
+﻿{
+    "shot":  "68",
+    "kind":  "interactive",
+    "assigned_to":  "wendy",
+    "audio_lines":  [
+
+                    ],
+    "segments":  "TODO",
+    "interaction":  "TODO",
+    "fallback":  {
+                     "timeout_s":  30,
+                     "reprompt_s":  [
+                                        8,
+                                        16
+                                    ],
+                     "on_timeout":  "auto_advance"
+                 }
+}
