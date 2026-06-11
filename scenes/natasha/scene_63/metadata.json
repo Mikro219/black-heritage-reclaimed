@@ -1,0 +1,10 @@
+{
+  "scene_id": "scene_63",
+  "artist": "natasha",
+  "fps": 24,
+  "resolution": [1920, 1080],
+  "transitions": {
+    "accepts_input_after_frame": 12,
+    "next_scene": "scene_64"
+  }
+}
