@@ -25,7 +25,7 @@ from typing import Optional
 from PIL import Image
 
 _IMAGE_EXTS = {".png", ".jpg", ".jpeg"}
-_FLUSH_CHUNK = 200  # frames decoded per batch before publishing to the cache
+_FLUSH_CHUNK = 100  # frames decoded per batch before publishing to the cache
 
 
 class FrameCacheManager:

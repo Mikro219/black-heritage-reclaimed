@@ -26,7 +26,7 @@ from typing import Optional
 
 from .frame_cache import FrameCacheManager
 
-PLAY_THRESHOLD = 600  # raw frames buffered before playback starts (drip mode kicks in after)
+PLAY_THRESHOLD = 100  # raw frames buffered before playback starts (drip mode kicks in after)
 
 
 class RenderEngine:
