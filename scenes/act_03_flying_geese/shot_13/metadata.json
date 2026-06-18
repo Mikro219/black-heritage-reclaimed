@@ -1,0 +1,20 @@
+{
+    "shot": "13",
+    "kind": "playback",
+    "assigned_to": "elayna",
+    "audio_lines": ["AL-03-006"],
+    "audio": "audio.mp3",
+    "interaction": {
+        "tier": "OI",
+        "id": "point_river_marker",
+        "type": "point_target_held",
+        "params": {
+            "hold_ms": 500,
+            "directions": ["down", "down_left", "down_right"],
+            "region_rect": { "x": 0.0, "y": 0.72, "w": 1.0, "h": 0.28 }
+        },
+        "sfx": "detect.mp3",
+        "feedback": "green_flash",
+        "oi_frame_window": [481, 717]
+    }
+}

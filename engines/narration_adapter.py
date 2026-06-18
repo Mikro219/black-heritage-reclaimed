@@ -76,13 +76,17 @@ class NarrationAdapter:
     # ------------------------------------------------------------------
 
     def _on_shot_audio_lines(self, data: dict) -> None:
-        """Enqueue all lines for a shot and start playback immediately."""
-        self._queue.clear()
-        self._channel.stop()
+        """Enqueue all lines for a shot and start playback immediately.
 
+        If none of the lines resolve to a per-line audio file, the shot uses the
+        whole-file ``audio.mp3`` convention instead (played by RenderEngine on the
+        same channel). In that case this adapter must NOT touch the channel — doing
+        so would stop the shot's audio.mp3 and leave silence.
+        """
         shot_id   = data.get("shot_id", "")
         audio_dir = self._audio_dirs.get(shot_id)
 
+        pending: list[tuple[Optional[Path], str]] = []
         for al_code in data.get("lines", []):
             resolved = None
             if audio_dir is not None:
@@ -91,10 +95,23 @@ class NarrationAdapter:
                     if candidate.exists():
                         resolved = candidate
                         break
-            self._queue.append((resolved, al_code))
-            if resolved is None:
-                log.debug("NarrationAdapter: no audio file for %s (assets_pending)", al_code)
+            pending.append((resolved, al_code))
 
+        # Emit dialogue_cue for every line regardless (VoiceEngine VI windows depend
+        # on these), but only seize the audio channel if we actually have files.
+        if not any(path is not None for path, _ in pending):
+            for _, al_code in pending:
+                self.event_bus.emit("dialogue_cue", {
+                    "code": al_code,
+                    "cue":  {"cue": al_code},
+                })
+            log.debug("NarrationAdapter: shot %s uses whole-file audio; channel left alone",
+                      shot_id)
+            self._queue.clear()
+            return
+
+        self._queue = pending
+        self._channel.stop()
         self._play_next()
 
     def _on_input_lock(self, data: dict) -> None:

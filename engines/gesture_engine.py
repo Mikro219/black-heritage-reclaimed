@@ -87,9 +87,12 @@ class GestureEngine:
 
         if self._active_cg:
             if self._dispatch(self._active_cg, results, self._active_cg_context):
-                self._emit_cg(self._active_cg["id"])
-                self._active_cg = None
+                # Save before clearing so event callbacks can re-arm without being wiped
+                gesture_id = self._active_cg["id"]
+                choice     = self._active_cg_context.get("point_direction")
+                self._active_cg         = None
                 self._active_cg_context = {}
+                self._emit_cg(gesture_id, choice)
 
         oi_window_ms = self.config["timing_defaults"].get("oi_window_ms", 6000)
         if self._active_oi and self._oi_open_time:
@@ -123,11 +126,9 @@ class GestureEngine:
     def _on_input_lock(self, data: dict):
         self._input_locked = data.get("locked", False)
 
-    def _emit_cg(self, gesture_id: str):
+    def _emit_cg(self, gesture_id: str, choice: str | None = None):
         cooldown = self._thresholds.get("gesture_cooldown_ms", 600) / 1000
         self._cooldown_until = time.monotonic() + cooldown
-        # Directional detectors store their result in context["point_direction"]
-        choice = self._active_cg_context.get("point_direction")
         label = f"CG:{gesture_id}" + (f"({choice})" if choice else "")
         self._last_fired = label
         self._last_fired_time = time.monotonic()
@@ -158,9 +159,11 @@ class GestureEngine:
         return {
             "active_cg": f"{cg['id']} ({cg['type']})" if cg else None,
             "active_oi": f"{oi['id']} ({oi['type']})" if oi else None,
+            "active_oi_params": oi.get("params", {}) if oi else None,
             "last_fired": last,
             "recording_pts": len(recording) if recording else 0,
             "pose_status": pose_status,
+            "point_dir": self._active_cg_context.get("dominant_direction"),
         }
 
     def _dispatch(self, interaction: dict, results, context: dict) -> bool:

@@ -1,0 +1,50 @@
+{
+    "shot": "09",
+    "kind": "interactive",
+    "assigned_to": "elayna",
+    "audio_lines": [],
+    "audio": "audio.mp3",
+    "hold_ms": 700,
+    "segments": {
+        "intro":          [1,    300],
+        "idle_loop":      [310,  310],
+        "left_selected":  [662,  748],
+        "right_selected": [1140, 1254],
+        "left_to_right":  [748,  820],
+        "right_to_left":  [836,  868],
+        "confirm_left":   [934,  1138],
+        "confirm_right":  [1414, 1622]
+    },
+    "interaction": {
+        "tier": "CG",
+        "hold_ms": 600,
+        "point_targets": { "left": [0.28, 0.48], "right": [0.70, 0.48] },
+        "point_proximity": 0.20,
+        "interaction_fsm": {
+            "initial": "waiting",
+            "states": {
+                "waiting":        { "segment": "idle_loop",      "loop": true,  "directions": ["left", "right"] },
+                "left_selected":  { "segment": "left_selected",  "loop": false, "on_enter_sfx": "pick.mp3",    "voice": "go" },
+                "right_selected": { "segment": "right_selected", "loop": false, "on_enter_sfx": "pick.mp3",    "voice": "go" },
+                "left_to_right":  { "segment": "left_to_right",  "loop": false, "on_enter_sfx": "switch.mp3"  },
+                "right_to_left":  { "segment": "right_to_left",  "loop": false, "on_enter_sfx": "switch.mp3"  },
+                "confirm_left":   { "segment": "confirm_left",   "loop": false, "on_enter_sfx": "confirm.mp3" },
+                "confirm_right":  { "segment": "confirm_right",  "loop": false, "on_enter_sfx": "confirm.mp3" }
+            },
+            "transitions": [
+                { "from": "waiting",        "on": "point_left",  "to": "left_selected"  },
+                { "from": "waiting",        "on": "point_right", "to": "right_selected" },
+                { "from": "left_selected",  "on": "point_right", "to": "left_to_right"  },
+                { "from": "right_selected", "on": "point_left",  "to": "right_to_left"  },
+                { "from": "left_to_right",  "on": "segment_end", "to": "right_selected" },
+                { "from": "right_to_left",  "on": "segment_end", "to": "left_selected"  },
+                { "from": "left_selected",  "on": "voice_go",    "to": "confirm_left"   },
+                { "from": "right_selected", "on": "voice_go",    "to": "confirm_right"  },
+                { "from": "confirm_left",   "on": "segment_end", "to": "__advance__"    },
+                { "from": "confirm_right",  "on": "segment_end", "to": "__advance__"    }
+            ],
+            "fallback": { "timeout_s": 30, "on_timeout": "auto_advance" }
+        }
+    },
+    "fallback": { "timeout_s": 60, "reprompt_s": [], "on_timeout": "auto_advance" }
+}

@@ -24,7 +24,7 @@ from PIL import Image
 from pathlib import Path
 from typing import Optional
 
-from .frame_preloader import FramePreloader
+from .frame_cache import FrameCacheManager
 
 
 class RenderEngine:
@@ -47,9 +47,13 @@ class RenderEngine:
         self._playback_start_time: float = 0.0
         self._pending_audio: Optional[str] = None
         self._current_frames_dir: Optional[Path] = None
-        self._current_preloader = FramePreloader()   # loads current shot
-        self._next_preloader    = FramePreloader()   # prefetches next shot in background
-        self._active_preloader: Optional[FramePreloader] = None  # draining continuation
+
+        # Look-ahead frame cache (continuous background preload of all shots with art)
+        self._cache: Optional[FrameCacheManager] = None
+        self._loading_dir: Optional[Path] = None   # incoming shot being converted
+        self._loading_frames: list = []            # Surfaces built for the incoming shot
+        self._raw_cursor: int = 0                  # raw frames converted so far
+        self._convert_chunk = config.get("frame_convert_chunk", 120)  # surfaces/ tick during swap
 
         # OI flash overlay
         self._flash_color: tuple = (0, 255, 80)
@@ -72,11 +76,19 @@ class RenderEngine:
         self._freeze_on_page_index: Optional[int] = None
         self._freeze_on_page_target: Optional[int] = None  # PDF page for debug
 
+        # FSM segment-constrained playback (set by play_segment event)
+        self._seg_start:  Optional[int] = None  # inclusive start frame index
+        self._seg_end:    Optional[int] = None  # inclusive end frame index
+        self._seg_loop:   bool = True
+        self._seg_anchor: float = 0.0           # time.monotonic() when segment started
+        self._seg_done:   bool = False
+
         self.event_bus.subscribe("shot_load",     self._on_shot_load)
         self.event_bus.subscribe("prefetch_shot", self._on_prefetch_shot)
         self.event_bus.subscribe("oi_flash",          self._on_oi_flash)
         self.event_bus.subscribe("play_sfx",          self._on_play_sfx)
         self.event_bus.subscribe("set_frame_window",  self._on_set_frame_window)
+        self.event_bus.subscribe("play_segment",      self._on_play_segment)
         self.event_bus.subscribe("scene_load",    self._on_scene_load)
         self.event_bus.subscribe("dev_frames_load", self._on_dev_frames_load)
         self.event_bus.subscribe("render_event",  self._on_render_event)
@@ -106,28 +118,47 @@ class RenderEngine:
         self._landmark_data = landmark_data
         now = time.monotonic()
 
-        # Poll current preloader — claim initial batch when ready
-        if not self._frames and self._current_frames_dir:
-            if self._current_preloader.is_ready(self._current_frames_dir):
-                self._claim_and_start(self._current_preloader)
+        # ── Look-ahead cache: convert the incoming shot's frames to Surfaces only
+        #    once the cache has it FULLY decoded, then swap it in atomically. Until
+        #    then the previous shot's last frame stays frozen on screen — we never
+        #    play partially-loaded frames or fall back to whatever happens to be
+        #    decoded. Conversion is chunked so the swap doesn't hitch the loop.
+        self._service_loading()
 
-        # Drain continuation frames loaded since last tick
-        if self._active_preloader:
-            new = self._active_preloader.drain()
-            if new:
-                self._frames.extend(new)
+        playing = self._frames and self._loading_dir is None
 
-        if self._frames:
+        if playing:
             if self._freeze_active and self._freeze_frame_index is not None:
                 # Hold the freeze frame — only jump if that index is already loaded
                 if self._freeze_frame_index < len(self._frames):
                     self._frame_index = self._freeze_frame_index
+
+            elif self._seg_start is not None:
+                # FSM segment-constrained playback: lock to a named frame range.
+                # Frames are guaranteed fully loaded here (a shot only begins playing
+                # after its whole frame set is cached), so no partial-load handling.
+                seg_len  = max(1, self._seg_end - self._seg_start + 1)
+                elapsed  = now - self._seg_anchor
+                raw_local = int(elapsed * self._fps)
+                if self._seg_loop:
+                    local = raw_local % seg_len
+                else:
+                    local = min(raw_local, seg_len - 1)
+                    if not self._seg_done and raw_local >= seg_len:
+                        self._seg_done = True
+                        print(f"[RenderEngine] segment_playback_done "
+                              f"[{self._seg_start}–{self._seg_end}]")
+                        self.event_bus.emit("segment_playback_done", {})
+                # Guard: the emit above can synchronously advance to the next shot,
+                # clearing _frames/_seg_start via _on_shot_load.
+                if self._seg_start is not None and self._frames:
+                    self._frame_index = min(self._seg_start + local,
+                                            len(self._frames) - 1)
+
             else:
-                # Time-based frame index: always show the frame that corresponds to
-                # elapsed wall-clock time so playback stays in sync with audio.
-                # Clamp to last loaded frame if loading hasn't caught up yet.
+                # Standard time-based frame index: stays in sync with audio.
                 elapsed = now - self._playback_start_time
-                target = int(elapsed * self._fps)
+                target = max(0, int(elapsed * self._fps))
                 self._frame_index = min(target, len(self._frames) - 1)
 
                 # Frame-gated OI window: emit events when _frame_index crosses thresholds
@@ -157,10 +188,25 @@ class RenderEngine:
                     self._freeze_on_page_target = None
                     self.event_bus.emit("freeze_activated", {})
 
+            if self._frames and 0 <= self._frame_index < len(self._frames):
+                self._screen.blit(self._frames[self._frame_index], (0, 0))
+            else:
+                self._screen.fill((0, 0, 0))
+
+        elif self._frames:
+            # Loading the next shot: freeze on the current (last shown) frame and
+            # wait until it's fully preloaded — do not advance, do not show stand-ins.
+            self._frame_index = max(0, min(self._frame_index, len(self._frames) - 1))
             self._screen.blit(self._frames[self._frame_index], (0, 0))
+            if narration_debug and self._loading_dir is not None:
+                self._draw_loading_indicator()
+
         else:
+            # No previous frame to hold (cold start) — black until first shot loads.
             self._screen.fill((0, 0, 0))
-            if narration_debug and narration_debug.get("waiting_id"):
+            if self._loading_dir is not None:
+                self._draw_loading_indicator()
+            elif narration_debug and narration_debug.get("waiting_id"):
                 self._draw_wait_for_cg_placeholder(narration_debug.get("waiting_id"))
 
         # OI flash overlay — fade in then fade out using a sine curve
@@ -179,6 +225,7 @@ class RenderEngine:
             self._draw_index_cursors(landmark_data, handedness_data)
 
         if self._debug:
+            self._draw_oi_target_flag(gesture_debug)
             self._draw_debug_panel(landmark_data, gesture_debug, voice_debug, narration_debug)
             if scene_debug:
                 self._draw_scene_panel(scene_debug)
@@ -243,13 +290,66 @@ class RenderEngine:
     # Scene / frame loading
     # ------------------------------------------------------------------
 
+    def attach_cache(self, shots) -> None:
+        """Start the continuous look-ahead frame cache over every shot with art.
+
+        Call once after the sequence is loaded. The cache decodes all shots that
+        have frames on disk in the background, prioritising forward from whatever
+        shot becomes current, so later shots are fully preloaded before we reach
+        them. assets_pending (placeholder) shots are skipped — they have no art.
+        """
+        dirs = []
+        for s in shots:
+            fd = getattr(s, "frames_dir", None)
+            if fd and not getattr(s, "assets_pending", True):
+                dirs.append(Path(fd))
+        self._cache = FrameCacheManager(self._get_resolution())
+        self._cache.start(dirs)
+
+    def _service_loading(self) -> None:
+        """Convert the incoming shot's cached raw frames to Surfaces, swap when full.
+
+        Conversion only starts once the cache reports the shot fully decoded, and is
+        chunked across ticks so the swap never stalls the render loop. The shot does
+        not begin playing (and its audio does not start) until every frame is ready.
+        """
+        if self._loading_dir is None or self._cache is None:
+            return
+        if not self._cache.is_complete(self._loading_dir):
+            return   # still decoding on the worker — keep holding the previous frame
+
+        total = self._cache.loaded_count(self._loading_dir)
+        end = min(total, self._raw_cursor + self._convert_chunk)
+        for data, size in self._cache.get_raw_slice(
+                self._loading_dir, self._raw_cursor, end - self._raw_cursor):
+            self._loading_frames.append(pygame.image.fromstring(data, size, "RGB"))
+        self._raw_cursor = end
+
+        if self._raw_cursor >= total and total > 0:
+            # Fully converted — swap in and start playback + audio together.
+            self._frames = self._loading_frames
+            self._loading_frames = []
+            self._loading_dir = None
+            self._frame_index = 0
+            self._playback_start_time = time.monotonic()
+            self._begin_audio()
+            self.event_bus.emit("shot_frames_ready", {})
+            print(f"[RenderEngine] shot ready: {len(self._frames)} frames (fully preloaded)")
+
+    def _begin_audio(self) -> None:
+        if self._pending_audio:
+            try:
+                sound = pygame.mixer.Sound(self._pending_audio)
+                pygame.mixer.Channel(0).play(sound)
+            except Exception as exc:
+                print(f"[RenderEngine] audio load failed: {exc}")
+            self._pending_audio = None
+
     def _on_shot_load(self, data: dict):
         shot = data.get("shot")
         if shot is None:
             return
         self._fps = getattr(shot, "fps", 24)
-        self._frame_index = 0
-        self._frames = []
         self._pending_load_paths = []
         self._freeze_active = False
         self._freeze_frame_index = None
@@ -258,61 +358,43 @@ class RenderEngine:
         self._freeze_on_page_target = None
         self._page_to_frame_index = {}
         self._last_frame_time = time.monotonic()
-        self._playback_start_time = time.monotonic()
         audio_file = getattr(shot, "audio_file", None)
         self._pending_audio = str(audio_file) if audio_file else None
 
-        frames_dir = getattr(shot, "frames_dir", None)
-        if frames_dir is None or getattr(shot, "assets_pending", True):
-            return
-
-        self._current_frames_dir = Path(frames_dir)
-
-        self._active_preloader  = None
+        # Always reset interaction state regardless of whether frames exist.
+        # If a synchronous shot transition fires mid-frame (e.g. confirm segment
+        # ends and _advance() emits shot_load before update() returns), these must
+        # be cleared so the render loop doesn't continue executing a stale segment.
         self._oi_frame_start    = None
         self._oi_frame_end      = None
         self._oi_window_open    = False
-        initial_batch = self.config.get("initial_frame_batch", 90)
+        self._seg_start         = None
+        self._seg_end           = None
+        self._seg_done          = False
+        # Reset incoming-shot conversion state.
+        self._loading_frames = []
+        self._raw_cursor     = 0
 
-        # If the next-shot preloader already loaded this shot, claim immediately
-        if self._next_preloader.is_ready(self._current_frames_dir):
-            self._claim_and_start(self._next_preloader)
-            return
-
-        # Otherwise kick off loading now (first shot, or cache miss)
-        self._current_preloader.start(self._current_frames_dir, self._get_resolution(),
-                                      initial_batch=initial_batch)
-
-    def _on_prefetch_shot(self, data: dict):
-        """Start preloading a future shot in the background."""
-        shot = data.get("shot")
-        if shot is None:
-            return
         frames_dir = getattr(shot, "frames_dir", None)
         if frames_dir is None or getattr(shot, "assets_pending", True):
+            # Placeholder shot with no art — clear the screen, nothing to load.
+            self._frames = []
+            self._frame_index = 0
+            self._current_frames_dir = None
+            self._loading_dir = None
             return
-        fd = Path(frames_dir)
-        if fd != self._current_frames_dir:
-            initial_batch = self.config.get("initial_frame_batch", 90)
-            self._next_preloader.start(fd, self._get_resolution(), initial_batch=initial_batch)
 
-    def _claim_and_start(self, preloader: "FramePreloader") -> None:
-        """Claim initial batch from preloader, start audio, anchor the clock. Main thread only."""
-        surfaces = preloader.claim(self._current_frames_dir)
-        if not surfaces:
-            return
-        self._frames = surfaces
-        self._active_preloader = preloader
-        self._playback_start_time = time.monotonic()
-        if self._pending_audio:
-            try:
-                sound = pygame.mixer.Sound(self._pending_audio)
-                pygame.mixer.Channel(0).play(sound)
-            except Exception as exc:
-                print(f"[RenderEngine] audio load failed: {exc}")
-            self._pending_audio = None
-        self.event_bus.emit("shot_frames_ready", {})
-        print(f"[RenderEngine] shot ready: {len(self._frames)} frames initial, audio started")
+        # Keep the previous shot's frames on screen (frozen on the last frame) while
+        # the incoming shot preloads — _service_loading swaps it in once complete.
+        self._current_frames_dir = Path(frames_dir)
+        self._loading_dir = Path(frames_dir)
+        if self._cache is not None:
+            self._cache.prioritize(self._loading_dir)
+
+    def _on_prefetch_shot(self, data: dict):
+        """No-op: the look-ahead cache already preloads every shot forward of the
+        current one. Retained because ShotSequencePlayer still emits prefetch_shot."""
+        return
 
     def _get_resolution(self) -> tuple[int, int]:
         display_cfg = self.config.get("_profile", {}).get("display", {})
@@ -328,6 +410,7 @@ class RenderEngine:
         self._fps = metadata.get("fps", 24)
         self._frame_index = 0
         self._frames = self._load_frames(frames_dir)
+        self._loading_dir = None   # legacy synchronous load path; not cache-driven
         self._last_frame_time = time.monotonic()
         self._freeze_active = False
         self._freeze_frame_index = None
@@ -363,6 +446,7 @@ class RenderEngine:
         self._fps = data.get("fps", 0.5)
         self._frame_index = 0
         self._frames = []
+        self._loading_dir = None   # legacy synchronous load path; not cache-driven
         self._pending_load_paths = list(paths)
         self._pending_load_fps = self._fps
         self._freeze_active = False
@@ -423,12 +507,105 @@ class RenderEngine:
         self._oi_frame_end   = data.get("end")
         self._oi_window_open = False
 
+    def _on_play_segment(self, data: dict):
+        self._seg_start  = data.get("start")
+        self._seg_end    = data.get("end")
+        self._seg_loop   = data.get("loop", True)
+        self._seg_anchor = time.monotonic()
+        self._seg_done   = False
+        print(f"[RenderEngine] play_segment [{self._seg_start}–{self._seg_end}]  "
+              f"loop={self._seg_loop}")
+
     def _on_render_event(self, data: dict):
         self._pending_events.append(data.get("name"))
 
     # ------------------------------------------------------------------
     # Drawing helpers
     # ------------------------------------------------------------------
+
+    def _draw_oi_target_flag(self, gesture_debug: dict | None) -> None:
+        """Draw a flag-style overlay for the active OI detection zone (debug mode only).
+
+        For region_rect: a labelled cyan rectangle with a flag tab at the top-left.
+        For directions:  compass arrows radiating from the bottom-centre of the screen.
+        Rect x-coordinates are mirrored to match display orientation (same transform
+        as the fingertip cursor: display_x = 1 - raw_x).
+        """
+        if not gesture_debug:
+            return
+        params = gesture_debug.get("active_oi_params")
+        if not params:
+            return
+
+        sw, sh = self._screen.get_size()
+        COLOR   = (80, 220, 255)    # cyan — distinct from CG yellow
+        FILL_A  = 35                # fill alpha
+        BORDER  = 2
+
+        rect = params.get("region_rect")
+        if rect:
+            # Mirror x so the rect aligns with the fingertip cursor on screen.
+            rx0 = int((1.0 - rect["x"] - rect["w"]) * sw)
+            rx1 = int((1.0 - rect["x"]) * sw)
+            ry0 = int(rect["y"] * sh)
+            ry1 = int((rect["y"] + rect["h"]) * sh)
+            rw  = max(1, rx1 - rx0)
+            rh  = max(1, ry1 - ry0)
+
+            # Semi-transparent fill
+            fill = pygame.Surface((rw, rh), pygame.SRCALPHA)
+            fill.fill((*COLOR, FILL_A))
+            self._screen.blit(fill, (rx0, ry0))
+
+            # Border
+            pygame.draw.rect(self._screen, COLOR, (rx0, ry0, rw, rh), BORDER)
+
+            # Flag tab — small filled rectangle with label, pinned to top-left corner
+            label_text = gesture_debug.get("active_oi", "OI target")
+            if self._small_font:
+                lbl = self._small_font.render(label_text, True, (0, 0, 0))
+                tab_w = lbl.get_width() + 10
+                tab_h = lbl.get_height() + 6
+                tab_surf = pygame.Surface((tab_w, tab_h), pygame.SRCALPHA)
+                tab_surf.fill((*COLOR, 220))
+                tab_surf.blit(lbl, (5, 3))
+                self._screen.blit(tab_surf, (rx0, ry0 - tab_h))
+
+        directions = params.get("directions")
+        if directions:
+            # Draw directional arrows from a fixed anchor point at the bottom-centre.
+            _DIR_VEC = {
+                "up":         ( 0, -1), "down":       ( 0,  1),
+                "left":       (-1,  0), "right":      ( 1,  0),
+                "up_left":    (-1, -1), "up_right":   ( 1, -1),
+                "down_left":  (-1,  1), "down_right": ( 1,  1),
+            }
+            import math as _math
+            ax = sw // 2
+            ay = sh - 80          # near bottom-centre
+            arrow_len = 50
+
+            for d in directions:
+                vec = _DIR_VEC.get(d)
+                if not vec:
+                    continue
+                mag = _math.hypot(*vec)
+                dx = int(vec[0] / mag * arrow_len)
+                dy = int(vec[1] / mag * arrow_len)
+                ex, ey = ax + dx, ay + dy
+                pygame.draw.line(self._screen, COLOR, (ax, ay), (ex, ey), 3)
+                # Arrowhead: two short lines at ~135° from the direction
+                head = 12
+                ang  = _math.atan2(dy, dx)
+                for side in (0.6, -0.6):
+                    hx = int(ex - head * _math.cos(ang + side * _math.pi))
+                    hy = int(ey - head * _math.sin(ang + side * _math.pi))
+                    pygame.draw.line(self._screen, COLOR, (ex, ey), (hx, hy), 2)
+
+            if self._small_font and directions:
+                label = "OI: " + "/".join(directions)
+                lbl = self._small_font.render(label, True, COLOR)
+                self._screen.blit(lbl, (ax - lbl.get_width() // 2, ay + arrow_len + 6))
 
     def _draw_index_cursors(self, landmark_data, handedness_data=None):
         """Draw a crosshair at each hand's index fingertip with L/R label."""
@@ -497,6 +674,21 @@ class RenderEngine:
                 surf = self._small_font.render(label, True, color_dot)
                 self._screen.blit(surf, (wx + 4, wy - 4))
 
+    def _draw_loading_indicator(self) -> None:
+        """Small corner readout while the incoming shot finishes preloading."""
+        if not self._screen or not self._small_font or self._cache is None:
+            return
+        loaded = self._cache.loaded_count(self._loading_dir) if self._loading_dir else 0
+        total  = self._cache.total_count(self._loading_dir) if self._loading_dir else None
+        name   = self._loading_dir.parent.name if self._loading_dir else "?"
+        done, shots_total = self._cache.progress()
+        if total:
+            txt = f"preloading {name}  {loaded}/{total}  ({done}/{shots_total} shots)"
+        else:
+            txt = f"preloading {name}…  ({done}/{shots_total} shots)"
+        surf = self._small_font.render(txt, True, (180, 180, 180))
+        self._screen.blit(surf, (20, self._screen.get_height() - 30))
+
     def _draw_wait_for_cg_placeholder(self, waiting_id: str):
         """Placeholder card when WAIT_FOR_CG is active but no storyboard frame exists."""
         if not self._screen or not self._font:
@@ -537,6 +729,9 @@ class RenderEngine:
             oi = gesture_debug.get("active_oi")
             lines.append((f"CG: {cg or '--'}", (255, 220, 0) if cg else (140, 140, 140)))
             lines.append((f"OI: {oi or '--'}", (100, 200, 255) if oi else (140, 140, 140)))
+            point_dir = gesture_debug.get("point_dir")
+            if point_dir:
+                lines.append((f"POINT: {point_dir}", (255, 255, 120)))
             last = gesture_debug.get("last_fired")
             if last:
                 lines.append((f"FIRED: {last}", (255, 140, 0)))

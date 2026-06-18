@@ -1,22 +1,23 @@
-﻿{
-    "shot":  "04",
-    "kind":  "interactive",
-    "assigned_to":  "elayna",
-    "audio_lines":  [
-
-                    ],
-    "segments":  {
-        "intro":      [1, 277],
-        "idle_loop":  [],
-        "resolution": []
-    },
-    "interaction":  "TODO",
-    "fallback":  {
-                     "timeout_s":  30,
-                     "reprompt_s":  [
-                                        8,
-                                        16
-                                    ],
-                     "on_timeout":  "auto_advance"
-                 }
+{
+    "shot": "06",
+    "kind": "playback",
+    "assigned_to": "elayna",
+    "audio_lines": ["AL-01-007"],
+    "audio": "audio.mp3",
+    "interaction": {
+        "tier": "OI",
+        "id": "raise_hands",
+        "type": "presence_bilateral",
+        "params": { "y_threshold": "shoulder", "hold_ms": 500 },
+        "voice_alternative": {
+            "id": "freedom",
+            "keywords": ["freedom"],
+            "mode": "keyword",
+            "tier": "cg_alternative",
+            "window_ms": 10000
+        },
+        "sfx": "detect.mp3",
+        "feedback": "green_flash",
+        "oi_frame_window": [318, 570]
+    }
 }

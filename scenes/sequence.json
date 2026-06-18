@@ -1,261 +1,156 @@
 {
   "_comment": "BHR runtime timeline. Ordered shot list. Generated skeleton from BHR_ASSET_TRACKER.xlsx \u2014 MIKE TO COMPLETE the TODO fields (audio_lines, segments, interaction). act assignment is a proposal via the new-title-card heuristic; reconcile act labels against the script (Prologue + Scenes 1-11 + Final Address).",
-  "fps": 24,
+  "fps": 30,
   "shots": [
     {
       "shot": "01",
-      "act": "01",
+      "act": "00",
       "kind": "playback",
       "reuse_of": null,
-      "audio_lines": [],
-      "tracker_type": "TITLE CARD",
-      "tracker_notes": ""
+      "audio": "audio.mp3",
+      "audio_lines": []
     },
-    {
+        {
       "shot": "02",
       "act": "01",
       "kind": "playback",
       "reuse_of": null,
-      "audio_lines": [],
-      "tracker_type": "PAN, ZOOM IN",
-      "tracker_notes": "animated door element"
+      "audio_lines": []
     },
-    {
+        {
       "shot": "03",
       "act": "01",
       "kind": "playback",
+      "audio": "audio.mp3",
       "reuse_of": null,
-      "audio_lines": [],
-      "tracker_type": "CLOSE UP",
-      "tracker_notes": ""
+      "audio_lines": []
     },
     {
       "shot": "04",
       "act": "01",
-      "kind": "interactive",
-      "reuse_of": "2",
-      "audio_lines": [],
-      "tracker_type": "REUSE",
-      "tracker_notes": "interactive",
-      "segments": {
-        "intro": "TODO",
-        "idle_loop": "TODO",
-        "resolution": "TODO"
-      },
-      "interaction": "TODO",
-      "fallback": {
-        "timeout_s": 30,
-        "reprompt_s": [
-          8,
-          16
-        ],
-        "on_timeout": "auto_advance"
-      }
+      "kind": "playback",
+      "reuse_of": null,
+      "audio_lines": []
     },
     {
       "shot": "05",
       "act": "01",
-      "kind": "interactive",
-      "reuse_of": "3",
-      "audio_lines": [],
-      "tracker_type": "REUSE, ZOOM IN",
-      "tracker_notes": "light variation of SC03 + interactive",
-      "segments": {
-        "intro": "TODO",
-        "idle_loop": "TODO",
-        "resolution": "TODO"
-      },
-      "interaction": "TODO",
-      "fallback": {
-        "timeout_s": 30,
-        "reprompt_s": [
-          8,
-          16
-        ],
-        "on_timeout": "auto_advance"
-      }
+      "kind": "playback",
+      "reuse_of": null,
+      "audio": "audio.mp3",
+      "audio_lines": []
     },
     {
       "shot": "06",
       "act": "02",
       "kind": "playback",
+      "audio": "audio.mp3",
       "reuse_of": null,
-      "audio_lines": [],
-      "tracker_type": "TITLE CARD",
-      "tracker_notes": ""
+      "audio_lines": []
     },
     {
       "shot": "07",
       "act": "02",
       "kind": "playback",
+      "audio": "audio.mp3",
       "reuse_of": null,
-      "audio_lines": [],
-      "tracker_type": "PAN",
-      "tracker_notes": ""
+      "audio_lines": []
     },
     {
       "shot": "08",
       "act": "02",
-      "kind": "interactive",
-      "reuse_of": "7",
-      "audio_lines": [],
-      "tracker_type": "REUSE",
-      "tracker_notes": "interactive",
-      "segments": {
-        "intro": "TODO",
-        "idle_loop": "TODO",
-        "resolution": "TODO"
-      },
-      "interaction": "TODO",
-      "fallback": {
-        "timeout_s": 30,
-        "reprompt_s": [
-          8,
-          16
-        ],
-        "on_timeout": "auto_advance"
-      }
+      "kind": "playback",
+      "audio": "audio.mp3",
+      "reuse_of": null,
+      "audio_lines": []
     },
     {
       "shot": "09",
       "act": "02",
+      "audio": "audio.mp3",
       "kind": "interactive",
-      "reuse_of": "9",
-      "audio_lines": [],
-      "tracker_type": "REUSE, ZOOM IN",
-      "tracker_notes": "interactive",
-      "segments": {
-        "intro": "TODO",
-        "idle_loop": "TODO",
-        "resolution": "TODO"
-      },
-      "interaction": "TODO",
-      "fallback": {
-        "timeout_s": 30,
-        "reprompt_s": [
-          8,
-          16
-        ],
-        "on_timeout": "auto_advance"
-      }
+      "reuse_of": null,
+      "audio_lines": []
     },
     {
       "shot": "10",
       "act": "03",
       "kind": "playback",
+      "audio": "audio.mp3",
       "reuse_of": null,
-      "audio_lines": [],
-      "tracker_type": "TITLE CARD",
-      "tracker_notes": ""
+      "audio_lines": []
     },
     {
       "shot": "11",
       "act": "03",
       "kind": "playback",
+      "audio": "audio.mp3",
       "reuse_of": null,
-      "audio_lines": [],
-      "tracker_type": "PAN",
-      "tracker_notes": ""
+      "audio_lines": []
     },
     {
       "shot": "12",
       "act": "03",
       "kind": "playback",
+      "audio": "audio.mp3",
       "reuse_of": "12",
-      "audio_lines": [],
-      "tracker_type": "TITLE CARD, REUSE",
-      "tracker_notes": ""
+      "audio_lines": []
     },
     {
       "shot": "13",
       "act": "03",
-      "kind": "interactive",
-      "reuse_of": "13",
-      "audio_lines": [],
-      "tracker_type": "PAN, REUSE, ZOOM IN",
-      "tracker_notes": "interactive",
-      "segments": {
-        "intro": "TODO",
-        "idle_loop": "TODO",
-        "resolution": "TODO"
-      },
-      "interaction": "TODO",
-      "fallback": {
-        "timeout_s": 30,
-        "reprompt_s": [
-          8,
-          16
-        ],
-        "on_timeout": "auto_advance"
-      }
+      "kind": "playback",
+      "reuse_of": null,
+      "audio": "audio.mp3",
+      "audio_lines": []
     },
     {
       "shot": "14",
       "act": "04",
       "kind": "playback",
       "reuse_of": null,
-      "audio_lines": [],
-      "tracker_type": "TITLE CARD",
-      "tracker_notes": ""
+      "audio": "audio.mp3",
+      "audio_lines": []
     },
     {
       "shot": "15",
       "act": "04",
       "kind": "playback",
       "reuse_of": null,
-      "audio_lines": [],
-      "tracker_type": "",
-      "tracker_notes": "no cam move"
+      "audio": "audio.mp3",
+      "audio_lines": []
     },
     {
       "shot": "16",
       "act": "04",
       "kind": "playback",
       "reuse_of": null,
-      "audio_lines": [],
-      "tracker_type": "PAN",
-      "tracker_notes": "spinning star bg"
+      "audio": "audio.mp3",
+      "audio_lines": []
     },
     {
       "shot": "17",
       "act": "04",
       "kind": "playback",
-      "reuse_of": "17",
-      "audio_lines": [],
-      "tracker_type": "REUSE",
-      "tracker_notes": ""
+      "reuse_of": null,
+      "audio": "audio.mp3",
+      "audio_lines": []
     },
     {
       "shot": "18",
       "act": "04",
       "kind": "playback",
-      "reuse_of": "16",
-      "audio_lines": [],
-      "tracker_type": "TITLE CARD, REUSE",
-      "tracker_notes": ""
+      "reuse_of": null,
+      "audio": "audio.mp3",
+      "audio_lines": []
     },
     {
       "shot": "19",
       "act": "04",
       "kind": "interactive",
-      "reuse_of": "18",
-      "audio_lines": [],
-      "tracker_type": "REUSE, PAN",
-      "tracker_notes": "interactive + reuse bg stars",
-      "segments": {
-        "intro": "TODO",
-        "idle_loop": "TODO",
-        "resolution": "TODO"
-      },
-      "interaction": "TODO",
-      "fallback": {
-        "timeout_s": 30,
-        "reprompt_s": [
-          8,
-          16
-        ],
-        "on_timeout": "auto_advance"
-      }
+      "reuse_of": null,
+      "audio": "audio.mp3",
+      "audio_lines": ["AL-04-007"]
     },
     {
       "shot": "20",

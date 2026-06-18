@@ -108,12 +108,14 @@ class ShotSequencePlayer:
         self._segment_duration: float = 0.0   # estimated when entering segment
         self._segment_done:     bool  = False  # set True by Phase 3 segment_playback_done
 
-        event_bus.subscribe("cg_detected",       self._on_cg_detected)
-        event_bus.subscribe("oi_detected",       self._on_oi_detected)
-        event_bus.subscribe("vi_detected",       self._on_vi_detected)
-        event_bus.subscribe("shot_frames_ready", self._on_shot_frames_ready)
-        event_bus.subscribe("frame_window_enter", self._on_frame_window_enter)
-        # Phase 3: event_bus.subscribe("segment_playback_done", self._on_segment_playback_done)
+        self._fsm: Optional["ShotFSM"] = None
+
+        event_bus.subscribe("cg_detected",          self._on_cg_detected)
+        event_bus.subscribe("oi_detected",           self._on_oi_detected)
+        event_bus.subscribe("vi_detected",           self._on_vi_detected)
+        event_bus.subscribe("shot_frames_ready",     self._on_shot_frames_ready)
+        event_bus.subscribe("frame_window_enter",    self._on_frame_window_enter)
+        event_bus.subscribe("segment_playback_done", self._on_segment_playback_done)
 
     # ------------------------------------------------------------------
     # Public
@@ -125,13 +127,13 @@ class ShotSequencePlayer:
             return self.shots[self._index]
         return None
 
-    def start(self) -> None:
+    def start(self, start_index: int = 0) -> None:
         if not self.shots:
             self._player_state = PLAYER_FINISHED
             self.event_bus.emit("sequence_finished", {})
             return
         self._player_state = PLAYER_RUNNING
-        self._enter_shot(0)
+        self._enter_shot(max(0, min(start_index, len(self.shots) - 1)))
 
     def update(self) -> None:
         """Drive the state machine. Call once per main-loop frame."""
@@ -267,18 +269,30 @@ class ShotSequencePlayer:
             })
 
     def _enter_hold(self, shot: Shot) -> None:
+        print(f"[ShotPlayer][DBG] _enter_hold shot {shot.shot} "
+              f"(prev fsm={'set' if self._fsm else 'none'})")
         self._shot_state      = STATE_HOLD
         self._hold_start      = time.monotonic()
         self._chain_index     = 0
         self._reprompt_fired  = set()
         self._segment_done    = False
         self._segment_duration = 0.0
+        self._fsm             = None
 
         self.event_bus.emit("shot_state_change", {
             "shot_id": shot.shot,
             "state":   STATE_HOLD,
             "segment": "idle_loop",
         })
+
+        # FSM path: interaction_fsm key inside the interaction dict
+        fsm_spec = (shot.interaction or {}).get("interaction_fsm")
+        if fsm_spec:
+            self._fsm = ShotFSM(fsm_spec, shot.segments)
+            print(f"[ShotPlayer] shot {shot.shot} FSM init: "
+                  f"states={list(self._fsm.states)} initial={self._fsm.current}")
+            self._fsm_enter_state()
+            return
 
         self._chain = _build_chain(shot.shot, shot.interaction)
 
@@ -450,6 +464,122 @@ class ShotSequencePlayer:
             })
 
     # ------------------------------------------------------------------
+    # FSM helpers
+    # ------------------------------------------------------------------
+
+    def _fsm_enter_state(self) -> None:
+        """Enter the FSM's current state: switch frame range, arm detectors, open voice window."""
+        if not self._fsm:
+            return
+        shot = self.current_shot
+        if not shot:
+            return
+        state_id = self._fsm.current
+        print(f"[ShotPlayer] FSM → {state_id}  loop={self._fsm.is_loop()}")
+
+        # Switch render engine to this state's frame range
+        seg = self._fsm.segment_range()
+        if seg:
+            self.event_bus.emit("play_segment", {
+                "start": seg[0],
+                "end":   seg[1],
+                "loop":  self._fsm.is_loop(),
+            })
+
+        # SFX on state entry
+        sfx = self._fsm.on_enter_sfx()
+        if sfx:
+            sfx_path = _resolve_sfx(shot, sfx)
+            if sfx_path:
+                self.event_bus.emit("play_sfx", {"path": sfx_path})
+            else:
+                print(f"[ShotPlayer] FSM SFX not found: {sfx!r}")
+
+        # Arm gesture detector for any outgoing transitions.
+        # gesture_type in the FSM spec selects the detector family:
+        #   "point"  (default) — directional_point: hold finger in direction
+        #   "draw"             — directional_draw:  swipe motion in direction
+        directions = self._fsm.outgoing_point_directions()
+        keyword    = self._fsm.voice_keyword()
+        hold_ms    = (shot.interaction or {}).get("hold_ms", 500)
+        fsm_spec   = (shot.interaction or {}).get("interaction_fsm", {})
+        gesture_type = fsm_spec.get("gesture_type", "point")
+
+        # States with no gesture or voice transitions (transition animations, confirm
+        # segments) lock all input so stale detections can't fire during playback.
+        # States with active transitions unlock so the player can interact.
+        accepts_input = bool(directions or keyword)
+        self.event_bus.emit("input_lock", {"locked": not accepts_input})
+        print(f"[ShotPlayer] FSM input_lock={not accepts_input}  state={state_id}  gesture_type={gesture_type}")
+
+        if directions and gesture_type == "draw":
+            # directional_draw: one direction per state, motion-based swipe.
+            # Use the first declared direction (states should only list one for draw).
+            # Gesture id is "draw_<direction>" so _on_cg_detected fires FSM event directly.
+            direction = directions[0]
+            self.event_bus.emit("cg_window_open", {
+                "interaction": {
+                    "id":     f"draw_{direction}",
+                    "type":   "directional_draw",
+                    "params": {"direction": direction},
+                    "tier":   "cg",
+                }
+            })
+        elif directions:
+            params = {"directions": directions, "hold_ms": hold_ms}
+            # Position/target mode: if the shot declares on-screen path targets,
+            # pass them so the detector classifies by where the fingertip is (which
+            # path it's over) rather than by the finger-vector angle.
+            interaction = shot.interaction or {}
+            point_targets = interaction.get("point_targets")
+            if point_targets:
+                params["targets"] = point_targets
+                params["proximity_threshold"] = interaction.get("point_proximity", 0.22)
+            self.event_bus.emit("cg_window_open", {
+                "interaction": {
+                    "id":     f"{shot.shot}_fsm_{state_id}",
+                    "type":   "directional_point",
+                    "params": params,
+                    "tier":   "cg",
+                }
+            })
+        else:
+            self.event_bus.emit("cg_window_open", {"interaction": None})
+
+        if keyword:
+            self.event_bus.emit("vi_window_open", {
+                "vi_config": {
+                    "id":       f"voice_{keyword}",
+                    "keywords": [keyword],
+                    "mode":     "keyword",
+                    "tier":     "cg_required",
+                    "window_ms": 10000,
+                }
+            })
+
+    def _fsm_fire(self, event: str) -> None:
+        """Fire an FSM event from the current state, enter the resulting state or advance."""
+        if not self._fsm:
+            print(f"[ShotPlayer][DBG] _fsm_fire({event!r}) but no FSM active")
+            return
+        shot = self.current_shot
+        if not shot:
+            return
+        from_state = self._fsm.current
+        next_state = self._fsm.fire(event)
+        print(f"[ShotPlayer][DBG] _fsm_fire: from={from_state!r} event={event!r} "
+              f"-> {next_state!r}")
+        if next_state is None:
+            return   # no matching transition — silent
+        print(f"[ShotPlayer] FSM event={event!r} → {next_state}")
+        if next_state == "__advance__":
+            self._fsm = None
+            self.event_bus.emit("input_lock", {"locked": False})
+            self._advance()
+        else:
+            self._fsm_enter_state()
+
+    # ------------------------------------------------------------------
     # Event handlers
     # ------------------------------------------------------------------
 
@@ -473,15 +603,33 @@ class ShotSequencePlayer:
             if not next_shot.assets_pending:
                 self.event_bus.emit("prefetch_shot", {"shot": next_shot})
 
+    def _on_segment_playback_done(self, data: dict) -> None:
+        """Non-looping FSM segment finished — fire segment_end transition."""
+        if self._shot_state == STATE_HOLD and self._fsm:
+            self._fsm_fire("segment_end")
+
     def _on_cg_detected(self, data: dict) -> None:
+        print(f"[ShotPlayer][DBG] cg_detected raw={data}  state={self._shot_state}  "
+              f"fsm_current={self._fsm.current if self._fsm else None}")
         if self._shot_state != STATE_HOLD:
             return
         shot = self.current_shot
-        if shot is None or not self._chain:
-            return
-        if self._chain_index >= len(self._chain):
+        if shot is None:
             return
 
+        # FSM path: convert choice → point_<direction> event (normalize diagonals)
+        if self._fsm:
+            choice = data.get("choice", "")
+            if choice:
+                canonical = self._fsm.normalize_direction(choice)
+                self._fsm_fire(f"point_{canonical}")
+            else:
+                self._fsm_fire(data.get("gesture_id", ""))
+            return
+
+        # Existing chain path
+        if not self._chain or self._chain_index >= len(self._chain):
+            return
         gesture_id = data.get("gesture_id", "")
         expected   = self._chain[self._chain_index].get("id")
         if gesture_id != expected:
@@ -522,7 +670,13 @@ class ShotSequencePlayer:
         if not shot:
             return
         voice_id = data.get("voice_id", "")
-        print(f"[ShotPlayer] shot {shot.shot} VI detected: {voice_id!r}  tier={data.get('tier')}")
+        print(f"[ShotPlayer] shot {shot.shot} VI detected: {voice_id!r}  tier={data.get('tier')}"
+              f"  state={self._shot_state}  fsm_current={self._fsm.current if self._fsm else None}")
+
+        # FSM path: voice_id is used directly as the transition event (e.g. "voice_go")
+        if self._fsm and self._shot_state == STATE_HOLD:
+            self._fsm_fire(voice_id)
+            return
 
         # For OI playback shots with a voice_alternative, treat VI exactly like OI detected
         if self._shot_state == STATE_PLAY and shot.interaction:
@@ -567,6 +721,118 @@ class ShotSequencePlayer:
             print(f"[ShotPlayer] shot {shot.shot} frame_window_enter -> arming VI "
                   f"{vi_config.get('id')!r} keywords={vi_config.get('keywords')}")
             self.event_bus.emit("vi_window_open", {"vi_config": vi_config})
+
+
+# ---------------------------------------------------------------------------
+# ShotFSM — mini state machine for branching interactive shots
+# ---------------------------------------------------------------------------
+
+class ShotFSM:
+    """
+    Minimal FSM for shots that have multiple selectable paths (point_path,
+    point_fork, choose_path).
+
+    Spec lives under interaction["interaction_fsm"] in metadata.json:
+
+        states      — {state_id: {segment, loop, on_enter_sfx, voice}}
+        transitions — [{from, on, to}, ...]  (to "__advance__" exits the shot)
+        initial     — starting state id
+
+    Gesture events are named "point_<direction>" (left/right/up/down/…).
+    Voice events use the vi_config id, typically "voice_<keyword>".
+    The render engine emits "segment_playback_done" → "segment_end" event.
+    """
+
+    # Maps FSM event name → directions accepted by the directional_point detector.
+    # Cardinal events (point_left/right/up/down) expand to include adjacent diagonals
+    # so real-world pointing at ~45° off-axis still registers.
+    _DIR_MAP = {
+        "point_left":       ["left",  "up_left",   "down_left"  ],
+        "point_right":      ["right", "up_right",  "down_right" ],
+        "point_up":         ["up",    "up_left",   "up_right"   ],
+        "point_down":       ["down",  "down_left", "down_right" ],
+        "point_up_left":    ["up_left"   ],
+        "point_up_right":   ["up_right"  ],
+        "point_down_left":  ["down_left" ],
+        "point_down_right": ["down_right"],
+    }
+
+    # Maps a raw detected direction back to the canonical FSM event direction
+    # (diagonals collapse to the cardinal they belong to under _DIR_MAP expansion).
+    _DIR_NORMALIZE = {
+        "left":       "left",  "up_left":   "left",  "down_left":  "left",
+        "right":      "right", "up_right":  "right", "down_right": "right",
+        "up":         "up",    "down":      "down",
+    }
+
+    def __init__(self, spec: dict, segments: Optional[dict]):
+        self.states      = spec.get("states", {})
+        self.transitions = spec.get("transitions", [])
+        self.fallback    = spec.get("fallback", {})
+        self._segments   = segments or {}
+        self.current     = spec.get("initial", "waiting")
+        self.done        = False
+
+    def segment_range(self) -> Optional[tuple]:
+        seg_name = self.states.get(self.current, {}).get("segment")
+        if not seg_name:
+            return None
+        seg = self._segments.get(seg_name)
+        if isinstance(seg, (list, tuple)) and len(seg) == 2:
+            return (int(seg[0]), int(seg[1]))
+        return None
+
+    def is_loop(self) -> bool:
+        return self.states.get(self.current, {}).get("loop", False)
+
+    def on_enter_sfx(self) -> Optional[str]:
+        return self.states.get(self.current, {}).get("on_enter_sfx")
+
+    def voice_keyword(self) -> Optional[str]:
+        return self.states.get(self.current, {}).get("voice")
+
+    def outgoing_point_directions(self) -> list:
+        """Accepted directions for the current state's outgoing point_* transitions.
+
+        If the current state declares a "directions" list in the FSM metadata, that
+        list is used exactly (no expansion). Otherwise cardinal events expand to include
+        adjacent diagonals so off-axis pointing registers.
+        """
+        # Per-state override: metadata can restrict or custom-set accepted directions.
+        # Use this to keep "waiting" strict (cardinal only) while allowing diagonal
+        # leniency in the selected/switch states.
+        override = self.states.get(self.current, {}).get("directions")
+        if override is not None:
+            return list(override)
+
+        result = []
+        for t in self.transitions:
+            if t.get("from") == self.current:
+                dirs = self._DIR_MAP.get(t.get("on", ""), [])
+                for d in dirs:
+                    if d not in result:
+                        result.append(d)
+        return result
+
+    def normalize_direction(self, raw: str) -> str:
+        """Collapse a detected direction to the canonical FSM event direction."""
+        return self._DIR_NORMALIZE.get(raw, raw)
+
+    def fire(self, event: str) -> Optional[str]:
+        """
+        Fire event from current state.
+        Returns next state id, "__advance__", or None (no matching transition).
+        Updates self.current on success.
+        """
+        for t in self.transitions:
+            if t.get("from") == self.current and t.get("on") == event:
+                next_state = t["to"]
+                if next_state == "__advance__":
+                    self.done = True
+                    return "__advance__"
+                self.current = next_state
+                return next_state
+        return None
 
 
 # ---------------------------------------------------------------------------

@@ -1,8 +1,16 @@
-﻿{
-    "shot":  "02",
-    "kind":  "playback",
-    "assigned_to":  "elayna",
-    "audio_lines":  [
-
-                    ]
+{
+    "shot": "04",
+    "kind": "interactive",
+    "assigned_to": "elayna",
+    "audio_lines": [],
+    "audio": "audio.mp3",
+    "interaction": {
+        "tier": "OI",
+        "id": "quilt_gesture",
+        "type": "mouth_proximity_tip",
+        "params": { "y_threshold": "shoulder", "hold_ms": 300 },
+        "sfx": "detect.mp3",
+        "feedback": "green_flash",
+        "oi_frame_window": [380, 535]
+    }
 }

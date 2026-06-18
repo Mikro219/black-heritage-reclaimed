@@ -1,0 +1,19 @@
+{
+    "shot": "05",
+    "kind": "playback",
+    "assigned_to": "elayna",
+    "audio_lines": ["AL-01-010"],
+    "audio": "audio.mp3",
+    "interaction": {
+        "tier": "OI",
+        "id": "point_quilt_block",
+        "type": "point_target_held",
+        "params": {
+            "hold_ms": 600,
+            "region_rect": { "x": 0.55, "y": 0.08, "w": 0.28, "h": 0.32 }
+        },
+        "sfx": "detect.mp3",
+        "feedback": "green_flash",
+        "oi_frame_window": [326, 506]
+    }
+}
