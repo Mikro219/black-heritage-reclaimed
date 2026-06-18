@@ -327,6 +327,8 @@ def _run_dry_run(config: dict) -> None:
 def main():
     parser = argparse.ArgumentParser(description="Black Heritage Reclaimed")
     parser.add_argument("--profile", metavar="NAME", help="Host profile name")
+    parser.add_argument("--start-shot", metavar="SHOT", default=None,
+                        help="Shot number to start at (e.g. 09). Skips all earlier shots.")
     parser.add_argument("--dry-run", action="store_true",
                         help="Console-only: walk all 78 shots through ShotSequencePlayer "
                              "with no camera, display, or audio, then exit")
@@ -370,7 +372,22 @@ def main():
     shots             = load_sequence(SCENES_ROOT, config)
     player            = ShotSequencePlayer(shots, config, bus)
     narration_adapter = NarrationAdapter(config, bus, shots)
-    player.start()
+
+    # Start the continuous look-ahead frame cache: preloads every shot with art in
+    # the background (forward from the current shot) so future shots are fully ready.
+    render.attach_cache(shots)
+
+    start_index = 0
+    if args.start_shot:
+        target = args.start_shot.zfill(2)
+        ids = [s.shot for s in shots]
+        if target in ids:
+            start_index = ids.index(target)
+            print(f"[main] Starting at shot {target} (index {start_index})", file=sys.stderr)
+        else:
+            print(f"[main] --start-shot {target!r} not found in sequence; starting from shot 01",
+                  file=sys.stderr)
+    player.start(start_index)
 
     voice.start()
 
@@ -386,6 +403,8 @@ def main():
             if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
                 _shutdown(cap, gesture, voice)
                 return
+            if event.type == pygame.KEYDOWN and event.key == pygame.K_RIGHT:
+                player._advance()
 
         ret, frame = cap.read()
         if not ret:
