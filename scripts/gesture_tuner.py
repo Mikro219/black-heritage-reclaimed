@@ -1693,23 +1693,29 @@ def main():
             stroke_count = context.get("paddle_stroke_count", 0)
             min_strokes  = live_params.get("min_strokes", 4)
             pct = min(stroke_count / min_strokes, 1.0) if min_strokes > 0 else 0.0
-            locked_side  = context.get("paddle_side", None)
-            state_lines.append((f"side locked: {locked_side or 'detecting...'}",
-                                 accent if locked_side else (120, 120, 120)))
             state_lines.append((f"strokes: {stroke_count}/{min_strokes}",
                                  accent if stroke_count >= min_strokes else (200, 200, 200)))
             if pose_lm:
                 sh_l, sh_r = pose_lm[11], pose_lm[12]
+                hip_l, hip_r = pose_lm[23], pose_lm[24]
                 lw, rw = pose_lm[15], pose_lm[16]
-                midline_x = (sh_l.x + sh_r.x) / 2
-                l_side = "left" if lw.x < midline_x else "right"
-                r_side = "left" if rw.x < midline_x else "right"
-                same = l_side == r_side
-                state_lines.append((f"L={l_side} R={r_side}  same_side: {'YES' if same else 'NO — RESET'}",
-                                     accent if same else (200, 80, 80)))
+                shoulder_y = (sh_l.y + sh_r.y) / 2
+                _wo = live_params.get("waist_y_offset", 0.0)
+                hip_y = (hip_l.y + hip_r.y) / 2 + _wo
+                l_above_sh = lw.y < shoulder_y
+                l_below_hip = lw.y > hip_y
+                r_above_sh = rw.y < shoulder_y
+                r_below_hip = rw.y > hip_y
                 phase_l = context.get("paddle_phase_l", "—")
                 phase_r = context.get("paddle_phase_r", "—")
-                state_lines.append((f"phase_L={phase_l}  phase_R={phase_r}", (160, 160, 200)))
+                l_done = context.get("paddle_l_completed", False)
+                r_done = context.get("paddle_r_completed", False)
+                state_lines.append((f"phase_L={phase_l} {'DONE' if l_done else ''}  phase_R={phase_r} {'DONE' if r_done else ''}",
+                                     accent if (l_done and r_done) else (160, 160, 200)))
+                state_lines.append((f"L: {'above_sh' if l_above_sh else 'below_hip' if l_below_hip else 'mid'}  "
+                                     f"R: {'above_sh' if r_above_sh else 'below_hip' if r_below_hip else 'mid'}  "
+                                     f"offset={_wo:+.2f}",
+                                     (160, 160, 200)))
             else:
                 state_lines.append(("POSE NONE — cannot fire", (200, 80, 80)))
             state_lines.append(("stroke progress:", (200, 200, 200)))
