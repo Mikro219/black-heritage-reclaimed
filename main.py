@@ -392,6 +392,9 @@ def main():
     voice.start()
 
     cap = open_camera(profile)
+    # Camera capture + MediaPipe inference run on their own thread; the render loop
+    # below only consumes the latest landmarks and never blocks on detection.
+    gesture.start_capture(cap)
     render_fps = profile.get("performance", {}).get("render_fps_cap", 30)
     clock = pygame.time.Clock()
 
@@ -406,11 +409,7 @@ def main():
             if event.type == pygame.KEYDOWN and event.key == pygame.K_RIGHT:
                 player._advance()
 
-        ret, frame = cap.read()
-        if not ret:
-            continue
-
-        gesture.process_frame(frame)
+        gesture.update()
         player.update()
         narration_adapter.update()
 

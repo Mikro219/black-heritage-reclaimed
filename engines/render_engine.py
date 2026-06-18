@@ -341,7 +341,9 @@ class RenderEngine:
         if end > self._raw_cursor:
             for data, size in self._cache.get_raw_slice(
                     self._loading_dir, self._raw_cursor, end - self._raw_cursor):
-                surf = pygame.image.fromstring(data, size, "RGB")
+                # .convert() once to the display's pixel format so every later blit
+                # is a straight memcpy instead of a per-pixel format conversion.
+                surf = pygame.image.fromstring(data, size, "RGB").convert()
                 if self._drip_active:
                     self._frames.append(surf)       # live list — render loop sees it immediately
                 else:
@@ -480,7 +482,7 @@ class RenderEngine:
                 continue
             path = os.path.join(frames_dir, fname)
             img = Image.open(path).convert("RGB").resize((w, h))
-            surface = pygame.image.fromstring(img.tobytes(), img.size, "RGB")
+            surface = pygame.image.fromstring(img.tobytes(), img.size, "RGB").convert()
             frames.append(surface)
         return frames
 
@@ -523,7 +525,7 @@ class RenderEngine:
                 continue
             try:
                 img = Image.open(path).convert("RGB").resize((w, h))
-                surface = pygame.image.fromstring(img.tobytes(), img.size, "RGB")
+                surface = pygame.image.fromstring(img.tobytes(), img.size, "RGB").convert()
                 frames.append(surface)
             except Exception as exc:
                 print(f"[RenderEngine] Failed to load frame {path}: {exc}")

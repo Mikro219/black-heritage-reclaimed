@@ -11,9 +11,16 @@ timers, velocity history, and path recordings.
 import cv2
 import mediapipe as mp
 from typing import Optional
+import threading
 import time
 
 from engines.detectors import REGISTRY
+
+
+# Detectors that read MediaPipe Pose landmarks (body-relative). Pose inference is
+# the most expensive call, so the capture thread only runs it when one of these
+# is the active CG/OI detector.
+_POSE_PRIMARY = {"arms_crossed", "run_arms", "unravel", "paddle"}
 
 
 class GestureEngine:
@@ -40,6 +47,22 @@ class GestureEngine:
         self._last_pose_time: float = 0.0
         self._pose_stale_s: float = 0.5  # stale if no valid update for >500ms
 
+        # --- Capture / inference thread ---------------------------------------
+        # The camera read + MediaPipe inference run on a dedicated worker thread so
+        # the render loop is never blocked on detection (CLAUDE.md performance rule).
+        # The worker publishes the latest landmarks into _pub_* under _frame_lock;
+        # the main thread snapshots them in update() and runs detector dispatch.
+        self._cap = None
+        self._capture_thread: Optional[threading.Thread] = None
+        self._capture_running = False
+        self._frame_lock = threading.Lock()
+        self._pub_hand_landmarks = None
+        self._pub_handedness = None
+        self._pub_pose_lm = None
+        self._pub_pose_time: float = 0.0
+        self._pub_seq: int = 0            # increments on each new inference result
+        self._last_consumed_seq: int = -1  # last seq the main thread dispatched
+
         self._active_cg: Optional[dict] = None
         self._active_cg_context: dict = {}
         self._active_oi: Optional[dict] = None
@@ -57,36 +80,102 @@ class GestureEngine:
         self.event_bus.subscribe("oi_window_open", self._on_oi_window_open)
         self.event_bus.subscribe("input_lock", self._on_input_lock)
 
-    def process_frame(self, frame):
+    def start_capture(self, cap) -> None:
+        """Take ownership of the camera and start the capture/inference worker."""
+        self._cap = cap
+        self._capture_running = True
+        self._capture_thread = threading.Thread(
+            target=self._capture_loop, daemon=True, name="GestureCapture"
+        )
+        self._capture_thread.start()
+        print("[GestureEngine] capture thread started")
+
+    def _pose_needed(self) -> bool:
+        """True if the active CG/OI detector reads Pose landmarks."""
+        cg_type = self._active_cg.get("type", "") if self._active_cg else ""
+        oi_type = self._active_oi.get("type", "") if self._active_oi else ""
+        return cg_type in _POSE_PRIMARY or oi_type in _POSE_PRIMARY
+
+    def _capture_loop(self) -> None:
+        """Worker: read camera, run MediaPipe, publish landmarks. Never touches the bus."""
+        while self._capture_running:
+            cap = self._cap
+            if cap is None:
+                break
+            ret, frame = cap.read()
+            if not ret:
+                time.sleep(0.005)   # camera hiccup — don't spin at 100% CPU
+                continue
+
+            # Always drain the camera to keep the USB pipeline fresh, but skip the
+            # expensive inference while input is locked (playback/transitions need
+            # no detection — matches the old early-return behaviour).
+            if self._input_locked:
+                continue
+
+            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            hand_results = self._hands.process(rgb)
+
+            # Pose only when a body-relative detector is armed (#3 — halves cost
+            # during the hands-only holds that make up most of acts 1–4).
+            run_pose = self._pose_needed()
+            pose_lm = None
+            if run_pose:
+                pose_results = self._pose.process(rgb)
+                if pose_results.pose_landmarks:
+                    pose_lm = pose_results.pose_landmarks.landmark
+
+            now = time.monotonic()
+            with self._frame_lock:
+                self._pub_hand_landmarks = hand_results.multi_hand_landmarks
+                self._pub_handedness     = hand_results.multi_handedness
+                if run_pose and pose_lm is not None:
+                    self._pub_pose_lm   = pose_lm
+                    self._pub_pose_time = now
+                self._pub_seq += 1
+
+    def update(self) -> None:
+        """Main thread: dispatch detectors on the newest published landmarks.
+
+        Cheap landmark math only — camera read and MediaPipe inference happen on
+        the capture thread, so this never stalls the render loop.
+        """
         if self._input_locked:
             return
 
-        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        results = self._hands.process(rgb)
-        self._last_landmarks = results.multi_hand_landmarks
-        self._last_handedness = results.multi_handedness
+        # Snapshot the latest inference result under the lock.
+        with self._frame_lock:
+            seq        = self._pub_seq
+            landmarks  = self._pub_hand_landmarks
+            handedness = self._pub_handedness
+            pose_lm    = self._pub_pose_lm
+            pose_time  = self._pub_pose_time
 
-        pose_results = self._pose.process(rgb)
-        now = time.monotonic()
-        if pose_results.pose_landmarks:
-            self._last_pose_lm = pose_results.pose_landmarks.landmark
-            self._last_pose_time = now
+        self._last_landmarks  = landmarks
+        self._last_handedness = handedness
+        self._last_pose_lm    = pose_lm
+        self._last_pose_time  = pose_time
 
-        # Pose-primary detectors (arms_crossed, run_arms, unravel, paddle) can fire
-        # without hand landmarks. Only require hands for detectors that explicitly need them.
-        _POSE_PRIMARY = {"arms_crossed", "run_arms", "unravel", "paddle"}
-        has_hands = bool(results.multi_hand_landmarks)
+        # No new inference since last update — skip dispatch (avoids re-processing
+        # an identical landmark frame when render runs faster than inference).
+        if seq == self._last_consumed_seq:
+            return
+        self._last_consumed_seq = seq
+
+        # Pose-primary detectors can fire without hand landmarks; everything else
+        # needs hands present.
+        has_hands = bool(landmarks)
         active_cg_type = self._active_cg.get("type", "") if self._active_cg else ""
         needs_dispatch = has_hands or active_cg_type in _POSE_PRIMARY
-
         if not needs_dispatch:
             return
 
+        now = time.monotonic()
         if now < self._cooldown_until:
             return
 
         if self._active_cg:
-            if self._dispatch(self._active_cg, results, self._active_cg_context):
+            if self._dispatch(self._active_cg, landmarks, self._active_cg_context):
                 # Save before clearing so event callbacks can re-arm without being wiped
                 gesture_id = self._active_cg["id"]
                 choice     = self._active_cg_context.get("point_direction")
@@ -98,7 +187,7 @@ class GestureEngine:
         if self._active_oi and self._oi_open_time:
             elapsed = (now - self._oi_open_time) * 1000
             if elapsed <= oi_window_ms:
-                if self._dispatch(self._active_oi, results, self._active_oi_context):
+                if self._dispatch(self._active_oi, landmarks, self._active_oi_context):
                     self._emit_oi(self._active_oi["id"])
                     self._active_oi = None
                     self._active_oi_context = {}
@@ -166,10 +255,9 @@ class GestureEngine:
             "point_dir": self._active_cg_context.get("dominant_direction"),
         }
 
-    def _dispatch(self, interaction: dict, results, context: dict) -> bool:
+    def _dispatch(self, interaction: dict, landmarks, context: dict) -> bool:
         detector_type = interaction.get("type")
         params = interaction.get("params", {})
-        landmarks = results.multi_hand_landmarks
         detector_fn = REGISTRY.get(detector_type)
         if detector_fn is None:
             if detector_type not in self._warned_missing:
@@ -184,5 +272,11 @@ class GestureEngine:
         return detector_fn(landmarks, params, context)
 
     def close(self):
+        # Stop the worker before tearing down the MediaPipe graphs / camera so the
+        # worker can't call .process() on a closed graph or read a released cap.
+        self._capture_running = False
+        if self._capture_thread is not None:
+            self._capture_thread.join(timeout=2.0)
+            self._capture_thread = None
         self._hands.close()
         self._pose.close()
