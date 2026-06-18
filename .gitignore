@@ -6,3 +6,7 @@ CLAUDE.md
 Thumbs.db
 *.png
 *.jpg
+
+# Disk-backed frame packs (huge, regenerated from frames/ on first run)
+framecache.npy
+*.npy.building

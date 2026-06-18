@@ -1,19 +1,23 @@
 """
-FrameCacheManager — persistent background look-ahead frame cache.
+FrameCacheManager — disk-backed, RAM-bounded frame provider.
 
-Decodes frames for every shot that has art on disk into an in-memory raw-bytes
-cache, working forward from the current shot so upcoming shots are fully loaded
-*before* the player reaches them. The old per-shot preloader stopped after the
-current (and immediately-next) shot; this keeps going until every shot with art
-is cached, using the idle time between interactions.
+Each shot's frames are packed once into a single raw `.npy` array on disk
+(`<shot>/framecache.npy`, shape (N, H, W, 3) uint8 at display resolution). On
+later runs the pack is memory-mapped instead of re-decoding thousands of PNG/JPG
+files — so startup and look-ahead loading cost almost nothing the second time.
 
-Frames are decoded with PIL on a background thread as raw RGB bytes. The render
-engine converts them to pygame Surfaces on the main thread (pygame surface
-creation is kept off worker threads on purpose).
+Memory is bounded two ways:
+  • Only a window of shots (current + `keep_ahead`) keeps an open mmap; shots
+    behind / far ahead are evicted. The OS pages mmapped frames in/out on demand.
+  • Frames are served as raw bytes; the render engine converts them to pygame
+    Surfaces lazily and keeps only a small LRU window of Surfaces (see FrameView).
 
-Priority: the current shot first, then every shot after it in sequence order,
-then wrap around to fill any earlier ones. Per-shot loading is resumable — a
-shot that was preempted mid-load continues from where it stopped.
+First-run fallback: until a shot's pack finishes building, frames are decoded
+one at a time directly from the source images, so playback can start immediately
+while the pack builds in the background.
+
+The build streams frame-by-frame through a memmap, so packing a 5000-frame shot
+never holds more than one frame in RAM.
 """
 
 from __future__ import annotations
@@ -22,29 +26,35 @@ import threading
 from pathlib import Path
 from typing import Optional
 
+import numpy as np
 from PIL import Image
 
 _IMAGE_EXTS = {".png", ".jpg", ".jpeg"}
-_FLUSH_CHUNK = 100  # frames decoded per batch before publishing to the cache
+PACK_NAME = "framecache.npy"
 
 
 class FrameCacheManager:
-    def __init__(self, resolution: tuple[int, int]):
-        self._res = resolution
+    def __init__(self, resolution: tuple[int, int], keep_ahead: int = 2):
+        self._w, self._h = resolution
+        self._keep_ahead = keep_ahead
+
         self._lock = threading.Lock()
         self._cv = threading.Condition(self._lock)
 
-        self._raw: dict[Path, list] = {}        # dir -> list[(bytes, (w, h))]
-        self._counts: dict[Path, int] = {}      # dir -> total frame count on disk
-        self._complete: set[Path] = set()       # dirs fully decoded
-        self._order: list[Path] = []            # ordered dirs (shots with art)
-        self._priority: Optional[Path] = None   # dir to load first (current shot)
+        self._order: list[Path] = []                 # frames dirs, sequence order
+        self._paths: dict[Path, list[Path]] = {}     # frames dir -> sorted image paths
+        self._packs: dict[Path, np.memmap] = {}      # frames dir -> mmap (N,H,W,3)
+        self._priority: Optional[Path] = None
+        self._priority_idx: int = 0
         self._stop = False
         self._thread: Optional[threading.Thread] = None
 
     # ------------------------------------------------------------------
     # Public — main thread
     # ------------------------------------------------------------------
+
+    def resolution(self) -> tuple[int, int]:
+        return (self._w, self._h)
 
     def start(self, ordered_dirs) -> None:
         with self._lock:
@@ -59,53 +69,89 @@ class FrameCacheManager:
             self._cv.notify_all()
 
     def prioritize(self, frames_dir) -> None:
-        """Load this shot next (it just became current)."""
+        """Mark this shot current: ensure its paths are listed, evict far shots."""
         d = Path(frames_dir)
+        self._ensure_paths(d)
         with self._cv:
             self._priority = d
-            if d not in self._order:
+            if d in self._order:
+                self._priority_idx = self._order.index(d)
+            else:
                 self._order.append(d)
+                self._priority_idx = len(self._order) - 1
             self._cv.notify_all()
+        self._evict_outside_window()
 
-    def is_complete(self, frames_dir) -> bool:
+    def is_ready(self, frames_dir) -> bool:
+        """True once frames can be served (pack mmapped OR source paths listed)."""
+        d = Path(frames_dir)
         with self._lock:
-            return Path(frames_dir) in self._complete
+            return d in self._packs or bool(self._paths.get(d))
 
-    def loaded_count(self, frames_dir) -> int:
+    def frame_count(self, frames_dir) -> Optional[int]:
+        d = Path(frames_dir)
         with self._lock:
-            lst = self._raw.get(Path(frames_dir))
-            return len(lst) if lst else 0
+            mm = self._packs.get(d)
+            if mm is not None:
+                return mm.shape[0]
+            paths = self._paths.get(d)
+            return len(paths) if paths else None
 
-    def total_count(self, frames_dir) -> Optional[int]:
+    def pack_ready(self, frames_dir) -> bool:
+        """True if the fast mmap pack (not just the decode fallback) is live."""
         with self._lock:
-            return self._counts.get(Path(frames_dir))
+            return Path(frames_dir) in self._packs
 
-    def get_raw_slice(self, frames_dir, start: int, count: int) -> list:
-        """Return a shallow copy of raw frames [start : start+count] for conversion."""
+    def get_frame_bytes(self, frames_dir, i: int):
+        """Return (raw_rgb_bytes, (w, h)) for frame i, or None if unavailable.
+
+        The current (priority) shot is never evicted while it plays, so reading its
+        mmap outside the lock is safe.
+        """
+        d = Path(frames_dir)
         with self._lock:
-            lst = self._raw.get(Path(frames_dir))
-            if not lst:
-                return []
-            return list(lst[start:start + count])
+            mm = self._packs.get(d)
+            paths = self._paths.get(d)
 
-    def progress(self) -> tuple[int, int]:
-        with self._lock:
-            return len(self._complete), len(self._order)
+        if mm is not None:
+            n = mm.shape[0]
+            i = max(0, min(i, n - 1))
+            return mm[i].tobytes(), (self._w, self._h)
 
-    # ------------------------------------------------------------------
-    # Worker thread
-    # ------------------------------------------------------------------
-
-    def _next_target(self) -> Optional[Path]:
-        with self._lock:
-            if not self._order:
+        if paths:
+            i = max(0, min(i, len(paths) - 1))
+            try:
+                img = Image.open(paths[i]).convert("RGB").resize((self._w, self._h))
+                return img.tobytes(), (self._w, self._h)
+            except Exception as exc:
+                print(f"[FrameCache] decode fallback failed {paths[i].name}: {exc}")
                 return None
-            start = self._order.index(self._priority) if self._priority in self._order else 0
-            # forward from the current shot, then wrap to earlier shots
-            for d in self._order[start:] + self._order[:start]:
-                if d not in self._complete:
-                    return d
-            return None
+        return None
+
+    # ------------------------------------------------------------------
+    # Window / eviction
+    # ------------------------------------------------------------------
+
+    def _window(self) -> list[Path]:
+        lo = self._priority_idx
+        hi = min(len(self._order), self._priority_idx + self._keep_ahead + 1)
+        return self._order[lo:hi]
+
+    def _evict_outside_window(self) -> None:
+        keep = set(self._window())
+        with self._lock:
+            for d in list(self._packs):
+                if d not in keep:
+                    mm = self._packs.pop(d)
+                    try:
+                        mm._mmap.close()
+                    except Exception:
+                        pass
+                    print(f"[FrameCache] evicted pack {d.parent.name}")
+
+    # ------------------------------------------------------------------
+    # Worker thread — builds/mmaps packs for the window
+    # ------------------------------------------------------------------
 
     def _worker(self) -> None:
         while True:
@@ -117,57 +163,105 @@ class FrameCacheManager:
                 with self._cv:
                     if self._stop:
                         return
-                    self._cv.wait(timeout=1.0)   # everything cached — idle until prioritise()
+                    self._cv.wait(timeout=0.5)
                 continue
-            self._load_dir(target)
+            self._ensure_pack(target)
 
-    def _load_dir(self, frames_dir: Path) -> None:
-        w, h = self._res
+    def _next_target(self) -> Optional[Path]:
+        """Next windowed shot that doesn't yet have a live mmap pack."""
+        for d in self._window():
+            with self._lock:
+                if d not in self._packs:
+                    return d
+        return None
+
+    def _pack_path(self, frames_dir: Path) -> Path:
+        return frames_dir.parent / PACK_NAME
+
+    def _ensure_paths(self, frames_dir: Path) -> list[Path]:
+        with self._lock:
+            cached = self._paths.get(frames_dir)
+        if cached is not None:
+            return cached
         try:
             paths = sorted(
                 p for p in frames_dir.iterdir() if p.suffix.lower() in _IMAGE_EXTS
             )
         except OSError as exc:
             print(f"[FrameCache] cannot list {frames_dir}: {exc}")
-            with self._lock:
-                self._complete.add(frames_dir)
+            paths = []
+        with self._lock:
+            self._paths[frames_dir] = paths
+        return paths
+
+    def _ensure_pack(self, frames_dir: Path) -> None:
+        paths = self._ensure_paths(frames_dir)
+        n = len(paths)
+        if n == 0:
+            return
+
+        pack = self._pack_path(frames_dir)
+        if not pack.exists() or not self._pack_valid(pack, n):
+            if not self._build_pack(pack, paths):
+                return  # aborted (stop) or build failed — fallback decode stays active
+
+        try:
+            mm = np.load(pack, mmap_mode="r")
+        except Exception as exc:
+            print(f"[FrameCache] mmap load failed {pack.name}: {exc}")
             return
 
         with self._lock:
-            self._counts[frames_dir] = len(paths)
-            existing = len(self._raw.get(frames_dir, []))
+            # Only keep if still in the window (priority may have moved on).
+            if frames_dir in self._window():
+                self._packs[frames_dir] = mm
+        print(f"[FrameCache] pack ready {frames_dir.parent.name} ({n} frames)")
 
-        if existing >= len(paths):
-            with self._lock:
-                self._complete.add(frames_dir)
-            return
+    def _pack_valid(self, pack: Path, n: int) -> bool:
+        try:
+            mm = np.load(pack, mmap_mode="r")
+            ok = (mm.shape[0] == n and mm.shape[1] == self._h and mm.shape[2] == self._w)
+            del mm
+            return bool(ok)
+        except Exception:
+            return False
 
-        buf: list = []
-        for i in range(existing, len(paths)):
-            try:
-                img = Image.open(paths[i]).convert("RGB").resize((w, h))
-                buf.append((img.tobytes(), (w, h)))
-            except Exception as exc:
-                print(f"[FrameCache] skip {paths[i].name}: {exc}")
-                continue
-            if len(buf) >= _FLUSH_CHUNK:
+    def _build_pack(self, pack: Path, paths: list[Path]) -> bool:
+        """Stream frames to a memmapped .npy on disk (one frame in RAM at a time)."""
+        n = len(paths)
+        tmp = pack.with_suffix(".npy.building")
+        print(f"[FrameCache] building pack {pack.parent.name} ({n} frames)...")
+        try:
+            mm = np.lib.format.open_memmap(
+                tmp, mode="w+", dtype=np.uint8, shape=(n, self._h, self._w, 3)
+            )
+        except Exception as exc:
+            print(f"[FrameCache] cannot create pack {tmp}: {exc}")
+            return False
+
+        try:
+            for i, p in enumerate(paths):
                 with self._lock:
                     if self._stop:
-                        return
-                    pri = self._priority
-                    self._raw.setdefault(frames_dir, []).extend(buf)
-                buf = []
-                # A newly-current shot preempts this one; flush partial and yield.
-                if pri is not None and pri != frames_dir and pri not in self._complete:
-                    return
-
-        if buf:
-            with self._lock:
-                self._raw.setdefault(frames_dir, []).extend(buf)
-
-        with self._lock:
-            if len(self._raw.get(frames_dir, [])) >= len(paths):
-                self._complete.add(frames_dir)
-                done, total = len(self._complete), len(self._order)
-                print(f"[FrameCache] complete {frames_dir.parent.name} "
-                      f"({len(paths)} frames)  [{done}/{total} shots cached]")
+                        del mm
+                        tmp.unlink(missing_ok=True)
+                        return False
+                try:
+                    img = Image.open(p).convert("RGB").resize((self._w, self._h))
+                    mm[i] = np.asarray(img, dtype=np.uint8)
+                except Exception as exc:
+                    print(f"[FrameCache] skip {p.name}: {exc}")
+                    mm[i] = 0
+            mm.flush()
+            del mm
+            import os
+            os.replace(tmp, pack)
+            return True
+        except Exception as exc:
+            print(f"[FrameCache] build failed {pack.name}: {exc}")
+            try:
+                del mm
+            except Exception:
+                pass
+            tmp.unlink(missing_ok=True)
+            return False

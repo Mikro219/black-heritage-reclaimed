@@ -20,13 +20,65 @@ Debug overlay draws hand landmarks when config.debug_overlay is true.
 import os
 import time
 import pygame
+from collections import OrderedDict
 from PIL import Image
 from pathlib import Path
 from typing import Optional
 
 from .frame_cache import FrameCacheManager
 
-PLAY_THRESHOLD = 100  # raw frames buffered before playback starts (drip mode kicks in after)
+# Max converted Surfaces kept in RAM per shot (LRU). 240 frames at 1080p ≈ 1.9 GB.
+SURFACE_LRU_CAP = 240
+
+
+class FrameView:
+    """Lazy, RAM-bounded view over a shot's frames, indexable like a list of
+    pygame Surfaces.
+
+    Frames are converted from the cache's mmapped raw bytes on demand and only an
+    LRU window of Surfaces is kept resident, so a 5000-frame shot never holds all
+    its Surfaces in memory at once. Supports len(), [i] and [a:b] so it drops into
+    the existing render code wherever a frame list was used.
+    """
+
+    def __init__(self, cache, frames_dir, count, convert_fn, lru_cap=SURFACE_LRU_CAP):
+        self._cache = cache
+        self._dir = frames_dir
+        self._count = count
+        self._convert = convert_fn
+        self._cap = lru_cap
+        self._surf: "OrderedDict[int, pygame.Surface]" = OrderedDict()
+        self._blank: Optional[pygame.Surface] = None
+
+    def __len__(self):
+        return self._count
+
+    def __bool__(self):
+        return self._count > 0
+
+    def __getitem__(self, i):
+        if isinstance(i, slice):
+            return [self[j] for j in range(*i.indices(self._count))]
+        if i < 0:
+            i += self._count
+        i = max(0, min(i, self._count - 1))
+
+        surf = self._surf.get(i)
+        if surf is not None:
+            self._surf.move_to_end(i)
+            return surf
+
+        got = self._cache.get_frame_bytes(self._dir, i)
+        if got is None:
+            if self._blank is None:
+                self._blank = pygame.Surface(self._cache.resolution())
+            return self._blank
+        data, size = got
+        surf = self._convert(data, size)
+        self._surf[i] = surf
+        if len(self._surf) > self._cap:
+            self._surf.popitem(last=False)   # evict least-recently-used
+        return surf
 
 
 class RenderEngine:
@@ -53,16 +105,14 @@ class RenderEngine:
         # Look-ahead frame cache (continuous background preload of all shots with art)
         self._cache: Optional[FrameCacheManager] = None
         self._loading_dir: Optional[Path] = None   # incoming shot being converted
-        self._loading_frames: list = []            # Surfaces built for the incoming shot
-        self._raw_cursor: int = 0                  # raw frames converted so far
-        self._convert_chunk = config.get("frame_convert_chunk", 120)  # surfaces/ tick during swap
-        self._drip_active: bool = False            # True after early-start swap; drip-feeds remaining frames
+        self._loading_kind: str = "playback"       # kind of the incoming shot (debug only)
 
-        # OI flash overlay
+        # OI flash overlay (full-screen surface pre-allocated once in init_display)
         self._flash_color: tuple = (0, 255, 80)
         self._flash_start: float = 0.0
         self._flash_until: float = 0.0
         self._flash_alpha: int   = 80   # peak alpha (0-255)
+        self._flash_overlay: Optional[pygame.Surface] = None
 
         # Frame-gated OI window (1-based frame numbers, matching filenames)
         self._oi_frame_start: Optional[int] = None
@@ -110,6 +160,11 @@ class RenderEngine:
         pygame.display.set_caption("Black Heritage Reclaimed")
         self._font = pygame.font.SysFont("monospace", 20, bold=True)
         self._small_font = pygame.font.SysFont("monospace", 14, bold=True)
+        # Cached fonts for the scene panel (avoids constructing SysFont per frame).
+        self._scene_font = pygame.font.SysFont("monospace", 16)
+        self._scene_title_font = pygame.font.SysFont("monospace", 22, bold=True)
+        # Pre-allocate the full-screen OI flash overlay once (reused each flash frame).
+        self._flash_overlay = pygame.Surface((w, h), pygame.SRCALPHA)
 
     def update(self, landmark_data=None, handedness_data=None,
                gesture_debug: dict | None = None,
@@ -121,14 +176,13 @@ class RenderEngine:
         self._landmark_data = landmark_data
         now = time.monotonic()
 
-        # ── Look-ahead cache: convert the incoming shot's frames to Surfaces only
-        #    once the cache has it FULLY decoded, then swap it in atomically. Until
-        #    then the previous shot's last frame stays frozen on screen — we never
-        #    play partially-loaded frames or fall back to whatever happens to be
-        #    decoded. Conversion is chunked so the swap doesn't hitch the loop.
+        # ── Swap in the incoming shot once the disk-backed cache can serve it. The
+        #    FrameView converts frames to Surfaces on demand (LRU-bounded), so RAM
+        #    stays flat regardless of shot length. Until ready, the previous shot's
+        #    last frame stays frozen on screen.
         self._service_loading()
 
-        playing = bool(self._frames) and (self._loading_dir is None or self._drip_active)
+        playing = bool(self._frames) and self._loading_dir is None
 
         if playing:
             if self._freeze_active and self._freeze_frame_index is not None:
@@ -212,17 +266,16 @@ class RenderEngine:
             elif narration_debug and narration_debug.get("waiting_id"):
                 self._draw_wait_for_cg_placeholder(narration_debug.get("waiting_id"))
 
-        # OI flash overlay — fade in then fade out using a sine curve
-        if now < self._flash_until:
+        # OI flash overlay — fade in then fade out using a sine curve.
+        # Reuses the pre-allocated full-screen surface (no per-frame alloc).
+        if now < self._flash_until and self._flash_overlay is not None:
             duration = self._flash_until - self._flash_start
             progress = (now - self._flash_start) / duration if duration > 0 else 1.0
             import math as _math
             alpha = int(self._flash_alpha * _math.sin(progress * _math.pi))
             alpha = max(0, min(255, alpha))
-            sw, sh = self._screen.get_size()
-            overlay = pygame.Surface((sw, sh), pygame.SRCALPHA)
-            overlay.fill((*self._flash_color, alpha))
-            self._screen.blit(overlay, (0, 0))
+            self._flash_overlay.fill((*self._flash_color, alpha))
+            self._screen.blit(self._flash_overlay, (0, 0))
 
         if landmark_data:
             self._draw_index_cursors(landmark_data, handedness_data)
@@ -306,79 +359,41 @@ class RenderEngine:
             fd = getattr(s, "frames_dir", None)
             if fd and not getattr(s, "assets_pending", True):
                 dirs.append(Path(fd))
-        self._cache = FrameCacheManager(self._get_resolution())
+        keep_ahead = self.config.get("frame_cache_keep_ahead", 2)
+        self._cache = FrameCacheManager(self._get_resolution(), keep_ahead=keep_ahead)
         self._cache.start(dirs)
 
+    def _convert_surface(self, data, size) -> pygame.Surface:
+        """Raw RGB bytes → display-format Surface (.convert() makes blits a memcpy)."""
+        return pygame.image.fromstring(data, size, "RGB").convert()
+
     def _service_loading(self) -> None:
-        """Convert the incoming shot's cached raw frames to Surfaces, with early-start drip.
+        """Swap in the incoming shot once the cache can serve its frames.
 
-        Once PLAY_THRESHOLD raw frames are buffered by the cache worker, conversion
-        begins immediately. As soon as PLAY_THRESHOLD surfaces are ready, playback
-        starts (audio fires, shot_frames_ready emits) even if the rest of the shot
-        hasn't decoded yet. Remaining frames are drip-fed into the live _frames list
-        while the shot plays — _frames and _loading_frames are the same list object
-        during drip mode, so appends are visible to the render loop instantly.
-
-        For shots shorter than PLAY_THRESHOLD the old behaviour is preserved: wait
-        for is_complete, then convert all and swap.
+        No upfront conversion: as soon as the cache is ready (mmap pack live, or the
+        decode fallback's file list available), we point _frames at a FrameView that
+        converts frames to Surfaces on demand and keeps only an LRU window in RAM.
+        Until then the previous shot's last frame stays frozen on screen.
         """
         if self._loading_dir is None or self._cache is None:
             return
+        if not self._cache.is_ready(self._loading_dir):
+            return   # pack still building / paths not listed — hold previous frame
 
-        total     = self._cache.total_count(self._loading_dir) or 0
-        available = self._cache.loaded_count(self._loading_dir)
+        count = self._cache.frame_count(self._loading_dir) or 0
+        if count <= 0:
+            self._loading_dir = None
+            return
 
-        # Gate: wait until enough raw frames are buffered.
-        if total > 0 and total <= PLAY_THRESHOLD:
-            # Short shot — wait for full decode before converting.
-            if not self._cache.is_complete(self._loading_dir):
-                return
-        elif available < PLAY_THRESHOLD:
-            return  # not enough buffered yet for early start
-
-        # Convert a chunk of raw frames to Surfaces.
-        end = min(available, self._raw_cursor + self._convert_chunk)
-        if end > self._raw_cursor:
-            for data, size in self._cache.get_raw_slice(
-                    self._loading_dir, self._raw_cursor, end - self._raw_cursor):
-                # .convert() once to the display's pixel format so every later blit
-                # is a straight memcpy instead of a per-pixel format conversion.
-                surf = pygame.image.fromstring(data, size, "RGB").convert()
-                if self._drip_active:
-                    self._frames.append(surf)       # live list — render loop sees it immediately
-                else:
-                    self._loading_frames.append(surf)
-            self._raw_cursor = end
-
-        # Early-start swap: enough Surfaces converted to begin playing.
-        swap_threshold = min(PLAY_THRESHOLD, total) if total > 0 else PLAY_THRESHOLD
-        if not self._drip_active and len(self._loading_frames) >= swap_threshold:
-            self._frames              = self._loading_frames   # same list object — drip appends work
-            self._frame_index         = 0
-            self._playback_start_time = time.monotonic()
-            self._begin_audio()
-            self.event_bus.emit("shot_frames_ready", {})
-            self._drip_active = True
-            print(f"[RenderEngine] early start: {len(self._frames)} frames buffered, "
-                  f"{total - self._raw_cursor} remaining")
-
-        # Fully converted: tear down loading state.
-        is_done = (self._cache.is_complete(self._loading_dir) and
-                   self._raw_cursor >= self._cache.loaded_count(self._loading_dir))
-        if is_done:
-            if not self._drip_active:
-                # Short shot — swap in now (waited for full load above).
-                self._frames              = self._loading_frames
-                self._frame_index         = 0
-                self._playback_start_time = time.monotonic()
-                self._begin_audio()
-                self.event_bus.emit("shot_frames_ready", {})
-                print(f"[RenderEngine] shot ready: {len(self._frames)} frames")
-            else:
-                print(f"[RenderEngine] drip complete: {len(self._frames)} frames total")
-            self._loading_frames = []
-            self._loading_dir    = None
-            self._drip_active    = False
+        self._frames = FrameView(self._cache, self._loading_dir, count,
+                                  self._convert_surface)
+        self._frame_index         = 0
+        self._playback_start_time = time.monotonic()
+        self._loading_dir         = None
+        self._begin_audio()
+        self.event_bus.emit("shot_frames_ready", {})
+        print(f"[RenderEngine] shot ready: {count} frames "
+              f"({'pack' if self._cache.pack_ready(self._current_frames_dir) else 'decode fallback'})")
 
     def _begin_audio(self) -> None:
         if self._pending_audio:
@@ -394,6 +409,7 @@ class RenderEngine:
         if shot is None:
             return
         self._fps = getattr(shot, "fps", 24)
+        self._loading_kind = getattr(shot, "kind", "playback")
         self._pending_load_paths = []
         self._freeze_active = False
         self._freeze_frame_index = None
@@ -415,10 +431,6 @@ class RenderEngine:
         self._seg_start         = None
         self._seg_end           = None
         self._seg_done          = False
-        # Reset incoming-shot conversion state.
-        self._loading_frames = []
-        self._raw_cursor     = 0
-        self._drip_active    = False
 
         frames_dir = getattr(shot, "frames_dir", None)
         if frames_dir is None or getattr(shot, "assets_pending", True):
@@ -720,17 +732,15 @@ class RenderEngine:
                 self._screen.blit(surf, (wx + 4, wy - 4))
 
     def _draw_loading_indicator(self) -> None:
-        """Small corner readout while the incoming shot finishes preloading."""
+        """Small corner readout while the incoming shot's frame pack is building."""
         if not self._screen or not self._small_font or self._cache is None:
             return
-        loaded = self._cache.loaded_count(self._loading_dir) if self._loading_dir else 0
-        total  = self._cache.total_count(self._loading_dir) if self._loading_dir else None
-        name   = self._loading_dir.parent.name if self._loading_dir else "?"
-        done, shots_total = self._cache.progress()
+        name  = self._loading_dir.parent.name if self._loading_dir else "?"
+        total = self._cache.frame_count(self._loading_dir) if self._loading_dir else None
         if total:
-            txt = f"preloading {name}  {loaded}/{total}  ({done}/{shots_total} shots)"
+            txt = f"building frame pack: {name}  ({total} frames)..."
         else:
-            txt = f"preloading {name}…  ({done}/{shots_total} shots)"
+            txt = f"preparing {name}..."
         surf = self._small_font.render(txt, True, (180, 180, 180))
         self._screen.blit(surf, (20, self._screen.get_height() - 30))
 
@@ -839,8 +849,8 @@ class RenderEngine:
         pad = 10
         panel_w = 440
         line_h = 22
-        small_font = pygame.font.SysFont("monospace", 16)
-        title_font = pygame.font.SysFont("monospace", 22, bold=True)
+        small_font = self._scene_font          # cached in init_display (no per-frame SysFont)
+        title_font = self._scene_title_font
 
         idx = scene_debug["scene_idx"]
         total = scene_debug["scene_total"]
