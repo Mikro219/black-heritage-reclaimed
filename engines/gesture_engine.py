@@ -51,6 +51,7 @@ class GestureEngine:
         self._input_locked = False
         self._last_fired: Optional[str] = None
         self._last_fired_time: float = 0.0
+        self._warned_missing: set = set()   # suppress repeated "not in registry" noise
 
         self.event_bus.subscribe("cg_window_open", self._on_cg_window_open)
         self.event_bus.subscribe("oi_window_open", self._on_oi_window_open)
@@ -115,6 +116,9 @@ class GestureEngine:
         self._active_oi = data.get("interaction")
         self._active_oi_context = {}
         self._oi_open_time = time.monotonic()
+        oi = self._active_oi or {}
+        print(f"[GestureEngine] OI window open: id={oi.get('id')!r}  type={oi.get('type')!r}  "
+              f"in_registry={oi.get('type') in REGISTRY}")
 
     def _on_input_lock(self, data: dict):
         self._input_locked = data.get("locked", False)
@@ -135,6 +139,7 @@ class GestureEngine:
     def _emit_oi(self, gesture_id: str):
         self._last_fired = f"OI:{gesture_id}"
         self._last_fired_time = time.monotonic()
+        print(f"[GestureEngine] OI DETECTED: {gesture_id}")
         self.event_bus.emit("oi_detected", {"gesture_id": gesture_id})
 
     def debug_info(self) -> dict:
@@ -164,6 +169,10 @@ class GestureEngine:
         landmarks = results.multi_hand_landmarks
         detector_fn = REGISTRY.get(detector_type)
         if detector_fn is None:
+            if detector_type not in self._warned_missing:
+                self._warned_missing.add(detector_type)
+                print(f"[GestureEngine] WARNING: detector type {detector_type!r} not in registry. "
+                      f"Known types: {sorted(REGISTRY)}")
             return False
         # Inject current pose landmarks under reserved context key.
         # Body-relative detectors read context["_pose_lm"]; existing detectors ignore it.

@@ -21,7 +21,10 @@ import os
 import time
 import pygame
 from PIL import Image
+from pathlib import Path
 from typing import Optional
+
+from .frame_preloader import FramePreloader
 
 
 class RenderEngine:
@@ -41,6 +44,23 @@ class RenderEngine:
         self._small_font: Optional[pygame.font.Font] = None
         self._pending_load_paths: list = []
         self._pending_load_fps: float = 0.5
+        self._playback_start_time: float = 0.0
+        self._pending_audio: Optional[str] = None
+        self._current_frames_dir: Optional[Path] = None
+        self._current_preloader = FramePreloader()   # loads current shot
+        self._next_preloader    = FramePreloader()   # prefetches next shot in background
+        self._active_preloader: Optional[FramePreloader] = None  # draining continuation
+
+        # OI flash overlay
+        self._flash_color: tuple = (0, 255, 80)
+        self._flash_start: float = 0.0
+        self._flash_until: float = 0.0
+        self._flash_alpha: int   = 80   # peak alpha (0-255)
+
+        # Frame-gated OI window (1-based frame numbers, matching filenames)
+        self._oi_frame_start: Optional[int] = None
+        self._oi_frame_end:   Optional[int] = None
+        self._oi_window_open: bool = False
 
         # Freeze-frame state
         self._page_to_frame_index: dict = {}   # PDF page number → frame list index
@@ -52,14 +72,18 @@ class RenderEngine:
         self._freeze_on_page_index: Optional[int] = None
         self._freeze_on_page_target: Optional[int] = None  # PDF page for debug
 
-        self.event_bus.subscribe("shot_load", self._on_shot_load)
-        self.event_bus.subscribe("scene_load", self._on_scene_load)
+        self.event_bus.subscribe("shot_load",     self._on_shot_load)
+        self.event_bus.subscribe("prefetch_shot", self._on_prefetch_shot)
+        self.event_bus.subscribe("oi_flash",          self._on_oi_flash)
+        self.event_bus.subscribe("play_sfx",          self._on_play_sfx)
+        self.event_bus.subscribe("set_frame_window",  self._on_set_frame_window)
+        self.event_bus.subscribe("scene_load",    self._on_scene_load)
         self.event_bus.subscribe("dev_frames_load", self._on_dev_frames_load)
-        self.event_bus.subscribe("render_event", self._on_render_event)
-        self.event_bus.subscribe("freeze_frame", self._on_freeze_frame)
+        self.event_bus.subscribe("render_event",  self._on_render_event)
+        self.event_bus.subscribe("freeze_frame",  self._on_freeze_frame)
         self.event_bus.subscribe("freeze_on_page", self._on_freeze_on_page)
         self.event_bus.subscribe("freeze_release", self._on_freeze_release)
-        self.event_bus.subscribe("page_jump", self._on_page_jump)
+        self.event_bus.subscribe("page_jump",     self._on_page_jump)
 
     def init_display(self):
         pygame.display.init()
@@ -82,17 +106,16 @@ class RenderEngine:
         self._landmark_data = landmark_data
         now = time.monotonic()
 
-        # Drain one pending frame per tick so the main thread never blocks on image load
-        if self._pending_load_paths:
-            path = self._pending_load_paths.pop(0)
-            display_cfg = self.config.get("_profile", {}).get("display", {})
-            w, h = display_cfg.get("resolution") or self.config.get("resolution", [1920, 1080])
-            try:
-                img = Image.open(path).convert("RGB").resize((w, h))
-                surface = pygame.image.fromstring(img.tobytes(), img.size, "RGB")
-                self._frames.append(surface)
-            except Exception as exc:
-                print(f"[RenderEngine] Failed to load frame {path}: {exc}")
+        # Poll current preloader — claim initial batch when ready
+        if not self._frames and self._current_frames_dir:
+            if self._current_preloader.is_ready(self._current_frames_dir):
+                self._claim_and_start(self._current_preloader)
+
+        # Drain continuation frames loaded since last tick
+        if self._active_preloader:
+            new = self._active_preloader.drain()
+            if new:
+                self._frames.extend(new)
 
         if self._frames:
             if self._freeze_active and self._freeze_frame_index is not None:
@@ -100,28 +123,57 @@ class RenderEngine:
                 if self._freeze_frame_index < len(self._frames):
                     self._frame_index = self._freeze_frame_index
             else:
-                frame_duration = 1.0 / self._fps
-                if now - self._last_frame_time >= frame_duration:
-                    self._frame_index = (self._frame_index + 1) % len(self._frames)
-                    self._last_frame_time = now
+                # Time-based frame index: always show the frame that corresponds to
+                # elapsed wall-clock time so playback stays in sync with audio.
+                # Clamp to last loaded frame if loading hasn't caught up yet.
+                elapsed = now - self._playback_start_time
+                target = int(elapsed * self._fps)
+                self._frame_index = min(target, len(self._frames) - 1)
 
-                    # Play-through freeze: activate when natural playback reaches target
-                    if (self._freeze_on_page_index is not None and
-                            self._freeze_on_page_index < len(self._frames) and
-                            self._frame_index >= self._freeze_on_page_index):
-                        self._frame_index = self._freeze_on_page_index
-                        self._freeze_frame_index = self._freeze_on_page_index
-                        self._freeze_active = True
-                        self._current_freeze_page = self._freeze_on_page_target
-                        self._freeze_on_page_index = None
-                        self._freeze_on_page_target = None
-                        self.event_bus.emit("freeze_activated", {})
+                # Frame-gated OI window: emit events when _frame_index crosses thresholds
+                if self._oi_frame_start is not None and not self._oi_window_open:
+                    if self._frame_index >= self._oi_frame_start:
+                        self._oi_window_open = True
+                        print(f"[RenderEngine] frame_window_enter at frame {self._frame_index} "
+                              f"(gate={self._oi_frame_start}-{self._oi_frame_end})")
+                        self.event_bus.emit("frame_window_enter", {})
+                if self._oi_frame_end is not None and self._oi_window_open:
+                    if self._frame_index >= self._oi_frame_end:
+                        self._oi_window_open = False
+                        self._oi_frame_start = None   # clear so we don't re-trigger on clamped last frame
+                        self._oi_frame_end   = None
+                        print(f"[RenderEngine] frame_window_exit at frame {self._frame_index}")
+                        self.event_bus.emit("frame_window_exit", {})
+
+                # Play-through freeze: activate when time-based playback reaches target
+                if (self._freeze_on_page_index is not None and
+                        self._freeze_on_page_index < len(self._frames) and
+                        self._frame_index >= self._freeze_on_page_index):
+                    self._frame_index = self._freeze_on_page_index
+                    self._freeze_frame_index = self._freeze_on_page_index
+                    self._freeze_active = True
+                    self._current_freeze_page = self._freeze_on_page_target
+                    self._freeze_on_page_index = None
+                    self._freeze_on_page_target = None
+                    self.event_bus.emit("freeze_activated", {})
 
             self._screen.blit(self._frames[self._frame_index], (0, 0))
         else:
             self._screen.fill((0, 0, 0))
             if narration_debug and narration_debug.get("waiting_id"):
                 self._draw_wait_for_cg_placeholder(narration_debug.get("waiting_id"))
+
+        # OI flash overlay — fade in then fade out using a sine curve
+        if now < self._flash_until:
+            duration = self._flash_until - self._flash_start
+            progress = (now - self._flash_start) / duration if duration > 0 else 1.0
+            import math as _math
+            alpha = int(self._flash_alpha * _math.sin(progress * _math.pi))
+            alpha = max(0, min(255, alpha))
+            sw, sh = self._screen.get_size()
+            overlay = pygame.Surface((sw, sh), pygame.SRCALPHA)
+            overlay.fill((*self._flash_color, alpha))
+            self._screen.blit(overlay, (0, 0))
 
         if landmark_data:
             self._draw_index_cursors(landmark_data, handedness_data)
@@ -206,18 +258,66 @@ class RenderEngine:
         self._freeze_on_page_target = None
         self._page_to_frame_index = {}
         self._last_frame_time = time.monotonic()
+        self._playback_start_time = time.monotonic()
+        audio_file = getattr(shot, "audio_file", None)
+        self._pending_audio = str(audio_file) if audio_file else None
 
         frames_dir = getattr(shot, "frames_dir", None)
         if frames_dir is None or getattr(shot, "assets_pending", True):
             return
 
-        from pathlib import Path
-        d = Path(frames_dir)
-        image_exts = {".png", ".jpg", ".jpeg"}
-        paths = sorted(str(p) for p in d.iterdir() if p.suffix.lower() in image_exts)
-        self._pending_load_paths = paths
-        self._pending_load_fps = self._fps
-        print(f"[RenderEngine] shot_load: queued {len(paths)} frames at {self._fps} fps")
+        self._current_frames_dir = Path(frames_dir)
+
+        self._active_preloader  = None
+        self._oi_frame_start    = None
+        self._oi_frame_end      = None
+        self._oi_window_open    = False
+        initial_batch = self.config.get("initial_frame_batch", 90)
+
+        # If the next-shot preloader already loaded this shot, claim immediately
+        if self._next_preloader.is_ready(self._current_frames_dir):
+            self._claim_and_start(self._next_preloader)
+            return
+
+        # Otherwise kick off loading now (first shot, or cache miss)
+        self._current_preloader.start(self._current_frames_dir, self._get_resolution(),
+                                      initial_batch=initial_batch)
+
+    def _on_prefetch_shot(self, data: dict):
+        """Start preloading a future shot in the background."""
+        shot = data.get("shot")
+        if shot is None:
+            return
+        frames_dir = getattr(shot, "frames_dir", None)
+        if frames_dir is None or getattr(shot, "assets_pending", True):
+            return
+        fd = Path(frames_dir)
+        if fd != self._current_frames_dir:
+            initial_batch = self.config.get("initial_frame_batch", 90)
+            self._next_preloader.start(fd, self._get_resolution(), initial_batch=initial_batch)
+
+    def _claim_and_start(self, preloader: "FramePreloader") -> None:
+        """Claim initial batch from preloader, start audio, anchor the clock. Main thread only."""
+        surfaces = preloader.claim(self._current_frames_dir)
+        if not surfaces:
+            return
+        self._frames = surfaces
+        self._active_preloader = preloader
+        self._playback_start_time = time.monotonic()
+        if self._pending_audio:
+            try:
+                sound = pygame.mixer.Sound(self._pending_audio)
+                pygame.mixer.Channel(0).play(sound)
+            except Exception as exc:
+                print(f"[RenderEngine] audio load failed: {exc}")
+            self._pending_audio = None
+        self.event_bus.emit("shot_frames_ready", {})
+        print(f"[RenderEngine] shot ready: {len(self._frames)} frames initial, audio started")
+
+    def _get_resolution(self) -> tuple[int, int]:
+        display_cfg = self.config.get("_profile", {}).get("display", {})
+        w, h = display_cfg.get("resolution") or self.config.get("resolution", [1920, 1080])
+        return (w, h)
 
     def _on_scene_load(self, data: dict):
         metadata = data.get("metadata", {})
@@ -301,6 +401,27 @@ class RenderEngine:
             except Exception as exc:
                 print(f"[RenderEngine] Failed to load frame {path}: {exc}")
         return frames
+
+    def _on_oi_flash(self, data: dict):
+        self._flash_color = data.get("color", (0, 255, 80))
+        duration_ms = data.get("duration_ms", 800)
+        self._flash_start = time.monotonic()
+        self._flash_until = self._flash_start + duration_ms / 1000.0
+
+    def _on_play_sfx(self, data: dict):
+        path = data.get("path")
+        if not path or not os.path.exists(path):
+            return
+        try:
+            sound = pygame.mixer.Sound(path)
+            pygame.mixer.Channel(1).play(sound)
+        except Exception as exc:
+            print(f"[RenderEngine] SFX load failed: {exc}")
+
+    def _on_set_frame_window(self, data: dict):
+        self._oi_frame_start = data.get("start")
+        self._oi_frame_end   = data.get("end")
+        self._oi_window_open = False
 
     def _on_render_event(self, data: dict):
         self._pending_events.append(data.get("name"))

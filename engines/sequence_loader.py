@@ -78,6 +78,7 @@ class Shot:
     # Resolved paths — None until act/shot tree is built
     frames_dir: Optional[Path]  # frames/ dir to load (follows reuse_of to source shot)
     audio_dir: Optional[Path]   # audio/ dir for AL-XX-YYY wav files
+    audio_file: Optional[Path]  # single audio file (shot_NN/audio.mp3 convention)
 
     # Status flags
     assets_pending: bool        # True if frames_dir is None or contains no image files
@@ -148,8 +149,8 @@ def load_sequence(scenes_root: Path, config: dict) -> list[Shot]:
         if raw.get("fallback"):
             fallback.update(raw["fallback"])
 
-        # Segments: None when value is "TODO" or any sub-field is "TODO"
-        raw_segments = raw.get("segments")
+        # Segments: metadata.json ← sequence.json (most specific wins)
+        raw_segments = raw.get("segments") or shot_meta.get("segments")
         if raw_segments in (None, "TODO"):
             segments = None
         elif isinstance(raw_segments, dict) and any(
@@ -159,11 +160,13 @@ def load_sequence(scenes_root: Path, config: dict) -> list[Shot]:
         else:
             segments = raw_segments
 
-        # Interaction: None when value is "TODO"
-        raw_interaction = raw.get("interaction")
+        # Interaction: metadata.json ← sequence.json (most specific wins)
+        raw_interaction = raw.get("interaction") or shot_meta.get("interaction")
         interaction = None if raw_interaction in (None, "TODO") else raw_interaction
 
-        is_interactive = raw.get("kind", "playback") == "interactive"
+        # Kind: metadata.json ← sequence.json
+        kind = raw.get("kind") or shot_meta.get("kind", "playback")
+        is_interactive = kind == "interactive"
         segments_todo   = is_interactive and (segments is None)
         interaction_todo = is_interactive and (interaction is None)
 
@@ -187,6 +190,8 @@ def load_sequence(scenes_root: Path, config: dict) -> list[Shot]:
             frames_dir = _resolve_frames_dir(act_dir, shot_id)
 
         audio_dir = _resolve_audio_dir(act_dir, shot_id)
+        audio_file = _resolve_audio_file(act_dir, shot_id,
+                                         raw.get("audio") or shot_meta.get("audio"))
 
         # assets_pending: frames dir absent or empty
         if frames_dir is None:
@@ -201,7 +206,7 @@ def load_sequence(scenes_root: Path, config: dict) -> list[Shot]:
         shots.append(Shot(
             shot=shot_id,
             act=act_id,
-            kind=raw.get("kind", "playback"),
+            kind=kind,
             audio_lines=raw.get("audio_lines") or [],
             tracker_type=raw.get("tracker_type", ""),
             tracker_notes=raw.get("tracker_notes", ""),
@@ -213,6 +218,7 @@ def load_sequence(scenes_root: Path, config: dict) -> list[Shot]:
             timing_profile=timing_profile,
             frames_dir=frames_dir,
             audio_dir=audio_dir,
+            audio_file=audio_file,
             assets_pending=assets_pending,
             segments_todo=segments_todo,
             interaction_todo=interaction_todo,
@@ -358,3 +364,11 @@ def _resolve_audio_dir(act_dir: Optional[Path], shot_id: str) -> Optional[Path]:
         return None
     d = act_dir / f"shot_{shot_id}" / "audio"
     return d if d.is_dir() else None
+
+
+def _resolve_audio_file(act_dir: Optional[Path], shot_id: str,
+                        filename: Optional[str]) -> Optional[Path]:
+    if act_dir is None or not filename:
+        return None
+    p = act_dir / f"shot_{shot_id}" / filename
+    return p if p.exists() else None

@@ -125,6 +125,7 @@ class VoiceEngine:
         if event_bus:
             event_bus.subscribe("dialogue_cue",   self._on_dialogue_cue)
             event_bus.subscribe("vi_chain_step",  self._on_vi_chain_step)  # shot-driven model
+            event_bus.subscribe("vi_window_open", self._on_vi_window_open)  # frame-gated OI path
             event_bus.subscribe("input_lock",     self._on_input_lock)
 
     # -----------------------------------------------------------------------
@@ -392,6 +393,17 @@ class VoiceEngine:
         }
         self.open_window(vi_config)
         log.info("VI window opened via vi_chain_step: keyword=%r required=%s", keyword, required)
+
+    def _on_vi_window_open(self, data: dict) -> None:
+        """Shot player emits this when a frame-gated OI window opens with a voice_alternative."""
+        vi_config = data.get("vi_config")
+        if not vi_config:
+            return
+        wid = self.open_window(vi_config)
+        log.info("VI window opened via vi_window_open: id=%s keywords=%s",
+                 vi_config.get("id"), vi_config.get("keywords"))
+        print(f"[VoiceEngine] window open: id={vi_config.get('id')!r}  "
+              f"keywords={vi_config.get('keywords')}  wid={wid[:8]}")
 
     def _on_input_lock(self, data: dict) -> None:
         locked: bool = data.get("locked", False)

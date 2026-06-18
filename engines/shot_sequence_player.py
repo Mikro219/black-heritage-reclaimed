@@ -45,6 +45,7 @@ from .sequence_loader import Shot
 # Per-shot states
 # ---------------------------------------------------------------------------
 
+STATE_PRELOADING = "PRELOADING"   # waiting for frame preloader before starting shot
 STATE_PLAY       = "PLAY"         # playback shot: playing frames start-to-end
 STATE_PLAY_INTRO = "PLAY_INTRO"   # interactive: playing intro segment
 STATE_HOLD       = "HOLD"         # interactive: idle_loop; detectors armed
@@ -107,9 +108,11 @@ class ShotSequencePlayer:
         self._segment_duration: float = 0.0   # estimated when entering segment
         self._segment_done:     bool  = False  # set True by Phase 3 segment_playback_done
 
-        event_bus.subscribe("cg_detected", self._on_cg_detected)
-        event_bus.subscribe("oi_detected", self._on_oi_detected)
-        event_bus.subscribe("vi_detected", self._on_vi_detected)
+        event_bus.subscribe("cg_detected",       self._on_cg_detected)
+        event_bus.subscribe("oi_detected",       self._on_oi_detected)
+        event_bus.subscribe("vi_detected",       self._on_vi_detected)
+        event_bus.subscribe("shot_frames_ready", self._on_shot_frames_ready)
+        event_bus.subscribe("frame_window_enter", self._on_frame_window_enter)
         # Phase 3: event_bus.subscribe("segment_playback_done", self._on_segment_playback_done)
 
     # ------------------------------------------------------------------
@@ -138,7 +141,9 @@ class ShotSequencePlayer:
         if shot is None:
             return
 
-        if self._shot_state in (STATE_PLAY, STATE_PLAY_INTRO, STATE_PLAY_RES):
+        if self._shot_state == STATE_PRELOADING:
+            pass  # waiting for shot_frames_ready from render engine
+        elif self._shot_state in (STATE_PLAY, STATE_PLAY_INTRO, STATE_PLAY_RES):
             self._update_play(shot)
         elif self._shot_state == STATE_HOLD:
             self._update_hold(shot)
@@ -191,14 +196,29 @@ class ShotSequencePlayer:
         self._index = index
         shot = self.shots[index]
 
+        # Set PRELOADING before emitting shot_load so _on_shot_frames_ready transitions
+        # correctly when the prefetch was already done (synchronous event chain).
+        if not shot.assets_pending:
+            self._shot_state = STATE_PRELOADING
+
         self.event_bus.emit("shot_load", {"shot": shot, "index": index})
         print(f"[ShotPlayer] >> shot {shot.shot}  kind={shot.kind}  act={shot.act}  "
               f"{'PENDING' if shot.assets_pending else 'frames_ready'}")
 
-        if shot.kind == "playback":
-            self._enter_segment(STATE_PLAY, shot)
+        if shot.assets_pending:
+            # No frames on disk yet — skip straight to playback (placeholder/TODO shot)
+            if shot.kind == "playback":
+                self._enter_segment(STATE_PLAY, shot)
+            else:
+                self._enter_segment(STATE_PLAY_INTRO, shot)
         else:
-            self._enter_segment(STATE_PLAY_INTRO, shot)
+            # STATE_PRELOADING already set above; emit change event and prefetch next
+            self.event_bus.emit("shot_state_change", {
+                "shot_id": shot.shot,
+                "state":   STATE_PRELOADING,
+                "segment": "preloading",
+            })
+            self._prefetch_next(index)
 
     def _enter_segment(self, state: str, shot: Shot) -> None:
         self._shot_state      = state
@@ -216,6 +236,27 @@ class ShotSequencePlayer:
             "state":   state,
             "segment": label_map.get(state, state),
         })
+
+        # Arm OI window for playback shots that declare an OI interaction
+        if state == STATE_PLAY and shot.interaction:
+            tier = shot.interaction.get("tier", "").upper()
+            if tier == "OI":
+                oi_frame_window = shot.interaction.get("oi_frame_window")
+                if oi_frame_window and len(oi_frame_window) == 2:
+                    # Frame-gated: tell the render engine which frame range to watch;
+                    # it emits frame_window_enter when playback reaches that frame.
+                    self.event_bus.emit("set_frame_window", {
+                        "start": oi_frame_window[0],
+                        "end":   oi_frame_window[1],
+                    })
+                else:
+                    # No frame gate — arm immediately for the full segment duration
+                    window_ms = max(int(self._segment_duration * 1000), 5000)
+                    oi = _single_as_oi(shot.shot, shot.interaction)
+                    self.event_bus.emit("oi_window_open", {
+                        "interaction": oi,
+                        "window_ms":   window_ms,
+                    })
 
         # Announce audio lines so Phase 3 can trigger narration
         if state in (STATE_PLAY, STATE_PLAY_INTRO) and shot.audio_lines:
@@ -286,6 +327,7 @@ class ShotSequencePlayer:
             return
 
         self.event_bus.emit("input_lock", {"locked": False})
+        self._prefetch_next(next_index)
         self._enter_shot(next_index)
 
     # ------------------------------------------------------------------
@@ -411,6 +453,26 @@ class ShotSequencePlayer:
     # Event handlers
     # ------------------------------------------------------------------
 
+    def _on_shot_frames_ready(self, data: dict) -> None:
+        """Render engine finished preloading — start playback now."""
+        if self._shot_state != STATE_PRELOADING:
+            return
+        shot = self.current_shot
+        if shot is None:
+            return
+        if shot.kind == "playback":
+            self._enter_segment(STATE_PLAY, shot)
+        else:
+            self._enter_segment(STATE_PLAY_INTRO, shot)
+
+    def _prefetch_next(self, current_index: int) -> None:
+        """Tell the render engine to start preloading the next shot in background."""
+        next_index = current_index + 1
+        if next_index < len(self.shots):
+            next_shot = self.shots[next_index]
+            if not next_shot.assets_pending:
+                self.event_bus.emit("prefetch_shot", {"shot": next_shot})
+
     def _on_cg_detected(self, data: dict) -> None:
         if self._shot_state != STATE_HOLD:
             return
@@ -440,15 +502,71 @@ class ShotSequencePlayer:
 
     def _on_oi_detected(self, data: dict) -> None:
         shot = self.current_shot
-        if shot:
-            print(f"[ShotPlayer] shot {shot.shot} OI: {data.get('gesture_id')}")
+        if not shot:
+            return
+        print(f"[ShotPlayer] shot {shot.shot} OI: {data.get('gesture_id')}")
+        interaction = shot.interaction or {}
+        sfx = interaction.get("sfx")
+        feedback = interaction.get("feedback")
+        if sfx:
+            sfx_path = _resolve_sfx(shot, sfx)
+            if sfx_path:
+                self.event_bus.emit("play_sfx", {"path": sfx_path})
+            else:
+                print(f"[ShotPlayer] SFX not found: {sfx!r} (checked audio/ subdir and shot root)")
+        if feedback == "green_flash":
+            self.event_bus.emit("oi_flash", {"color": (0, 255, 80), "duration_ms": 800})
 
     def _on_vi_detected(self, data: dict) -> None:
-        # Phase 3: if a VI chain step is armed and voice_id matches, advance the chain
         shot = self.current_shot
-        if shot:
-            print(f"[ShotPlayer] shot {shot.shot} VI: {data.get('voice_id')} "
-                  f"[not acted on until Phase 3]")
+        if not shot:
+            return
+        voice_id = data.get("voice_id", "")
+        print(f"[ShotPlayer] shot {shot.shot} VI detected: {voice_id!r}  tier={data.get('tier')}")
+
+        # For OI playback shots with a voice_alternative, treat VI exactly like OI detected
+        if self._shot_state == STATE_PLAY and shot.interaction:
+            tier = shot.interaction.get("tier", "").upper()
+            voice_alt = shot.interaction.get("voice_alternative", {})
+            if tier == "OI" and voice_id == voice_alt.get("id"):
+                sfx = shot.interaction.get("sfx")
+                feedback = shot.interaction.get("feedback")
+                if sfx:
+                    sfx_path = _resolve_sfx(shot, sfx)
+                    if sfx_path:
+                        self.event_bus.emit("play_sfx", {"path": sfx_path})
+                if feedback == "green_flash":
+                    self.event_bus.emit("oi_flash", {"color": (0, 255, 80), "duration_ms": 800})
+                return
+
+        # Phase 3: CG chain voice steps
+        print(f"[ShotPlayer] shot {shot.shot} VI {voice_id!r} not acted on in current state "
+              f"({self._shot_state})")
+
+    def _on_frame_window_enter(self, data: dict) -> None:
+        """Render engine crossed the oi_frame_window start — arm gesture OI and voice window."""
+        shot = self.current_shot
+        if not shot or not shot.interaction:
+            return
+        oi_frame_window = shot.interaction.get("oi_frame_window", [])
+        if len(oi_frame_window) == 2:
+            frame_count = oi_frame_window[1] - oi_frame_window[0]
+            window_ms = max(int(frame_count / max(1, shot.fps) * 1000), 2000)
+        else:
+            window_ms = 5000
+        oi = _single_as_oi(shot.shot, shot.interaction)
+        print(f"[ShotPlayer] shot {shot.shot} frame_window_enter -> arming OI {oi['id']} "
+              f"for {window_ms}ms")
+        self.event_bus.emit("oi_window_open", {"interaction": oi, "window_ms": window_ms})
+
+        # Also open a voice window if the interaction declares a voice_alternative
+        voice_alt = shot.interaction.get("voice_alternative")
+        if voice_alt:
+            vi_config = dict(voice_alt)
+            vi_config.setdefault("window_ms", window_ms)
+            print(f"[ShotPlayer] shot {shot.shot} frame_window_enter -> arming VI "
+                  f"{vi_config.get('id')!r} keywords={vi_config.get('keywords')}")
+            self.event_bus.emit("vi_window_open", {"vi_config": vi_config})
 
 
 # ---------------------------------------------------------------------------
@@ -554,6 +672,23 @@ def _estimate_duration(shot: Shot, state: str) -> float:
     except OSError:
         return 0.0
     return num_frames / max(1, shot.fps)
+
+
+def _resolve_sfx(shot: Shot, filename: str) -> Optional[str]:
+    """
+    Resolve an SFX filename to an absolute path.
+    Checks audio/ subdirectory first, then the shot root directory.
+    """
+    from pathlib import Path
+    if shot.audio_dir:
+        p = Path(shot.audio_dir) / filename
+        if p.exists():
+            return str(p)
+    if shot.frames_dir:
+        p = Path(shot.frames_dir).parent / filename
+        if p.exists():
+            return str(p)
+    return None
 
 
 def _effective_timing(shot: Shot, config: dict) -> dict:

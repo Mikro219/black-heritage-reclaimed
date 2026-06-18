@@ -35,11 +35,24 @@ def detect(landmarks, params: dict, context: dict) -> bool:
 
     threshold = params.get("proximity_threshold", 0.12)
     hold_ms = params.get("hold_ms", 400)
-    mouth_x = params.get("mouth_x", _MOUTH_X)
-    mouth_y = params.get("mouth_y", _MOUTH_Y)
     require_curl = params.get("require_curl", False)
 
+    # Use live pose mouth landmarks (9=left, 10=right) when available;
+    # fall back to hardcoded defaults or explicit param overrides.
+    # Use live pose mouth landmarks (9=left, 10=right) when available.
+    # Both hand and pose landmarks are raw MediaPipe coordinates (same space),
+    # so no mirroring needed here — the flip only applies in the render engine.
+    pose_lm = context.get("_pose_lm")
+    if pose_lm is not None:
+        mouth_x = (pose_lm[9].x + pose_lm[10].x) / 2
+        mouth_y = (pose_lm[9].y + pose_lm[10].y) / 2
+    else:
+        mouth_x = params.get("mouth_x", _MOUTH_X)
+        mouth_y = params.get("mouth_y", _MOUTH_Y)
+
     near = False
+    best_dist = 9.0
+    best_fail = ""
     for hand in landmarks:
         lm = hand.landmark
         wrist = lm[0]
@@ -53,13 +66,26 @@ def detect(landmarks, params: dict, context: dict) -> bool:
         for tip_idx in (8, 4):  # index tip, thumb tip
             tip = lm[tip_idx]
             dist = math.hypot(tip.x - mouth_x, tip.y - mouth_y)
-            if dist <= threshold:
-                # Tipping check: wrist above tip (wrist.y < tip.y)
-                if wrist.y < tip.y:
-                    near = True
-                    break
+            if dist < best_dist:
+                best_dist = dist
+                if dist <= threshold:
+                    if wrist.y < tip.y:
+                        near = True
+                        best_fail = "ok"
+                    else:
+                        best_fail = f"wrist not above tip (wrist.y={wrist.y:.2f} tip.y={tip.y:.2f})"
+                else:
+                    best_fail = f"too far (dist={dist:.3f} > threshold={threshold})"
         if near:
             break
+
+    # Debug: print once per second when a hand is reasonably close
+    _last_print = context.get("_debug_print_t", 0.0)
+    now_debug = time.monotonic()
+    if best_dist < threshold * 3 and now_debug - _last_print > 1.0:
+        context["_debug_print_t"] = now_debug
+        print(f"[mouth_proximity_tip] dist={best_dist:.3f}  mouth=({mouth_x:.2f},{mouth_y:.2f})  "
+              f"threshold={threshold}  status={best_fail or 'no hand close enough'}")
 
     now = time.monotonic()
     if near:
