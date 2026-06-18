@@ -20,6 +20,21 @@ SCENES = Path("scenes")
 # (act_folder, shot_id, global_start_frame, global_end_frame)  -- both inclusive
 
 SHOT_FRAMES = [
+    # Act 00 — Prologue
+    ("act_00_prologue",     "01",  1,     5170),
+
+    # Act 01 — The Quilt Awakens
+    ("act_01_quilt_awakens","02",  5171,  6018),
+    ("act_01_quilt_awakens","03",  6019,  6403),
+    ("act_01_quilt_awakens","04",  6404,  7052),
+    ("act_01_quilt_awakens","05",  7053,  7856),
+
+    # Act 02 — Crossroads
+    ("act_02_crossroads",   "06",  7857,  8156),
+    ("act_02_crossroads",   "07",  8157,  8574),
+    ("act_02_crossroads",   "08",  8575,  9148),
+    ("act_02_crossroads",   "09",  9149, 10770),
+
     # Act 03 — Flying Geese
     ("act_03_flying_geese", "10", 10771, 11038),
     ("act_03_flying_geese", "11", 11039, 11494),
