@@ -25,7 +25,7 @@ from typing import Optional
 from PIL import Image
 
 _IMAGE_EXTS = {".png", ".jpg", ".jpeg"}
-_FLUSH_CHUNK = 30   # frames buffered on the worker before publishing to the cache
+_FLUSH_CHUNK = 200  # frames decoded per batch before publishing to the cache
 
 
 class FrameCacheManager:
@@ -144,16 +144,6 @@ class FrameCacheManager:
 
         buf: list = []
         for i in range(existing, len(paths)):
-            with self._lock:
-                if self._stop:
-                    return
-                pri = self._priority
-            # A newly-current shot preempts this one; flush partial and yield.
-            if pri is not None and pri != frames_dir and pri not in self._complete:
-                if buf:
-                    with self._lock:
-                        self._raw.setdefault(frames_dir, []).extend(buf)
-                return
             try:
                 img = Image.open(paths[i]).convert("RGB").resize((w, h))
                 buf.append((img.tobytes(), (w, h)))
@@ -162,8 +152,14 @@ class FrameCacheManager:
                 continue
             if len(buf) >= _FLUSH_CHUNK:
                 with self._lock:
+                    if self._stop:
+                        return
+                    pri = self._priority
                     self._raw.setdefault(frames_dir, []).extend(buf)
                 buf = []
+                # A newly-current shot preempts this one; flush partial and yield.
+                if pri is not None and pri != frames_dir and pri not in self._complete:
+                    return
 
         if buf:
             with self._lock:

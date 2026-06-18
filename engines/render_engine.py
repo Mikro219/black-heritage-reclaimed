@@ -26,6 +26,8 @@ from typing import Optional
 
 from .frame_cache import FrameCacheManager
 
+PLAY_THRESHOLD = 600  # raw frames buffered before playback starts (drip mode kicks in after)
+
 
 class RenderEngine:
     def __init__(self, config: dict, event_bus: "EventBus"):
@@ -54,6 +56,7 @@ class RenderEngine:
         self._loading_frames: list = []            # Surfaces built for the incoming shot
         self._raw_cursor: int = 0                  # raw frames converted so far
         self._convert_chunk = config.get("frame_convert_chunk", 120)  # surfaces/ tick during swap
+        self._drip_active: bool = False            # True after early-start swap; drip-feeds remaining frames
 
         # OI flash overlay
         self._flash_color: tuple = (0, 255, 80)
@@ -125,7 +128,7 @@ class RenderEngine:
         #    decoded. Conversion is chunked so the swap doesn't hitch the loop.
         self._service_loading()
 
-        playing = self._frames and self._loading_dir is None
+        playing = bool(self._frames) and (self._loading_dir is None or self._drip_active)
 
         if playing:
             if self._freeze_active and self._freeze_frame_index is not None:
@@ -307,34 +310,73 @@ class RenderEngine:
         self._cache.start(dirs)
 
     def _service_loading(self) -> None:
-        """Convert the incoming shot's cached raw frames to Surfaces, swap when full.
+        """Convert the incoming shot's cached raw frames to Surfaces, with early-start drip.
 
-        Conversion only starts once the cache reports the shot fully decoded, and is
-        chunked across ticks so the swap never stalls the render loop. The shot does
-        not begin playing (and its audio does not start) until every frame is ready.
+        Once PLAY_THRESHOLD raw frames are buffered by the cache worker, conversion
+        begins immediately. As soon as PLAY_THRESHOLD surfaces are ready, playback
+        starts (audio fires, shot_frames_ready emits) even if the rest of the shot
+        hasn't decoded yet. Remaining frames are drip-fed into the live _frames list
+        while the shot plays — _frames and _loading_frames are the same list object
+        during drip mode, so appends are visible to the render loop instantly.
+
+        For shots shorter than PLAY_THRESHOLD the old behaviour is preserved: wait
+        for is_complete, then convert all and swap.
         """
         if self._loading_dir is None or self._cache is None:
             return
-        if not self._cache.is_complete(self._loading_dir):
-            return   # still decoding on the worker — keep holding the previous frame
 
-        total = self._cache.loaded_count(self._loading_dir)
-        end = min(total, self._raw_cursor + self._convert_chunk)
-        for data, size in self._cache.get_raw_slice(
-                self._loading_dir, self._raw_cursor, end - self._raw_cursor):
-            self._loading_frames.append(pygame.image.fromstring(data, size, "RGB"))
-        self._raw_cursor = end
+        total     = self._cache.total_count(self._loading_dir) or 0
+        available = self._cache.loaded_count(self._loading_dir)
 
-        if self._raw_cursor >= total and total > 0:
-            # Fully converted — swap in and start playback + audio together.
-            self._frames = self._loading_frames
-            self._loading_frames = []
-            self._loading_dir = None
-            self._frame_index = 0
+        # Gate: wait until enough raw frames are buffered.
+        if total > 0 and total <= PLAY_THRESHOLD:
+            # Short shot — wait for full decode before converting.
+            if not self._cache.is_complete(self._loading_dir):
+                return
+        elif available < PLAY_THRESHOLD:
+            return  # not enough buffered yet for early start
+
+        # Convert a chunk of raw frames to Surfaces.
+        end = min(available, self._raw_cursor + self._convert_chunk)
+        if end > self._raw_cursor:
+            for data, size in self._cache.get_raw_slice(
+                    self._loading_dir, self._raw_cursor, end - self._raw_cursor):
+                surf = pygame.image.fromstring(data, size, "RGB")
+                if self._drip_active:
+                    self._frames.append(surf)       # live list — render loop sees it immediately
+                else:
+                    self._loading_frames.append(surf)
+            self._raw_cursor = end
+
+        # Early-start swap: enough Surfaces converted to begin playing.
+        swap_threshold = min(PLAY_THRESHOLD, total) if total > 0 else PLAY_THRESHOLD
+        if not self._drip_active and len(self._loading_frames) >= swap_threshold:
+            self._frames              = self._loading_frames   # same list object — drip appends work
+            self._frame_index         = 0
             self._playback_start_time = time.monotonic()
             self._begin_audio()
             self.event_bus.emit("shot_frames_ready", {})
-            print(f"[RenderEngine] shot ready: {len(self._frames)} frames (fully preloaded)")
+            self._drip_active = True
+            print(f"[RenderEngine] early start: {len(self._frames)} frames buffered, "
+                  f"{total - self._raw_cursor} remaining")
+
+        # Fully converted: tear down loading state.
+        is_done = (self._cache.is_complete(self._loading_dir) and
+                   self._raw_cursor >= self._cache.loaded_count(self._loading_dir))
+        if is_done:
+            if not self._drip_active:
+                # Short shot — swap in now (waited for full load above).
+                self._frames              = self._loading_frames
+                self._frame_index         = 0
+                self._playback_start_time = time.monotonic()
+                self._begin_audio()
+                self.event_bus.emit("shot_frames_ready", {})
+                print(f"[RenderEngine] shot ready: {len(self._frames)} frames")
+            else:
+                print(f"[RenderEngine] drip complete: {len(self._frames)} frames total")
+            self._loading_frames = []
+            self._loading_dir    = None
+            self._drip_active    = False
 
     def _begin_audio(self) -> None:
         if self._pending_audio:
@@ -374,6 +416,7 @@ class RenderEngine:
         # Reset incoming-shot conversion state.
         self._loading_frames = []
         self._raw_cursor     = 0
+        self._drip_active    = False
 
         frames_dir = getattr(shot, "frames_dir", None)
         if frames_dir is None or getattr(shot, "assets_pending", True):
