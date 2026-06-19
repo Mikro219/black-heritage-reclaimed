@@ -92,8 +92,9 @@ class RenderEngine:
         self._frame_index = 0
         self._fps = 24
         self._last_frame_time = 0.0
-        profile_perf = config.get("_profile", {}).get("performance", {})
-        self._debug = profile_perf.get("debug_overlay", config.get("debug_overlay", False))
+        # Debug overlay starts OFF regardless of profile/config; toggle it at
+        # runtime with the D key (render.toggle_debug()).
+        self._debug = False
         self._pending_events: list = []
         self._landmark_data = None
         self._font: Optional[pygame.font.Font] = None
@@ -189,6 +190,12 @@ class RenderEngine:
         flags = pygame.FULLSCREEN if self._fullscreen else 0
         self._screen = pygame.display.set_mode(self._display_size, flags)
         print(f"[RenderEngine] fullscreen={'on' if self._fullscreen else 'off'}")
+
+    def toggle_debug(self) -> None:
+        """Show/hide the debug overlay (HANDS/POSE/CG/OI/SHOT panels, OI target flag,
+        scene panel). Does not affect playback."""
+        self._debug = not self._debug
+        print(f"[RenderEngine] debug_overlay={'on' if self._debug else 'off'}")
 
     # ------------------------------------------------------------------
     # Pause / resume
