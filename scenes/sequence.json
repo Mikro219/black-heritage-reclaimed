@@ -358,11 +358,11 @@
     {
       "shot": "45",
       "act": "08",
-      "kind": "playback",
-      "reuse_of": "46",
+      "kind": "interactive",
+      "reuse_of": null,
       "audio_lines": [],
       "tracker_type": "TITLE CARD, REUSE",
-      "tracker_notes": ""
+      "tracker_notes": "interactive disguise: hands-to-head + cross-arms (play-through OI)"
     },
     {
       "shot": "46",

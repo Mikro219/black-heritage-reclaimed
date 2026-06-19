@@ -1,0 +1,41 @@
+{
+    "shot": "45",
+    "kind": "interactive",
+    "assigned_to": "TBD",
+    "audio_lines": [],
+    "audio": "audio.mp3",
+    "_note": "Bow Tie disguise: two sequential gesture windows (shot 24 play-through OI pattern). intro plays, then oi_hat/mid/oi_coat/outro play straight through. oi_hat arms touch_head (both hands to crown, AL-08-005); oi_coat arms arms_crossed (AL-08-006). Each plays a reaction sfx + green flash on detection; the hat/coat-appearing animation is baked into the frames and plays regardless (non-blocking). Flip a state to loop:true to make it pause/block on the gesture. Shot base global frame = 30060; INT hands-on-head 30708-30880, INT cross-arms 31156-31330. hat.mp3/coat.mp3 are placeholders.",
+    "segments": {
+        "intro":   [1,    648],
+        "oi_hat":  [649,  821],
+        "mid":     [822,  1096],
+        "oi_coat": [1097, 1271],
+        "outro":   [1272, 2070]
+    },
+    "interaction": {
+        "tier": "OI",
+        "interaction_fsm": {
+            "initial": "oi_hat",
+            "states": {
+                "oi_hat":  { "segment": "oi_hat",  "loop": false,
+                             "oi": { "id": "hands_to_head", "type": "touch_head",
+                                     "params": { "hands_required": 2, "hold_ms": 400, "target": "crown", "use_pose": true, "radius_scale": 1.4 },
+                                     "sfx": "detect.mp3", "feedback": "green_flash" } },
+                "mid":     { "segment": "mid",     "loop": false },
+                "oi_coat": { "segment": "oi_coat", "loop": false,
+                             "oi": { "id": "arms_crossed", "type": "arms_crossed",
+                                     "params": { "hold_ms": 400, "dead_zone_frac": 0.05 },
+                                     "sfx": "detect.mp3", "feedback": "green_flash" } },
+                "outro":   { "segment": "outro",   "loop": false }
+            },
+            "transitions": [
+                { "from": "oi_hat",  "on": "segment_end", "to": "mid"         },
+                { "from": "mid",     "on": "segment_end", "to": "oi_coat"     },
+                { "from": "oi_coat", "on": "segment_end", "to": "outro"       },
+                { "from": "outro",   "on": "segment_end", "to": "__advance__" }
+            ],
+            "fallback": { "timeout_s": 30, "on_timeout": "auto_advance" }
+        }
+    },
+    "fallback": { "timeout_s": 300, "reprompt_s": [], "on_timeout": "auto_advance" }
+}

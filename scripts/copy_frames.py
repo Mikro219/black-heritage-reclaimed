@@ -71,6 +71,11 @@ SHOT_FRAMES = [
     ("act_07_bear_paw", "36", 27456, 28055),   # survey OI window global 27750-27914 -> local 295-459
     ("act_07_bear_paw", "37", 28056, 28844),   # fork FSM: intro 1-203, wrong 521-673, correct 674-789
     ("act_07_bear_paw", "38", 28844, 29258),
+
+    # Act 08 — Bow Tie / Hourglass  (shots 39-42 skipped on purpose)
+    ("act_08_bowtie_hourglass", "43", 29258, 29525),
+    ("act_08_bowtie_hourglass", "44", 29526, 30059),
+    ("act_08_bowtie_hourglass", "45", 30060, 32129),   # hat OI 649-821, coat OI 1097-1271
 ]
 
 # ──────────────────────────────────────────────────────────────────────────────
