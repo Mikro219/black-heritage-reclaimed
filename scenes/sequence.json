@@ -156,33 +156,17 @@
       "shot": "20",
       "act": "04",
       "kind": "interactive",
-      "reuse_of": "18",
-      "audio_lines": [],
-      "tracker_type": "CLOSE UP, ZOOM IN, REUSE",
-      "tracker_notes": "interactive + reuse bg stars - north star appears later half",
-      "segments": {
-        "intro": "TODO",
-        "idle_loop": "TODO",
-        "resolution": "TODO"
-      },
-      "interaction": "TODO",
-      "fallback": {
-        "timeout_s": 30,
-        "reprompt_s": [
-          8,
-          16
-        ],
-        "on_timeout": "auto_advance"
-      }
+      "reuse_of": null,
+      "audio": "audio.mp3",
+      "audio_lines": ["AL-04-007"]
     },
     {
       "shot": "21",
       "act": "04",
       "kind": "playback",
       "reuse_of": null,
-      "audio_lines": [],
-      "tracker_type": "REUSE",
-      "tracker_notes": "no light variation/fade to black"
+      "audio": "audio.mp3",
+      "audio_lines": []
     },
     {
       "shot": "22",

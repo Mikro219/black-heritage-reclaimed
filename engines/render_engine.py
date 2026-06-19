@@ -553,9 +553,12 @@ class RenderEngine:
         path = data.get("path")
         if not path or not os.path.exists(path):
             return
+        # channel 1: stroke / on_enter_sfx (can be long — carries tail audio).
+        # channel 2: OI reaction sfx (detect.mp3) — overlays without cutting ch.1.
+        channel = data.get("channel", 1)
         try:
             sound = pygame.mixer.Sound(path)
-            pygame.mixer.Channel(1).play(sound)
+            pygame.mixer.Channel(channel).play(sound)
         except Exception as exc:
             print(f"[RenderEngine] SFX load failed: {exc}")
 

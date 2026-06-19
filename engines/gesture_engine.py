@@ -68,6 +68,7 @@ class GestureEngine:
         self._active_oi: Optional[dict] = None
         self._active_oi_context: dict = {}
         self._oi_open_time: Optional[float] = None
+        self._active_oi_window_ms: float = config.get("timing_defaults", {}).get("oi_window_ms", 6000)
         self._cooldown_until: float = 0.0
         self._last_landmarks = None
         self._last_handedness = None
@@ -183,7 +184,7 @@ class GestureEngine:
                 self._active_cg_context = {}
                 self._emit_cg(gesture_id, choice)
 
-        oi_window_ms = self.config["timing_defaults"].get("oi_window_ms", 6000)
+        oi_window_ms = self._active_oi_window_ms
         if self._active_oi and self._oi_open_time:
             elapsed = (now - self._oi_open_time) * 1000
             if elapsed <= oi_window_ms:
@@ -208,9 +209,14 @@ class GestureEngine:
         self._active_oi = data.get("interaction")
         self._active_oi_context = {}
         self._oi_open_time = time.monotonic()
+        # Honor a per-window duration (FSM OI states pass their own); fall back to
+        # the global default so existing single-OI shots are unchanged.
+        self._active_oi_window_ms = data.get(
+            "window_ms", self.config["timing_defaults"].get("oi_window_ms", 6000)
+        )
         oi = self._active_oi or {}
         print(f"[GestureEngine] OI window open: id={oi.get('id')!r}  type={oi.get('type')!r}  "
-              f"in_registry={oi.get('type') in REGISTRY}")
+              f"window_ms={self._active_oi_window_ms}  in_registry={oi.get('type') in REGISTRY}")
 
     def _on_input_lock(self, data: dict):
         self._input_locked = data.get("locked", False)

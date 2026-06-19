@@ -109,6 +109,7 @@ class ShotSequencePlayer:
         self._segment_done:     bool  = False  # set True by Phase 3 segment_playback_done
 
         self._fsm: Optional["ShotFSM"] = None
+        self._fsm_state_deadline: Optional[float] = None  # OI-window auto-advance time
 
         event_bus.subscribe("cg_detected",          self._on_cg_detected)
         event_bus.subscribe("oi_detected",           self._on_oi_detected)
@@ -278,6 +279,7 @@ class ShotSequencePlayer:
         self._segment_done    = False
         self._segment_duration = 0.0
         self._fsm             = None
+        self._fsm_state_deadline = None
 
         self.event_bus.emit("shot_state_change", {
             "shot_id": shot.shot,
@@ -373,7 +375,17 @@ class ShotSequencePlayer:
 
     def _update_hold(self, shot: Shot) -> None:
         """Drive HOLD reprompts, OI expiry, and final timeout."""
-        elapsed = time.monotonic() - self._hold_start
+        now = time.monotonic()
+
+        # FSM OI state: auto-advance ("oi_done") when the optional window elapses.
+        if self._fsm and self._fsm_state_deadline is not None:
+            if now >= self._fsm_state_deadline:
+                print(f"[ShotPlayer] shot {shot.shot} FSM OI window elapsed -> oi_done")
+                self._fsm_state_deadline = None
+                self._fsm_fire("oi_done")
+            return
+
+        elapsed = now - self._hold_start
         timing  = _effective_timing(shot, self.config)
 
         # OI-only HOLD: advance when the OI window expires
@@ -501,16 +513,25 @@ class ShotSequencePlayer:
         #   "draw"             — directional_draw:  swipe motion in direction
         directions = self._fsm.outgoing_point_directions()
         keyword    = self._fsm.voice_keyword()
+        oi         = self._fsm.state_oi()
         hold_ms    = (shot.interaction or {}).get("hold_ms", 500)
         fsm_spec   = (shot.interaction or {}).get("interaction_fsm", {})
         gesture_type = fsm_spec.get("gesture_type", "point")
 
-        # States with no gesture or voice transitions (transition animations, confirm
-        # segments) lock all input so stale detections can't fire during playback.
-        # States with active transitions unlock so the player can interact.
-        accepts_input = bool(directions or keyword)
+        # Per-state OI auto-advance deadline is (re)armed only for OI states below.
+        self._fsm_state_deadline = None
+
+        # States with no gesture, voice, or OI interaction (transition animations,
+        # confirm segments) lock all input so stale detections can't fire during
+        # playback. States with active interactions unlock so the player can interact.
+        accepts_input = bool(directions or keyword or oi)
         self.event_bus.emit("input_lock", {"locked": not accepts_input})
         print(f"[ShotPlayer] FSM input_lock={not accepts_input}  state={state_id}  gesture_type={gesture_type}")
+
+        # Disarm any gesture OI window left armed by a previous state, unless this
+        # state is itself a gesture-OI state (it re-arms one below).
+        if not (oi and not oi.get("keywords")):
+            self.event_bus.emit("oi_window_open", {"interaction": None})
 
         if directions and gesture_type == "draw":
             # directional_draw: one direction per state, motion-based swipe.
@@ -543,6 +564,55 @@ class ShotSequencePlayer:
                     "tier":   "cg",
                 }
             })
+        elif oi:
+            # OI state: open an optional, non-blocking window. A reaction fires if
+            # performed (sfx/flash); detection never blocks. A "keywords" list makes
+            # it a voice OI (VI window); otherwise it's a gesture OI window.
+            #
+            # Two flavours by the state's "loop" flag:
+            #   loop=true  — PAUSING: loops its idle frames, auto-advances on
+            #                "oi_done" after window_ms (see _update_hold).
+            #   loop=false — PLAY-THROUGH: the window spans a playback segment and
+            #                advances on "segment_end" like any other play segment,
+            #                so the tail of a shot keeps playing with no pause.
+            self.event_bus.emit("cg_window_open", {"interaction": None})
+            is_loop = self._fsm.is_loop()
+            seg     = self._fsm.segment_range()
+            if is_loop:
+                window_ms = (self._fsm.state_window_ms()
+                             or self.config["timing_defaults"].get("oi_window_ms", 6000))
+            elif seg:
+                window_ms = int((seg[1] - seg[0] + 1) / max(1, shot.fps) * 1000)
+            else:
+                window_ms = self.config["timing_defaults"].get("oi_window_ms", 6000)
+            oi_id = oi.get("id", f"{shot.shot}_fsm_{state_id}_oi")
+            if oi.get("keywords"):
+                vi_config = {
+                    "id":        oi_id,
+                    "keywords":  oi.get("keywords", []),
+                    "mode":      oi.get("mode", "keyword"),
+                    "tier":      "reaction",
+                    "window_ms": window_ms,
+                }
+                print(f"[ShotPlayer] FSM OI voice window {oi_id} "
+                      f"keywords={vi_config['keywords']} for {window_ms}ms")
+                self.event_bus.emit("vi_window_open", {"vi_config": vi_config})
+            else:
+                oi_interaction = {
+                    "id":     oi_id,
+                    "type":   oi.get("type"),
+                    "params": oi.get("params", {}),
+                    "tier":   "oi",
+                }
+                print(f"[ShotPlayer] FSM OI window {oi_id} "
+                      f"type={oi_interaction['type']!r} for {window_ms}ms")
+                self.event_bus.emit("oi_window_open", {
+                    "interaction": oi_interaction,
+                    "window_ms":   window_ms,
+                })
+            # Only pausing (loop) OI states use a hold deadline; play-through OI
+            # states advance on segment_end like any other playback segment.
+            self._fsm_state_deadline = (time.monotonic() + window_ms / 1000.0) if is_loop else None
         else:
             self.event_bus.emit("cg_window_open", {"interaction": None})
 
@@ -652,14 +722,28 @@ class ShotSequencePlayer:
         shot = self.current_shot
         if not shot:
             return
-        print(f"[ShotPlayer] shot {shot.shot} OI: {data.get('gesture_id')}")
+        gesture_id = data.get("gesture_id")
+        print(f"[ShotPlayer] shot {shot.shot} OI: {gesture_id}")
+
+        # FSM OI state: reaction config lives on the current FSM state's "oi" block.
+        # The window keeps running to its deadline (oi_done) unless the metadata
+        # declares an "oi_<id>" transition, in which case we advance early.
+        if self._fsm and self._shot_state == STATE_HOLD and self._fsm.state_oi() is not None:
+            oi = self._fsm.state_oi() or {}
+            self._fire_oi_feedback(shot, oi.get("sfx"), oi.get("feedback"))
+            self._fsm_fire(f"oi_{gesture_id}")
+            return
+
         interaction = shot.interaction or {}
-        sfx = interaction.get("sfx")
-        feedback = interaction.get("feedback")
+        self._fire_oi_feedback(shot, interaction.get("sfx"), interaction.get("feedback"))
+
+    def _fire_oi_feedback(self, shot: Shot, sfx: str | None, feedback: str | None) -> None:
         if sfx:
             sfx_path = _resolve_sfx(shot, sfx)
             if sfx_path:
-                self.event_bus.emit("play_sfx", {"path": sfx_path})
+                # Channel 2 so the reaction overlays and never cuts off the
+                # stroke / on_enter_sfx audio playing on channel 1.
+                self.event_bus.emit("play_sfx", {"path": sfx_path, "channel": 2})
             else:
                 print(f"[ShotPlayer] SFX not found: {sfx!r} (checked audio/ subdir and shot root)")
         if feedback == "green_flash":
@@ -673,8 +757,17 @@ class ShotSequencePlayer:
         print(f"[ShotPlayer] shot {shot.shot} VI detected: {voice_id!r}  tier={data.get('tier')}"
               f"  state={self._shot_state}  fsm_current={self._fsm.current if self._fsm else None}")
 
-        # FSM path: voice_id is used directly as the transition event (e.g. "voice_go")
+        # FSM path
         if self._fsm and self._shot_state == STATE_HOLD:
+            oi = self._fsm.state_oi()
+            if oi is not None and oi.get("keywords"):
+                # OI voice window: fire the reaction; window keeps running to its
+                # deadline (oi_done) unless the metadata declares an "oi_<id>"
+                # transition for early advance.
+                self._fire_oi_feedback(shot, oi.get("sfx"), oi.get("feedback"))
+                self._fsm_fire(f"oi_{voice_id}")
+                return
+            # Otherwise voice_id is the transition event directly (e.g. "voice_go").
             self._fsm_fire(voice_id)
             return
 
@@ -784,6 +877,14 @@ class ShotFSM:
 
     def is_loop(self) -> bool:
         return self.states.get(self.current, {}).get("loop", False)
+
+    def state_oi(self) -> Optional[dict]:
+        """The current state's OI interaction block, if it is an OI window state."""
+        return self.states.get(self.current, {}).get("oi")
+
+    def state_window_ms(self) -> Optional[int]:
+        """The current state's OI window duration in ms, if declared."""
+        return self.states.get(self.current, {}).get("window_ms")
 
     def on_enter_sfx(self) -> Optional[str]:
         return self.states.get(self.current, {}).get("on_enter_sfx")

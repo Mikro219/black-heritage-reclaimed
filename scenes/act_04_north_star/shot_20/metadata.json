@@ -1,0 +1,66 @@
+{
+    "shot": "20",
+    "kind": "interactive",
+    "assigned_to": "TBD",
+    "audio_lines": ["AL-04-009"],
+    "audio": "audio.mp3",
+    "hold_ms": 500,
+    "_note": "Draws: freeze on idle_N, play_to_(N+1) animation on detect, freeze on next. After stroke_4 the tail plays straight through; oi_1/oi_2 are non-blocking windows that play detect.mp3 on detection. oi_2 region_rect is a placeholder (upper-centre star) — tune with debug_overlay on.",
+    "segments": {
+        "intro":      [1,    110],
+        "idle_1":     [420,  420],
+        "play_to_2":  [425,  455],
+        "idle_2":     [548,  548],
+        "play_to_3":  [549,  579],
+        "idle_3":     [664,  664],
+        "play_to_4":  [665,  695],
+        "idle_4":     [778,  778],
+        "conclusion": [779,  989],
+        "oi_1":       [990,  1162],
+        "mid":        [1163, 1559],
+        "oi_2":       [1560, 1722],
+        "outro":      [1723, 2132]
+    },
+    "interaction": {
+        "tier": "CG",
+        "hold_ms": 500,
+        "interaction_fsm": {
+            "gesture_type": "draw",
+            "initial": "stroke_1",
+            "states": {
+                "stroke_1":   { "segment": "idle_1",     "loop": true,  "directions": ["up_left"]    },
+                "play_to_2":  { "segment": "play_to_2",  "loop": false, "on_enter_sfx": "stroke1.mp3" },
+                "stroke_2":   { "segment": "idle_2",     "loop": true,  "directions": ["down_left"]  },
+                "play_to_3":  { "segment": "play_to_3",  "loop": false, "on_enter_sfx": "stroke2.mp3" },
+                "stroke_3":   { "segment": "idle_3",     "loop": true,  "directions": ["down_right"] },
+                "play_to_4":  { "segment": "play_to_4",  "loop": false, "on_enter_sfx": "stroke3.mp3" },
+                "stroke_4":   { "segment": "idle_4",     "loop": true,  "directions": ["up_right"]   },
+                "conclusion": { "segment": "conclusion", "loop": false, "on_enter_sfx": "stroke4.mp3" },
+                "oi_1":       { "segment": "oi_1",       "loop": false,
+                                "oi": { "id": "follow_the_gourd", "keywords": ["follow the gourd"], "sfx": "detect.mp3", "feedback": "green_flash" } },
+                "mid":        { "segment": "mid",        "loop": false },
+                "oi_2":       { "segment": "oi_2",       "loop": false,
+                                "oi": { "id": "reach_star", "type": "point_target_held",
+                                        "params": { "region_rect": { "x": 0.40, "y": 0.36, "w": 0.20, "h": 0.28 }, "hold_ms": 400 },
+                                        "sfx": "detect.mp3", "feedback": "green_flash" } },
+                "outro":      { "segment": "outro",      "loop": false }
+            },
+            "transitions": [
+                { "from": "stroke_1",   "on": "draw_up_left",    "to": "play_to_2"   },
+                { "from": "play_to_2",  "on": "segment_end",     "to": "stroke_2"    },
+                { "from": "stroke_2",   "on": "draw_down_left",  "to": "play_to_3"   },
+                { "from": "play_to_3",  "on": "segment_end",     "to": "stroke_3"    },
+                { "from": "stroke_3",   "on": "draw_down_right", "to": "play_to_4"   },
+                { "from": "play_to_4",  "on": "segment_end",     "to": "stroke_4"    },
+                { "from": "stroke_4",   "on": "draw_up_right",   "to": "conclusion"  },
+                { "from": "conclusion", "on": "segment_end",     "to": "oi_1"        },
+                { "from": "oi_1",       "on": "segment_end",     "to": "mid"         },
+                { "from": "mid",        "on": "segment_end",     "to": "oi_2"        },
+                { "from": "oi_2",       "on": "segment_end",     "to": "outro"       },
+                { "from": "outro",      "on": "segment_end",     "to": "__advance__" }
+            ],
+            "fallback": { "timeout_s": 30, "on_timeout": "auto_advance" }
+        }
+    },
+    "fallback": { "timeout_s": 300, "reprompt_s": [], "on_timeout": "auto_advance" }
+}
