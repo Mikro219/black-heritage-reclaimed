@@ -1,0 +1,36 @@
+{
+    "shot": "37",
+    "kind": "interactive",
+    "assigned_to": "TBD",
+    "audio_lines": [],
+    "audio": "audio.mp3",
+    "_note": "Bear's Paw fork (AL-07-008 point_fork). Pose region L/R. intro plays then freezes on its last frame (waiting). LEFT = wrong path -> transition animation -> back to the freeze frame to choose again. RIGHT = correct path -> transition animation -> advance to next shot. on_enter_sfx values are placeholders. Shot base global frame = 28056; intro 28056-28258, wrong 28576-28728, correct 28729-28844.",
+    "segments": {
+        "intro":        [1,   203],
+        "idle_loop":    [203, 203],
+        "wrong_path":   [521, 673],
+        "correct_path": [674, 789]
+    },
+    "interaction": {
+        "tier": "CG",
+        "hold_ms": 600,
+        "region_dead_zone_frac": 0.15,
+        "interaction_fsm": {
+            "gesture_type": "region",
+            "initial": "waiting",
+            "states": {
+                "waiting":      { "segment": "idle_loop",    "loop": true,  "directions": ["left", "right"] },
+                "wrong_path":   { "segment": "wrong_path",   "loop": false, "on_enter_sfx": "wrong.mp3"   },
+                "correct_path": { "segment": "correct_path", "loop": false, "on_enter_sfx": "correct.mp3" }
+            },
+            "transitions": [
+                { "from": "waiting",      "on": "point_left",  "to": "wrong_path"    },
+                { "from": "waiting",      "on": "point_right", "to": "correct_path"  },
+                { "from": "wrong_path",   "on": "segment_end", "to": "waiting"       },
+                { "from": "correct_path", "on": "segment_end", "to": "__advance__"   }
+            ],
+            "fallback": { "timeout_s": 60, "on_timeout": "auto_advance" }
+        }
+    },
+    "fallback": { "timeout_s": 60, "reprompt_s": [], "on_timeout": "auto_advance" }
+}

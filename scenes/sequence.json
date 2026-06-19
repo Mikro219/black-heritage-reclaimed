@@ -253,45 +253,39 @@
       "act": "07",
       "kind": "playback",
       "reuse_of": null,
-      "audio_lines": [],
-      "tracker_type": "TITLE CARD",
-      "tracker_notes": ""
+      "audio": "audio.mp3",
+      "audio_lines": []
     },
     {
       "shot": "35",
       "act": "07",
       "kind": "playback",
-      "reuse_of": null,
-      "audio_lines": [],
-      "tracker_type": "PAN, ZOOM OUT",
-      "tracker_notes": ""
+      "audio": "audio.mp3",
+      "audio_lines": []
     },
     {
       "shot": "36",
       "act": "07",
       "kind": "playback",
       "reuse_of": null,
-      "audio_lines": [],
-      "tracker_type": "CLOSE UP",
-      "tracker_notes": ""
+      "audio": "audio.mp3",
+      "audio_lines": []
     },
     {
       "shot": "37",
       "act": "07",
-      "kind": "playback",
+      "kind": "interactive",
       "reuse_of": null,
-      "audio_lines": [],
-      "tracker_type": "TITLE CARD",
-      "tracker_notes": ""
+      "audio": "audio.mp3",
+      "audio_lines": []
     },
     {
       "shot": "38",
       "act": "07",
       "kind": "playback",
-      "reuse_of": "37",
-      "audio_lines": [],
-      "tracker_type": "REUSE",
-      "tracker_notes": ""
+      "reuse_of": null,
+      "audio": "audio.mp3",
+      "audio_lines": []
     },
     {
       "shot": "39",

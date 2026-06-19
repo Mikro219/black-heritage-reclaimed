@@ -1,0 +1,22 @@
+{
+    "shot": "36",
+    "kind": "playback",
+    "assigned_to": "TBD",
+    "audio_lines": [],
+    "audio": "audio.mp3",
+    "_note": "Playback with frame-gated survey OI (Bear's Paw — scan the ground for prints). Survey window: global 27750-27914 -> local [295, 459]. Shot base global frame = 27456.",
+    "interaction": {
+        "tier": "OI",
+        "id": "scan_survey",
+        "type": "survey",
+        "params": {
+            "brow_y": 0.45,
+            "scan_window_ms": 2000,
+            "min_x_delta": 0.06,
+            "hold_ms": 200
+        },
+        "sfx": "detect.mp3",
+        "feedback": "green_flash",
+        "oi_frame_window": [295, 459]
+    }
+}
