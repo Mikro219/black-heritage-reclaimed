@@ -115,6 +115,12 @@ class ShotSequencePlayer:
         # play_if branch gating so path-specific shots skip the unchosen branch.
         self._fork_choices: dict = {}
 
+        # Pause/resume — while paused, update() is not driven and detection events
+        # are ignored; on resume every monotonic timer is shifted forward by the
+        # paused duration so HOLD timeouts and segment timing don't fire late.
+        self._paused: bool = False
+        self._pause_started: float = 0.0
+
         event_bus.subscribe("cg_detected",          self._on_cg_detected)
         event_bus.subscribe("oi_detected",           self._on_oi_detected)
         event_bus.subscribe("vi_detected",           self._on_vi_detected)
@@ -140,8 +146,31 @@ class ShotSequencePlayer:
         self._player_state = PLAYER_RUNNING
         self._enter_shot(max(0, min(start_index, len(self.shots) - 1)))
 
+    def pause(self) -> None:
+        """Freeze the shot clock. Idempotent."""
+        if self._paused:
+            return
+        self._paused = True
+        self._pause_started = time.monotonic()
+
+    def resume(self) -> None:
+        """Resume, shifting every timer forward by the paused duration so the
+        current segment, HOLD reprompts/timeout and OI windows continue cleanly."""
+        if not self._paused:
+            return
+        delta = time.monotonic() - self._pause_started
+        self._segment_start += delta
+        self._hold_start    += delta
+        if self._oi_expiry is not None:
+            self._oi_expiry += delta
+        if self._fsm_state_deadline is not None:
+            self._fsm_state_deadline += delta
+        self._paused = False
+
     def update(self) -> None:
         """Drive the state machine. Call once per main-loop frame."""
+        if self._paused:
+            return
         if self._player_state != PLAYER_RUNNING:
             return
         shot = self.current_shot
@@ -731,6 +760,8 @@ class ShotSequencePlayer:
             self._fsm_fire("segment_end")
 
     def _on_cg_detected(self, data: dict) -> None:
+        if self._paused:
+            return
         print(f"[ShotPlayer][DBG] cg_detected raw={data}  state={self._shot_state}  "
               f"fsm_current={self._fsm.current if self._fsm else None}")
         if self._shot_state != STATE_HOLD:
@@ -775,6 +806,8 @@ class ShotSequencePlayer:
         self._arm_chain_step(shot)
 
     def _on_oi_detected(self, data: dict) -> None:
+        if self._paused:
+            return
         shot = self.current_shot
         if not shot:
             return
@@ -806,6 +839,8 @@ class ShotSequencePlayer:
             self.event_bus.emit("oi_flash", {"color": (0, 255, 80), "duration_ms": 800})
 
     def _on_vi_detected(self, data: dict) -> None:
+        if self._paused:
+            return
         shot = self.current_shot
         if not shot:
             return

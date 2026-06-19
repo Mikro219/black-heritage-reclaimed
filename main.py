@@ -398,6 +398,14 @@ def main():
     render_fps = profile.get("performance", {}).get("render_fps_cap", 30)
     clock = pygame.time.Clock()
 
+    # Boot into the paused state — the experience waits on a PAUSED screen until
+    # an attendant presses Space/P to begin.
+    paused = True
+    player.pause()
+    render.pause()
+    pygame.mixer.pause()
+    print("[main] started PAUSED — press Space to begin")
+
     while True:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -406,12 +414,27 @@ def main():
             if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
                 _shutdown(cap, gesture, voice)
                 return
-            if event.type == pygame.KEYDOWN and event.key == pygame.K_RIGHT:
+            if event.type == pygame.KEYDOWN and event.key in (pygame.K_SPACE, pygame.K_p):
+                # Toggle pause/play. Freezes frames, audio, the shot clock and
+                # detection together; resume shifts every timer so nothing fires late.
+                paused = not paused
+                if paused:
+                    player.pause()
+                    render.pause()
+                    pygame.mixer.pause()
+                    print("[main] PAUSED")
+                else:
+                    player.resume()
+                    render.resume()
+                    pygame.mixer.unpause()
+                    print("[main] RESUMED")
+            if event.type == pygame.KEYDOWN and event.key == pygame.K_RIGHT and not paused:
                 player._advance()
 
-        gesture.update()
-        player.update()
-        narration_adapter.update()
+        if not paused:
+            gesture.update()
+            player.update()
+            narration_adapter.update()
 
         render.update(
             landmark_data=gesture._last_landmarks,

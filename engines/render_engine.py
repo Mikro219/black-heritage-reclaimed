@@ -136,6 +136,12 @@ class RenderEngine:
         self._seg_anchor: float = 0.0           # time.monotonic() when segment started
         self._seg_done:   bool = False
 
+        # Pause/resume — freezes frame advance; on resume every monotonic time
+        # anchor is shifted forward by the paused duration so playback, segment
+        # loops and the OI flash all continue exactly where they left off.
+        self._paused:        bool  = False
+        self._pause_started: float = 0.0
+
         self.event_bus.subscribe("shot_load",     self._on_shot_load)
         self.event_bus.subscribe("prefetch_shot", self._on_prefetch_shot)
         self.event_bus.subscribe("oi_flash",          self._on_oi_flash)
@@ -166,12 +172,62 @@ class RenderEngine:
         # Pre-allocate the full-screen OI flash overlay once (reused each flash frame).
         self._flash_overlay = pygame.Surface((w, h), pygame.SRCALPHA)
 
+    # ------------------------------------------------------------------
+    # Pause / resume
+    # ------------------------------------------------------------------
+
+    def pause(self) -> None:
+        """Freeze frame advance. Idempotent."""
+        if self._paused:
+            return
+        self._paused = True
+        self._pause_started = time.monotonic()
+
+    def resume(self) -> None:
+        """Resume playback, shifting every time anchor forward by the paused
+        duration so the current frame, segment loop and flash continue seamlessly."""
+        if not self._paused:
+            return
+        delta = time.monotonic() - self._pause_started
+        self._playback_start_time += delta
+        self._seg_anchor          += delta
+        self._flash_start         += delta
+        self._flash_until         += delta
+        self._last_frame_time     += delta
+        self._paused = False
+
+    def _draw_paused_overlay(self) -> None:
+        """Re-blit the held frame and a dimmed PAUSED banner over it."""
+        if self._frames and 0 <= self._frame_index < len(self._frames):
+            self._screen.blit(self._frames[self._frame_index], (0, 0))
+        else:
+            self._screen.fill((0, 0, 0))
+
+        sw, sh = self._screen.get_size()
+        veil = pygame.Surface((sw, sh), pygame.SRCALPHA)
+        veil.fill((0, 0, 0, 120))
+        self._screen.blit(veil, (0, 0))
+
+        if self._font:
+            title = self._font.render("|| PAUSED", True, (255, 255, 255))
+            self._screen.blit(title, ((sw - title.get_width()) // 2, sh // 2 - 24))
+        if self._small_font:
+            hint = self._small_font.render("Press Space to resume", True, (200, 200, 200))
+            self._screen.blit(hint, ((sw - hint.get_width()) // 2, sh // 2 + 16))
+
     def update(self, landmark_data=None, handedness_data=None,
                pose_data=None,
                gesture_debug: dict | None = None,
                scene_debug: dict | None = None, voice_debug: dict | None = None,
                narration_debug: dict | None = None):
         if not self._screen:
+            return
+
+        # While paused, hold the current frame and overlay a PAUSED banner.
+        # No time-based frame advance, no events emitted.
+        if self._paused:
+            self._draw_paused_overlay()
+            pygame.display.flip()
             return
 
         self._landmark_data = landmark_data
