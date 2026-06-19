@@ -1,0 +1,36 @@
+{
+    "shot": "50",
+    "kind": "interactive",
+    "assigned_to": "TBD",
+    "audio_lines": [],
+    "audio": "audio.mp3",
+    "_note": "Wagon Wheel fork (AL-09-005 choose_path). Pose region L/R. intro plays then freezes on its last frame (waiting). LEFT = Path A (hidden compartment) -> path animation -> advance to next shot. RIGHT = Path B (alongside wagon) -> path animation -> advance to next shot. Both branches advance (no loopback). on_enter_sfx values are placeholders. Shot base global frame = 32380; intro 32380-33360, path A 33648-34304, path B 34305-34998.",
+    "segments": {
+        "intro":     [1,    981],
+        "idle_loop": [981,  981],
+        "path_a":    [1269, 1925],
+        "path_b":    [1926, 2619]
+    },
+    "interaction": {
+        "tier": "CG",
+        "hold_ms": 600,
+        "region_dead_zone_frac": 0.15,
+        "interaction_fsm": {
+            "gesture_type": "region",
+            "initial": "waiting",
+            "states": {
+                "waiting": { "segment": "idle_loop", "loop": true,  "directions": ["left", "right"] },
+                "path_a":  { "segment": "path_a",    "loop": false, "on_enter_sfx": "path_a.mp3" },
+                "path_b":  { "segment": "path_b",    "loop": false, "on_enter_sfx": "path_b.mp3" }
+            },
+            "transitions": [
+                { "from": "waiting", "on": "point_left",  "to": "path_a"      },
+                { "from": "waiting", "on": "point_right", "to": "path_b"      },
+                { "from": "path_a",  "on": "segment_end", "to": "__advance__" },
+                { "from": "path_b",  "on": "segment_end", "to": "__advance__" }
+            ],
+            "fallback": { "timeout_s": 60, "on_timeout": "auto_advance" }
+        }
+    },
+    "fallback": { "timeout_s": 60, "reprompt_s": [], "on_timeout": "auto_advance" }
+}

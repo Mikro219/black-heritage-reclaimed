@@ -76,6 +76,10 @@ SHOT_FRAMES = [
     ("act_08_bowtie_hourglass", "43", 29258, 29525),
     ("act_08_bowtie_hourglass", "44", 29526, 30059),
     ("act_08_bowtie_hourglass", "45", 30060, 32129),   # hat OI 649-821, coat OI 1097-1271
+
+    # Act 09 — Wagon Wheel  (shots 46-48 skipped on purpose)
+    ("act_09_wagon_wheel", "49", 32129, 32379),
+    ("act_09_wagon_wheel", "50", 32380, 34998),   # fork FSM: intro 1-981, path A (L) 1269-1925, path B (R) 1926-2619
 ]
 
 # ──────────────────────────────────────────────────────────────────────────────

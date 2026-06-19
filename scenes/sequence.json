@@ -288,56 +288,6 @@
       "audio_lines": []
     },
     {
-      "shot": "39",
-      "act": "07",
-      "kind": "interactive",
-      "reuse_of": "38",
-      "audio_lines": [],
-      "tracker_type": "PAN, REUSE",
-      "tracker_notes": "interactive",
-      "segments": {
-        "intro": "TODO",
-        "idle_loop": "TODO",
-        "resolution": "TODO"
-      },
-      "interaction": "TODO",
-      "fallback": {
-        "timeout_s": 30,
-        "reprompt_s": [
-          8,
-          16
-        ],
-        "on_timeout": "auto_advance"
-      }
-    },
-    {
-      "shot": "40",
-      "act": "07",
-      "kind": "playback",
-      "reuse_of": null,
-      "audio_lines": [],
-      "tracker_type": "CLOSE UP, ZOOM IN",
-      "tracker_notes": ""
-    },
-    {
-      "shot": "41",
-      "act": "07",
-      "kind": "playback",
-      "reuse_of": null,
-      "audio_lines": [],
-      "tracker_type": "REUSE",
-      "tracker_notes": ""
-    },
-    {
-      "shot": "42",
-      "act": "07",
-      "kind": "playback",
-      "reuse_of": null,
-      "audio_lines": [],
-      "tracker_type": "ZOOM IN",
-      "tracker_notes": ""
-    },
-    {
       "shot": "43",
       "act": "08",
       "kind": "playback",
@@ -365,51 +315,10 @@
       "tracker_notes": "interactive disguise: hands-to-head + cross-arms (play-through OI)"
     },
     {
-      "shot": "46",
-      "act": "08",
-      "kind": "interactive",
-      "reuse_of": "48",
-      "audio_lines": [],
-      "tracker_type": "PAN, REUSE",
-      "tracker_notes": "interactive",
-      "segments": {
-        "intro": "TODO",
-        "idle_loop": "TODO",
-        "resolution": "TODO"
-      },
-      "interaction": "TODO",
-      "fallback": {
-        "timeout_s": 30,
-        "reprompt_s": [
-          8,
-          16
-        ],
-        "on_timeout": "auto_advance"
-      }
-    },
-    {
-      "shot": "47",
-      "act": "08",
-      "kind": "playback",
-      "reuse_of": null,
-      "audio_lines": [],
-      "tracker_type": "TITLE CARD",
-      "tracker_notes": ""
-    },
-    {
-      "shot": "48",
-      "act": "08",
-      "kind": "playback",
-      "reuse_of": "54",
-      "audio_lines": [],
-      "tracker_type": "ZOOM IN, REUSE",
-      "tracker_notes": ""
-    },
-    {
       "shot": "49",
       "act": "09",
       "kind": "playback",
-      "reuse_of": "51",
+      "reuse_of": null,
       "audio_lines": [],
       "tracker_type": "TITLE CARD, REUSE",
       "tracker_notes": ""
@@ -417,11 +326,11 @@
     {
       "shot": "50",
       "act": "09",
-      "kind": "playback",
+      "kind": "interactive",
       "reuse_of": null,
       "audio_lines": [],
       "tracker_type": "",
-      "tracker_notes": ""
+      "tracker_notes": "interactive fork: pose region L/R -> Path A / Path B, both advance"
     },
     {
       "shot": "51",
