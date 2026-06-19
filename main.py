@@ -428,6 +428,8 @@ def main():
                     render.resume()
                     pygame.mixer.unpause()
                     print("[main] RESUMED")
+            if event.type == pygame.KEYDOWN and event.key in (pygame.K_F11, pygame.K_f):
+                render.toggle_fullscreen()
             if event.type == pygame.KEYDOWN and event.key == pygame.K_RIGHT and not paused:
                 player._advance()
 

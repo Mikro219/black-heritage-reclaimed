@@ -86,6 +86,8 @@ class RenderEngine:
         self.config = config
         self.event_bus = event_bus
         self._screen: Optional[pygame.Surface] = None
+        self._fullscreen: bool = False
+        self._display_size: tuple = (1920, 1080)
         self._frames: list = []
         self._frame_index = 0
         self._fps = 24
@@ -161,7 +163,9 @@ class RenderEngine:
         pygame.font.init()
         display_cfg = self.config.get("_profile", {}).get("display", {})
         w, h = display_cfg.get("resolution") or self.config.get("resolution", [1920, 1080])
-        flags = pygame.FULLSCREEN if display_cfg.get("fullscreen", False) else 0
+        self._display_size = (w, h)
+        self._fullscreen = bool(display_cfg.get("fullscreen", False))
+        flags = pygame.FULLSCREEN if self._fullscreen else 0
         self._screen = pygame.display.set_mode((w, h), flags)
         pygame.display.set_caption("Black Heritage Reclaimed")
         self._font = pygame.font.SysFont("monospace", 20, bold=True)
@@ -171,6 +175,20 @@ class RenderEngine:
         self._scene_title_font = pygame.font.SysFont("monospace", 22, bold=True)
         # Pre-allocate the full-screen OI flash overlay once (reused each flash frame).
         self._flash_overlay = pygame.Surface((w, h), pygame.SRCALPHA)
+
+    def toggle_fullscreen(self) -> None:
+        """Switch between fullscreen and windowed at the same resolution.
+
+        Recreates the display surface (more reliable than display.toggle_fullscreen
+        on Windows). Existing cached frame Surfaces stay blittable; new conversions
+        pick up the new display format on demand via the FrameView LRU.
+        """
+        if self._screen is None:
+            return
+        self._fullscreen = not self._fullscreen
+        flags = pygame.FULLSCREEN if self._fullscreen else 0
+        self._screen = pygame.display.set_mode(self._display_size, flags)
+        print(f"[RenderEngine] fullscreen={'on' if self._fullscreen else 'off'}")
 
     # ------------------------------------------------------------------
     # Pause / resume
