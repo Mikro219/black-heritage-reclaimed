@@ -49,18 +49,14 @@
         "left"
       ],
       "hold_ms": 500,
-      "target_x": 0.22,
-      "target_y": 0.5,
-      "proximity_threshold": 0.3
+      "dead_zone_frac": 1.05
     },
     "point_path \u2014 RIGHT": {
       "directions": [
         "right"
       ],
       "hold_ms": 500,
-      "target_x": 0.78,
-      "target_y": 0.5,
-      "proximity_threshold": 0.3
+      "dead_zone_frac": 1.05
     },
     "point_river_marker": {
       "target_region": "lower_third",

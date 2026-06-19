@@ -27,11 +27,14 @@ from engines.detectors import REGISTRY
 # than falling back to fixed metadata values. See _inject_pose_params below.
 _POSE_DETECTORS = {"arms_crossed", "run_arms", "unravel", "paddle",
                    "mouth_proximity_tip", "touch_head",
-                   "survey", "directional_head_or_hand", "presence_bilateral"}
+                   "survey", "directional_head_or_hand", "presence_bilateral",
+                   "point_region"}
 
 # Pose-only detectors that can fire WITHOUT hand landmarks present (they read body
 # landmarks, not hands). Used to decide whether to dispatch when no hands are seen.
-_NO_HANDS_DETECTORS = {"arms_crossed", "run_arms", "unravel", "paddle"}
+# point_region reads pose wrists, so a hand reaching out to the side of the body
+# still registers even when MediaPipe Hands loses the finger pose there.
+_NO_HANDS_DETECTORS = {"arms_crossed", "run_arms", "unravel", "paddle", "point_region"}
 
 
 def _inject_pose_params(gtype: str, params: dict, pose_lm) -> dict:

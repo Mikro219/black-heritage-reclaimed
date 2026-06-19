@@ -68,24 +68,26 @@ GESTURES = [
         params={"target_region": "top_left_quadrant", "hold_ms": 500},
         tune_key="hold_ms", tune_step=50, accent=(0, 220, 255), highlights=[0, 8],
     ),
-    # ── directional_point ─────────────────────────────────────────────────
+    # ── point_region (pose wrist L/R of body midline) ─────────────────────
     dict(
         name="point_path — LEFT",
-        label="CG · Scene 2 · AL-02-007",
-        desc="Point LEFT to choose the left path — tip must reach LEFT marker",
-        type="directional_point",
-        params={"directions": ["left"], "hold_ms": 500,
-                "target_x": 0.22, "target_y": 0.50, "proximity_threshold": 0.30},
-        tune_key="hold_ms", tune_step=50, accent=(80, 200, 255), highlights=[0, 8],
+        label="CG · Scene 2 · AL-02-007 (shot 09)",
+        desc="Raise a hand to your LEFT of body midline & hold (pose region)  |  +/-: hold_ms  |  [/]: dead_zone_frac",
+        type="point_region",
+        params={"directions": ["left"], "hold_ms": 500, "dead_zone_frac": 0.15},
+        tune_key="hold_ms", tune_step=50,
+        tune_key2="dead_zone_frac", tune_step2=0.02,
+        accent=(80, 200, 255), highlights=[0],
     ),
     dict(
         name="point_path — RIGHT",
-        label="CG · Scene 2 · AL-02-007",
-        desc="Point RIGHT to choose the right path — tip must reach RIGHT marker",
-        type="directional_point",
-        params={"directions": ["right"], "hold_ms": 500,
-                "target_x": 0.78, "target_y": 0.50, "proximity_threshold": 0.30},
-        tune_key="hold_ms", tune_step=50, accent=(80, 200, 255), highlights=[0, 8],
+        label="CG · Scene 2 · AL-02-007 (shot 09)",
+        desc="Raise a hand to your RIGHT of body midline & hold (pose region)  |  +/-: hold_ms  |  [/]: dead_zone_frac",
+        type="point_region",
+        params={"directions": ["right"], "hold_ms": 500, "dead_zone_frac": 0.15},
+        tune_key="hold_ms", tune_step=50,
+        tune_key2="dead_zone_frac", tune_step2=0.02,
+        accent=(80, 200, 255), highlights=[0],
     ),
     dict(
         name="point_river_marker",
@@ -1103,6 +1105,64 @@ def draw_paddle_info(frame, context, params, pose_lm, w, h, accent):
         cv2.circle(frame, (px, py), 10, color, -1)
 
 
+def draw_point_region_info(frame, context, params, pose_lm, w, h, accent):
+    """Show body midline, centre dead-zone band, hip gate, and wrist region status."""
+    if pose_lm is None:
+        cv2.putText(frame, "POSE NONE — cannot fire", (12, h // 2),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (200, 80, 80), 2, cv2.LINE_AA)
+        return
+    sh_l, sh_r   = pose_lm[11], pose_lm[12]
+    hip_l, hip_r = pose_lm[23], pose_lm[24]
+    lw, rw       = pose_lm[15], pose_lm[16]
+
+    midline_x      = (sh_l.x + sh_r.x) / 2
+    shoulder_width = abs(sh_l.x - sh_r.x)
+    hip_y          = (hip_l.y + hip_r.y) / 2
+    dead           = params.get("dead_zone_frac", 0.15) * max(shoulder_width, 0.10)
+    accepted       = set(params.get("directions") or ["left", "right"])
+    require_raised = params.get("require_raised", True)
+
+    # Midline + dead-zone band (mirrored to display space)
+    mx_px   = int((1 - midline_x) * w)
+    dead_px = int(dead * w)
+    overlay = frame.copy()
+    cv2.rectangle(overlay, (mx_px - dead_px, 0), (mx_px + dead_px, h), (120, 120, 120), -1)
+    cv2.addWeighted(overlay, 0.18, frame, 0.82, 0, frame)
+    cv2.line(frame, (mx_px, 0), (mx_px, h), accent, 1, cv2.LINE_AA)
+    cv2.putText(frame, "midline", (mx_px + 4, 20),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.42, accent, 1, cv2.LINE_AA)
+
+    # Side labels
+    cv2.putText(frame, "LEFT" if "left" in accepted else "left (off)",
+                (mx_px - dead_px - 80, h // 2),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6,
+                accent if "left" in accepted else (90, 90, 90), 2, cv2.LINE_AA)
+    cv2.putText(frame, "RIGHT" if "right" in accepted else "right (off)",
+                (mx_px + dead_px + 10, h // 2),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6,
+                accent if "right" in accepted else (90, 90, 90), 2, cv2.LINE_AA)
+
+    # Hip gate line (wrist must be ABOVE this to count when require_raised)
+    if require_raised:
+        hy_px = int(hip_y * h)
+        cv2.line(frame, (0, hy_px), (w, hy_px), (160, 160, 80), 1, cv2.LINE_AA)
+        cv2.putText(frame, "hip gate (raise above)", (8, hy_px - 6),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.42, (160, 160, 80), 1, cv2.LINE_AA)
+
+    # Wrist dots — colour by whether they'd register
+    for wrist, label in ((lw, "L"), (rw, "R")):
+        screen_x = 1.0 - wrist.x
+        offset   = screen_x - (1 - midline_x)
+        raised   = (not require_raised) or wrist.y < hip_y
+        side     = "left" if offset < 0 else "right"
+        active   = raised and abs(offset) >= dead and side in accepted
+        color    = (80, 255, 80) if active else (200, 80, 80)
+        px, py   = int((1 - wrist.x) * w), int(wrist.y * h)
+        cv2.circle(frame, (px, py), 10, color, -1, cv2.LINE_AA)
+        cv2.putText(frame, label, (px - 5, py + 5),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 0), 1, cv2.LINE_AA)
+
+
 def draw_pose_markers(frame, pose_lm, w, h):
     """Draw key body landmarks as subtle reference points: mouth, ears, shoulders, eyes."""
     if pose_lm is None:
@@ -1280,6 +1340,9 @@ def main():
             if lm_list:
                 draw_direction_arrow(frame, lm_list, w, h, accepted, accent)
 
+        elif gtype == "point_region":
+            draw_point_region_info(frame, context, live_params, pose_lm, w, h, accent)
+
         elif gtype == "presence_bilateral":
             y_thresh = live_params.get("y_threshold", 0)
             draw_bilateral_threshold(frame, y_thresh, w, h, accent)
@@ -1445,6 +1508,23 @@ def main():
                 ok = dist <= prox
                 state_lines.append((f"tip dist={dist:.3f}  thresh={prox:.2f}  {'IN' if ok else 'OUT'}",
                                      accent if ok else (200, 80, 80)))
+            state_lines.append(("hold progress:", (200, 200, 200)))
+
+        elif gtype == "point_region":
+            pct = hold_progress(context, "point_direction_since", hold_ms or 500)
+            dir_now = context.get("point_direction") or "--"
+            accepted = live_params.get("directions", ["left", "right"])
+            in_set = dir_now in accepted
+            state_lines.append((f"region: {dir_now}  accepted: {accepted}",
+                                 accent if (dir_now != "--" and in_set) else (200, 80, 80) if dir_now != "--" else (120, 120, 120)))
+            if pose_lm:
+                midline_x = (pose_lm[11].x + pose_lm[12].x) / 2
+                sh_width  = abs(pose_lm[11].x - pose_lm[12].x)
+                dead      = live_params.get("dead_zone_frac", 0.15) * max(sh_width, 0.10)
+                state_lines.append((f"midline={midline_x:.3f}  dead_zone={dead:.3f} (frac {live_params.get('dead_zone_frac', 0.15):.2f})",
+                                     (160, 160, 160)))
+            else:
+                state_lines.append(("POSE NONE — cannot fire", (200, 80, 80)))
             state_lines.append(("hold progress:", (200, 200, 200)))
 
         elif gtype == "presence_bilateral":

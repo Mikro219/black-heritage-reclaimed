@@ -1,6 +1,7 @@
 from .rules.presence_bilateral import detect as presence_bilateral
 from .rules.presence_bilateral_still import detect as presence_bilateral_still
 from .rules.directional_point import detect as directional_point
+from .rules.point_region import detect as point_region
 from .rules.directional_head_or_hand import detect as directional_head_or_hand
 from .rules.bilateral_sweep import detect as bilateral_sweep
 from .rules.bilateral_lower import detect as bilateral_lower
@@ -28,6 +29,7 @@ REGISTRY = {
     "presence_bilateral": presence_bilateral,
     "presence_bilateral_still": presence_bilateral_still,
     "directional_point": directional_point,
+    "point_region": point_region,
     "directional_head_or_hand": directional_head_or_hand,
     "bilateral_sweep": bilateral_sweep,
     "bilateral_lower": bilateral_lower,

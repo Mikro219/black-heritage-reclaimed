@@ -546,6 +546,23 @@ class ShotSequencePlayer:
                     "tier":   "cg",
                 }
             })
+        elif directions and gesture_type == "region":
+            # point_region: pose wrist LEFT/RIGHT of body midline, hold to select.
+            # Robust for "pick a path" — no precise finger point needed. The detector
+            # reports the chosen side as `choice`, which _on_cg_detected normalises to
+            # a point_<direction> FSM event exactly like directional_point.
+            interaction = shot.interaction or {}
+            params = {"directions": directions, "hold_ms": hold_ms}
+            if interaction.get("region_dead_zone_frac") is not None:
+                params["dead_zone_frac"] = interaction["region_dead_zone_frac"]
+            self.event_bus.emit("cg_window_open", {
+                "interaction": {
+                    "id":     f"{shot.shot}_fsm_{state_id}",
+                    "type":   "point_region",
+                    "params": params,
+                    "tier":   "cg",
+                }
+            })
         elif directions:
             params = {"directions": directions, "hold_ms": hold_ms}
             # Position/target mode: if the shot declares on-screen path targets,
