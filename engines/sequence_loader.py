@@ -71,6 +71,11 @@ class Shot:
     interaction: Optional[dict] # full interaction spec dict
     fallback: dict              # timeout_s, reprompt_s, on_timeout
 
+    # Conditional playback — when set, the player skips this shot unless an
+    # earlier fork's recorded choice matches. Used for path-specific branch shots
+    # that converge later (e.g. shot 50 fork -> 58 Path A / 59 Path B -> 60).
+    play_if: Optional[dict]     # {"shot": "<src>", "branch": "left"|"right"} or None
+
     # Timing (resolved via inheritance chain)
     fps: int
     timing_profile: str         # "standard" | "urgent"
@@ -164,6 +169,9 @@ def load_sequence(scenes_root: Path, config: dict) -> list[Shot]:
         raw_interaction = raw.get("interaction") or shot_meta.get("interaction")
         interaction = None if raw_interaction in (None, "TODO") else raw_interaction
 
+        # Conditional playback branch gate: metadata.json ← sequence.json
+        play_if = raw.get("play_if") or shot_meta.get("play_if")
+
         # Kind: metadata.json ← sequence.json
         kind = raw.get("kind") or shot_meta.get("kind", "playback")
         is_interactive = kind == "interactive"
@@ -214,6 +222,7 @@ def load_sequence(scenes_root: Path, config: dict) -> list[Shot]:
             segments=segments,
             interaction=interaction,
             fallback=fallback,
+            play_if=play_if,
             fps=fps,
             timing_profile=timing_profile,
             frames_dir=frames_dir,

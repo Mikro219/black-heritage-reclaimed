@@ -80,6 +80,13 @@ SHOT_FRAMES = [
     # Act 09 — Wagon Wheel  (shots 46-48 skipped on purpose)
     ("act_09_wagon_wheel", "49", 32129, 32379),
     ("act_09_wagon_wheel", "50", 32380, 34998),   # fork FSM: intro 1-981, path A (L) 1269-1925, path B (R) 1926-2619
+
+    # Act 10 — Tumbling Blocks  (shots 51-56 skipped on purpose)
+    ("act_10_tumbling_blocks", "57", 34998, 35234),   # playback, no OI
+    ("act_10_tumbling_blocks", "58", 35234, 35944),   # cup-ear OI local 211-395 (global 35444-35628)
+    ("act_10_tumbling_blocks", "59", 35944, 36530),   # cup-ear OI local 97-275  (global 36040-36218)
+    ("act_10_tumbling_blocks", "60", 36530, 37142),   # fast-gather OI local 163-329 (global 36692-36858)
+    ("act_10_tumbling_blocks", "61", 37142, 38040),   # run-arms OI local 137-331 (global 37278-37472)
 ]
 
 # ──────────────────────────────────────────────────────────────────────────────

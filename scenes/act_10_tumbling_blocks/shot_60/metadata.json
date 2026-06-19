@@ -1,0 +1,22 @@
+{
+    "shot": "60",
+    "kind": "playback",
+    "assigned_to": "TBD",
+    "audio_lines": ["AL-10-004"],
+    "audio": "audio.mp3",
+    "_note": "Tumbling Blocks (Scene 10) — AL-10-004 fast_gather OI (written as non-blocking OI per Mike). Playback with frame-gated fast-gather OI; frames play straight through. OI window: global 36692-36858 -> local [163, 329]. Shot base global frame = 36530.",
+    "interaction": {
+        "tier": "OI",
+        "id": "fast_gather",
+        "type": "speed_bilateral",
+        "params": {
+            "min_bursts": 3,
+            "burst_window_ms": 3000,
+            "velocity_multiplier": 2.0,
+            "use_pose": true
+        },
+        "sfx": "detect.mp3",
+        "feedback": "green_flash",
+        "oi_frame_window": [163, 329]
+    }
+}

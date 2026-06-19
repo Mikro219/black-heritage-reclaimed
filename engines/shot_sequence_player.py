@@ -111,6 +111,10 @@ class ShotSequencePlayer:
         self._fsm: Optional["ShotFSM"] = None
         self._fsm_state_deadline: Optional[float] = None  # OI-window auto-advance time
 
+        # Fork choices recorded per source shot ("50" -> "left"|"right"), consumed by
+        # play_if branch gating so path-specific shots skip the unchosen branch.
+        self._fork_choices: dict = {}
+
         event_bus.subscribe("cg_detected",          self._on_cg_detected)
         event_bus.subscribe("oi_detected",           self._on_oi_detected)
         event_bus.subscribe("vi_detected",           self._on_vi_detected)
@@ -333,7 +337,7 @@ class ShotSequencePlayer:
             print(f"[ShotPlayer] ADVANCE  shot {shot.shot}  was {self._shot_state}")
 
         self.event_bus.emit("input_lock", {"locked": True})
-        next_index = self._index + 1
+        next_index = self._skip_branch_shots(self._index + 1)
 
         if next_index >= len(self.shots):
             self._player_state = PLAYER_FINAL
@@ -345,6 +349,37 @@ class ShotSequencePlayer:
         self.event_bus.emit("input_lock", {"locked": False})
         self._prefetch_next(next_index)
         self._enter_shot(next_index)
+
+    def _skip_branch_shots(self, index: int) -> int:
+        """Advance past branch-gated shots whose play_if doesn't match the fork choice.
+
+        A play_if is {"shot": <src>, "branch": "left"|"right"}. The shot plays only
+        if the fork at <src> recorded the matching branch. If the source fork never
+        recorded a choice (e.g. it timed out / auto-advanced), the first gated shot
+        in sequence order latches the branch so exactly one branch still plays
+        (deterministic Path A default, mirroring the random-path fallback intent).
+        """
+        while index < len(self.shots):
+            play_if = self.shots[index].play_if
+            if not play_if:
+                return index
+            src    = play_if.get("shot")
+            branch = play_if.get("branch")
+            if not branch:
+                return index
+            chosen = self._fork_choices.get(src)
+            if chosen is None:
+                # Fork left no choice — latch this branch as the default and play it.
+                self._fork_choices[src] = branch
+                print(f"[ShotPlayer] no fork choice for shot {src}; "
+                      f"defaulting to branch {branch!r}")
+                return index
+            if chosen == branch:
+                return index
+            print(f"[ShotPlayer] skip shot {self.shots[index].shot} "
+                  f"(play_if shot={src} branch={branch!r} != choice {chosen!r})")
+            index += 1
+        return index
 
     # ------------------------------------------------------------------
     # Update helpers
@@ -709,6 +744,10 @@ class ShotSequencePlayer:
             choice = data.get("choice", "")
             if choice:
                 canonical = self._fsm.normalize_direction(choice)
+                # Record the fork choice so later branch-gated shots (play_if) can
+                # skip the path that wasn't taken. Keyed by this fork's shot id.
+                self._fork_choices[shot.shot] = canonical
+                print(f"[ShotPlayer] shot {shot.shot} fork choice recorded: {canonical!r}")
                 self._fsm_fire(f"point_{canonical}")
             else:
                 self._fsm_fire(data.get("gesture_id", ""))

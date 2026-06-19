@@ -1,0 +1,20 @@
+{
+    "shot": "61",
+    "kind": "playback",
+    "assigned_to": "TBD",
+    "audio_lines": ["AL-10-010"],
+    "audio": "audio.mp3",
+    "_note": "Tumbling Blocks (Scene 10) — AL-10-010 run_arms OI. Playback with frame-gated run-arms OI (non-blocking; frames play straight through). OI window: global 37278-37472 -> local [137, 331]. Shot base global frame = 37142.",
+    "interaction": {
+        "tier": "OI",
+        "id": "run_arms",
+        "type": "run_arms",
+        "params": {
+            "min_cycles": 3,
+            "window_ms": 2000
+        },
+        "sfx": "detect.mp3",
+        "feedback": "green_flash",
+        "oi_frame_window": [137, 331]
+    }
+}

@@ -333,187 +333,49 @@
       "tracker_notes": "interactive fork: pose region L/R -> Path A / Path B, both advance"
     },
     {
-      "shot": "51",
-      "act": "09",
-      "kind": "interactive",
-      "reuse_of": null,
-      "audio_lines": [],
-      "tracker_type": "TITLE CARD",
-      "tracker_notes": "interactive",
-      "segments": {
-        "intro": "TODO",
-        "idle_loop": "TODO",
-        "resolution": "TODO"
-      },
-      "interaction": "TODO",
-      "fallback": {
-        "timeout_s": 30,
-        "reprompt_s": [
-          8,
-          16
-        ],
-        "on_timeout": "auto_advance"
-      }
-    },
-    {
-      "shot": "52",
-      "act": "09",
-      "kind": "playback",
-      "reuse_of": null,
-      "audio_lines": [],
-      "tracker_type": "CLOSE UP",
-      "tracker_notes": ""
-    },
-    {
-      "shot": "53",
-      "act": "09",
-      "kind": "interactive",
-      "reuse_of": "55",
-      "audio_lines": [],
-      "tracker_type": "TITLE CARD, REUSE",
-      "tracker_notes": "interactive",
-      "segments": {
-        "intro": "TODO",
-        "idle_loop": "TODO",
-        "resolution": "TODO"
-      },
-      "interaction": "TODO",
-      "fallback": {
-        "timeout_s": 30,
-        "reprompt_s": [
-          8,
-          16
-        ],
-        "on_timeout": "auto_advance"
-      }
-    },
-    {
-      "shot": "54",
-      "act": "09",
-      "kind": "playback",
-      "reuse_of": "54",
-      "audio_lines": [],
-      "tracker_type": "PAN, REUSE, CLOSE UP",
-      "tracker_notes": ""
-    },
-    {
-      "shot": "55",
-      "act": "09",
-      "kind": "interactive",
-      "reuse_of": null,
-      "audio_lines": [],
-      "tracker_type": "TITLE CARD",
-      "tracker_notes": "",
-      "segments": {
-        "intro": "TODO",
-        "idle_loop": "TODO",
-        "resolution": "TODO"
-      },
-      "interaction": "TODO",
-      "fallback": {
-        "timeout_s": 30,
-        "reprompt_s": [
-          8,
-          16
-        ],
-        "on_timeout": "auto_advance"
-      }
-    },
-    {
-      "shot": "56",
-      "act": "09",
-      "kind": "playback",
-      "reuse_of": "54",
-      "audio_lines": [],
-      "tracker_type": "PAN, REUSE, CLOSE UP",
-      "tracker_notes": "blur bg houses"
-    },
-    {
       "shot": "57",
       "act": "10",
       "kind": "playback",
-      "reuse_of": "56",
+      "reuse_of": null,
       "audio_lines": [],
       "tracker_type": "CLOSE UP, REUSE",
-      "tracker_notes": ""
+      "tracker_notes": "playback bridge, no OI"
     },
     {
       "shot": "58",
       "act": "10",
       "kind": "playback",
-      "reuse_of": "58",
-      "audio_lines": [],
+      "reuse_of": null,
+      "audio_lines": ["AL-10-002"],
       "tracker_type": "CLOSE UP, REUSE",
-      "tracker_notes": ""
+      "tracker_notes": "playback + cup-ear OI window"
     },
     {
       "shot": "59",
       "act": "10",
-      "kind": "interactive",
+      "kind": "playback",
       "reuse_of": null,
       "audio_lines": [],
       "tracker_type": "",
-      "tracker_notes": "interactive",
-      "segments": {
-        "intro": "TODO",
-        "idle_loop": "TODO",
-        "resolution": "TODO"
-      },
-      "interaction": "TODO",
-      "fallback": {
-        "timeout_s": 30,
-        "reprompt_s": [
-          8,
-          16
-        ],
-        "on_timeout": "auto_advance"
-      }
+      "tracker_notes": "playback + cup-ear OI window"
     },
     {
       "shot": "60",
       "act": "10",
-      "kind": "interactive",
+      "kind": "playback",
       "reuse_of": null,
-      "audio_lines": [],
+      "audio_lines": ["AL-10-004"],
       "tracker_type": "CLOSE UP",
-      "tracker_notes": "colour card bg? + interactive",
-      "segments": {
-        "intro": "TODO",
-        "idle_loop": "TODO",
-        "resolution": "TODO"
-      },
-      "interaction": "TODO",
-      "fallback": {
-        "timeout_s": 30,
-        "reprompt_s": [
-          8,
-          16
-        ],
-        "on_timeout": "auto_advance"
-      }
+      "tracker_notes": "colour card bg? + fast-gather OI window"
     },
     {
       "shot": "61",
       "act": "10",
-      "kind": "interactive",
+      "kind": "playback",
       "reuse_of": null,
-      "audio_lines": [],
+      "audio_lines": ["AL-10-010"],
       "tracker_type": "PAN",
-      "tracker_notes": "interactive",
-      "segments": {
-        "intro": "TODO",
-        "idle_loop": "TODO",
-        "resolution": "TODO"
-      },
-      "interaction": "TODO",
-      "fallback": {
-        "timeout_s": 30,
-        "reprompt_s": [
-          8,
-          16
-        ],
-        "on_timeout": "auto_advance"
-      }
+      "tracker_notes": "playback + run-arms OI window"
     },
     {
       "shot": "62",
@@ -765,6 +627,14 @@
       "audio_lines": [],
       "tracker_type": "",
       "tracker_notes": ""
+    },
+    {
+      "shot": "78",
+      "act": "12",
+      "kind": "playback",
+      "reuse_of": null,
+      "audio": "audio.mp3",
+      "audio_lines": []
     }
   ]
 }

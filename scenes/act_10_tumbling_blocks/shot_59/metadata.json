@@ -1,0 +1,21 @@
+{
+    "shot": "59",
+    "kind": "playback",
+    "assigned_to": "TBD",
+    "audio_lines": [],
+    "audio": "audio.mp3",
+    "play_if": { "shot": "50", "branch": "right" },
+    "_note": "Tumbling Blocks (Scene 10) — PATH B continuation (shot 50 fork chose right/alongside-wagon). Plays only if shot 50 recorded the RIGHT branch; otherwise the player skips this shot (Path A played shot 58 instead). Converges at shot 60. cup_ear_listen OI. Playback with frame-gated cup-ear OI (non-blocking; frames play straight through). OI window: global 36040-36218 -> local [97, 275]. Shot base global frame = 35944.",
+    "interaction": {
+        "tier": "OI",
+        "id": "cup_ear_listen",
+        "type": "directional_head_or_hand",
+        "params": {
+            "direction": "ear",
+            "hold_ms": 400
+        },
+        "sfx": "detect.mp3",
+        "feedback": "green_flash",
+        "oi_frame_window": [97, 275]
+    }
+}
