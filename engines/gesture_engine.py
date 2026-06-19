@@ -17,10 +17,15 @@ import time
 from engines.detectors import REGISTRY
 
 
-# Detectors that read MediaPipe Pose landmarks (body-relative). Pose inference is
-# the most expensive call, so the capture thread only runs it when one of these
-# is the active CG/OI detector.
-_POSE_PRIMARY = {"arms_crossed", "run_arms", "unravel", "paddle"}
+# Detectors that read MediaPipe Pose landmarks. Pose inference is the most
+# expensive call, so the capture thread only runs it when one of these is the
+# active CG/OI detector.
+_POSE_DETECTORS = {"arms_crossed", "run_arms", "unravel", "paddle",
+                   "mouth_proximity_tip", "touch_head"}
+
+# Pose-only detectors that can fire WITHOUT hand landmarks present (they read body
+# landmarks, not hands). Used to decide whether to dispatch when no hands are seen.
+_NO_HANDS_DETECTORS = {"arms_crossed", "run_arms", "unravel", "paddle"}
 
 
 class GestureEngine:
@@ -91,11 +96,24 @@ class GestureEngine:
         self._capture_thread.start()
         print("[GestureEngine] capture thread started")
 
+    @staticmethod
+    def _reads_pose(interaction) -> bool:
+        if not interaction:
+            return False
+        return (interaction.get("type", "") in _POSE_DETECTORS
+                or bool(interaction.get("params", {}).get("use_pose")))
+
+    @staticmethod
+    def _runs_without_hands(interaction) -> bool:
+        """Detectors that can fire with no hand landmarks (read body/pose only)."""
+        if not interaction:
+            return False
+        return (interaction.get("type", "") in _NO_HANDS_DETECTORS
+                or bool(interaction.get("params", {}).get("use_pose")))
+
     def _pose_needed(self) -> bool:
-        """True if the active CG/OI detector reads Pose landmarks."""
-        cg_type = self._active_cg.get("type", "") if self._active_cg else ""
-        oi_type = self._active_oi.get("type", "") if self._active_oi else ""
-        return cg_type in _POSE_PRIMARY or oi_type in _POSE_PRIMARY
+        """True if the active CG/OI detector reads Pose landmarks (type or use_pose)."""
+        return self._reads_pose(self._active_cg) or self._reads_pose(self._active_oi)
 
     def _capture_loop(self) -> None:
         """Worker: read camera, run MediaPipe, publish landmarks. Never touches the bus."""
@@ -166,8 +184,9 @@ class GestureEngine:
         # Pose-primary detectors can fire without hand landmarks; everything else
         # needs hands present.
         has_hands = bool(landmarks)
-        active_cg_type = self._active_cg.get("type", "") if self._active_cg else ""
-        needs_dispatch = has_hands or active_cg_type in _POSE_PRIMARY
+        needs_dispatch = (has_hands
+                          or self._runs_without_hands(self._active_cg)
+                          or self._runs_without_hands(self._active_oi))
         if not needs_dispatch:
             return
 

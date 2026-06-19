@@ -416,6 +416,7 @@ def main():
         render.update(
             landmark_data=gesture._last_landmarks,
             handedness_data=gesture._last_handedness,
+            pose_data=gesture._last_pose_lm,
             gesture_debug=gesture.debug_info(),
             scene_debug=None,
             voice_debug=voice.debug_info(),

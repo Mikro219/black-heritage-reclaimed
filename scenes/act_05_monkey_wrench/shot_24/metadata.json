@@ -1,0 +1,41 @@
+{
+    "shot": "24",
+    "kind": "interactive",
+    "assigned_to": "TBD",
+    "audio_lines": [],
+    "audio": "audio.mp3",
+    "_note": "Playback with two non-blocking OI windows (no draws). intro plays, then oi_1/mid/oi_2/outro play straight through; oi_1/oi_2 arm point-at-region OI windows that play detect.mp3 on detection (shot 5 pattern). Both region_rects are placeholders (centred) — tune with debug_overlay on, and confirm the actual OI gesture for each.",
+    "segments": {
+        "intro": [1,   335],
+        "oi_1":  [336, 526],
+        "mid":   [527, 705],
+        "oi_2":  [706, 890],
+        "outro": [891, 1708]
+    },
+    "interaction": {
+        "tier": "OI",
+        "interaction_fsm": {
+            "initial": "oi_1",
+            "states": {
+                "oi_1":  { "segment": "oi_1",  "loop": false,
+                           "oi": { "id": "oi_1", "type": "point_target_held",
+                                   "params": { "hold_ms": 600, "region_rect": { "x": 0.40, "y": 0.36, "w": 0.20, "h": 0.28 } },
+                                   "sfx": "detect.mp3", "feedback": "green_flash" } },
+                "mid":   { "segment": "mid",   "loop": false },
+                "oi_2":  { "segment": "oi_2",  "loop": false,
+                           "oi": { "id": "oi_2", "type": "point_target_held",
+                                   "params": { "hold_ms": 600, "region_rect": { "x": 0.40, "y": 0.36, "w": 0.20, "h": 0.28 } },
+                                   "sfx": "detect.mp3", "feedback": "green_flash" } },
+                "outro": { "segment": "outro", "loop": false }
+            },
+            "transitions": [
+                { "from": "oi_1",  "on": "segment_end", "to": "mid"         },
+                { "from": "mid",   "on": "segment_end", "to": "oi_2"        },
+                { "from": "oi_2",  "on": "segment_end", "to": "outro"       },
+                { "from": "outro", "on": "segment_end", "to": "__advance__" }
+            ],
+            "fallback": { "timeout_s": 30, "on_timeout": "auto_advance" }
+        }
+    },
+    "fallback": { "timeout_s": 300, "reprompt_s": [], "on_timeout": "auto_advance" }
+}

@@ -46,6 +46,13 @@ class NarrationAdapter:
         # Pending lines: list of (resolved_path_or_None, al_code)
         self._queue: list[tuple[Optional[Path], str]] = []
 
+        # True only while THIS adapter is driving channel 0 (playing AL lines).
+        # When a shot uses whole-file audio.mp3, RenderEngine owns channel 0 and the
+        # adapter must not stop it — otherwise an input_lock (every FSM transition /
+        # non-interactive segment) would kill the shot's audio.mp3 mid-playback.
+        self._owns_channel = False
+
+        event_bus.subscribe("shot_load",        self._on_shot_load)
         event_bus.subscribe("shot_audio_lines", self._on_shot_audio_lines)
         event_bus.subscribe("input_lock",       self._on_input_lock)
 
@@ -61,9 +68,15 @@ class NarrationAdapter:
             self._play_next()
 
     def stop_current(self) -> None:
-        """Stop playback and clear the queue (e.g. on scene transition)."""
+        """Stop our narration playback and clear the queue (e.g. on scene transition).
+
+        Only touches channel 0 when the adapter actually owns it — never stops a
+        shot's whole-file audio.mp3 (owned by RenderEngine).
+        """
         self._queue.clear()
-        self._channel.stop()
+        if self._owns_channel:
+            self._channel.stop()
+            self._owns_channel = False
 
     def debug_info(self) -> dict:
         return {
@@ -74,6 +87,11 @@ class NarrationAdapter:
     # ------------------------------------------------------------------
     # Event handlers
     # ------------------------------------------------------------------
+
+    def _on_shot_load(self, data: dict) -> None:
+        """New shot: assume whole-file audio (RenderEngine owns channel 0) until a
+        shot_audio_lines event proves this shot has per-line narration to play."""
+        self._owns_channel = False
 
     def _on_shot_audio_lines(self, data: dict) -> None:
         """Enqueue all lines for a shot and start playback immediately.
@@ -108,9 +126,13 @@ class NarrationAdapter:
             log.debug("NarrationAdapter: shot %s uses whole-file audio; channel left alone",
                       shot_id)
             self._queue.clear()
+            self._owns_channel = False
             return
 
+        # We have per-line narration files — take ownership of channel 0 (this
+        # replaces any whole-file audio.mp3 RenderEngine may have started).
         self._queue = pending
+        self._owns_channel = True
         self._channel.stop()
         self._play_next()
 

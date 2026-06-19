@@ -1,18 +1,21 @@
-﻿{
-    "shot":  "25",
-    "kind":  "interactive",
-    "assigned_to":  "elayna",
-    "audio_lines":  [
-
-                    ],
-    "segments":  "TODO",
-    "interaction":  "TODO",
-    "fallback":  {
-                     "timeout_s":  30,
-                     "reprompt_s":  [
-                                        8,
-                                        16
-                                    ],
-                     "on_timeout":  "auto_advance"
-                 }
+{
+    "shot": "25",
+    "kind": "playback",
+    "assigned_to": "TBD",
+    "audio_lines": [],
+    "audio": "audio.mp3",
+    "_note": "Playback with one frame-gated OI window (shot 5 pattern). Gesture: touch temple/head with one hand (touch_head, hands_required 1).",
+    "interaction": {
+        "tier": "OI",
+        "id": "touch_temple",
+        "type": "touch_head",
+        "params": {
+            "hands_required": 1,
+            "hold_ms": 500,
+            "target": "temple"
+        },
+        "sfx": "detect.mp3",
+        "feedback": "green_flash",
+        "oi_frame_window": [423, 611]
+    }
 }

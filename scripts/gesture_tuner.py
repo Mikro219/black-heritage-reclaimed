@@ -228,9 +228,9 @@ GESTURES = [
     dict(
         name="fast_gather",
         label="CG · Scene 10 · AL-10-004",
-        desc="Both hands rapid gathering — speed multiplier ≥2× idle",
+        desc="Both arms rapid gathering (Pose) — speed multiplier ≥2× idle",
         type="speed_bilateral",
-        params={"speed_multiplier": 2.0},
+        params={"speed_multiplier": 2.0, "use_pose": True},
         tune_key=None, accent=(255, 80, 80), highlights=[0, 8],
     ),
     # ── touch_head ────────────────────────────────────────────────────────

@@ -173,82 +173,32 @@
       "act": "05",
       "kind": "playback",
       "reuse_of": null,
-      "audio_lines": [],
-      "tracker_type": "TITLE CARD",
-      "tracker_notes": ""
+      "audio": "audio.mp3",
+      "audio_lines": []
     },
     {
       "shot": "23",
       "act": "05",
       "kind": "playback",
       "reuse_of": null,
-      "audio_lines": [],
-      "tracker_type": "",
-      "tracker_notes": "no cam move"
+      "audio": "audio.mp3",
+      "audio_lines": []
     },
     {
       "shot": "24",
       "act": "05",
       "kind": "interactive",
-      "reuse_of": "25",
-      "audio_lines": [],
-      "tracker_type": "CLOSE UP",
-      "tracker_notes": "redraw from SC25? + interactive",
-      "segments": {
-        "intro": "TODO",
-        "idle_loop": "TODO",
-        "resolution": "TODO"
-      },
-      "interaction": "TODO",
-      "fallback": {
-        "timeout_s": 30,
-        "reprompt_s": [
-          8,
-          16
-        ],
-        "on_timeout": "auto_advance"
-      }
+      "reuse_of": null,
+      "audio": "audio.mp3",
+      "audio_lines": []
     },
     {
       "shot": "25",
       "act": "05",
-      "kind": "interactive",
-      "reuse_of": "25",
-      "audio_lines": [],
-      "tracker_type": "REUSE",
-      "tracker_notes": "no tools on rock + interactive",
-      "segments": {
-        "intro": "TODO",
-        "idle_loop": "TODO",
-        "resolution": "TODO"
-      },
-      "interaction": "TODO",
-      "fallback": {
-        "timeout_s": 30,
-        "reprompt_s": [
-          8,
-          16
-        ],
-        "on_timeout": "auto_advance"
-      }
-    },
-    {
-      "shot": "26",
-      "act": "05",
       "kind": "playback",
-      "reuse_of": "24",
-      "audio_lines": [],
-      "tracker_type": "TITLE CARD, REUSE",
-      "tracker_notes": ""
-    },
-    {
-      "shot": "27",
-      "act": "05",
-      "kind": "playback",
-      "reuse_of": "27",
-      "audio_lines": [],
-      "tracker_type": "REUSE",
-      "tracker_notes": ""
+      "reuse_of": null,
+      "audio": "audio.mp3",
+      "audio_lines": []
     },
     {
       "shot": "28",

@@ -167,6 +167,7 @@ class RenderEngine:
         self._flash_overlay = pygame.Surface((w, h), pygame.SRCALPHA)
 
     def update(self, landmark_data=None, handedness_data=None,
+               pose_data=None,
                gesture_debug: dict | None = None,
                scene_debug: dict | None = None, voice_debug: dict | None = None,
                narration_debug: dict | None = None):
@@ -174,6 +175,7 @@ class RenderEngine:
             return
 
         self._landmark_data = landmark_data
+        self._pose_data = pose_data
         now = time.monotonic()
 
         # ── Swap in the incoming shot once the disk-backed cache can serve it. The
@@ -197,6 +199,7 @@ class RenderEngine:
                 seg_len  = max(1, self._seg_end - self._seg_start + 1)
                 elapsed  = now - self._seg_anchor
                 raw_local = int(elapsed * self._fps)
+                seg_start_before = self._seg_start
                 if self._seg_loop:
                     local = raw_local % seg_len
                 else:
@@ -206,9 +209,16 @@ class RenderEngine:
                         print(f"[RenderEngine] segment_playback_done "
                               f"[{self._seg_start}–{self._seg_end}]")
                         self.event_bus.emit("segment_playback_done", {})
-                # Guard: the emit above can synchronously advance to the next shot,
-                # clearing _frames/_seg_start via _on_shot_load.
-                if self._seg_start is not None and self._frames:
+                # The emit above can synchronously start a NEW segment (FSM advance)
+                # or clear playback (shot advance). In that case `local` (and seg
+                # bounds) are stale — applying _seg_start + local would land on a
+                # frame from elsewhere in the shot and flash for one tick. Detect the
+                # change and position at the new segment's first frame instead.
+                if self._seg_start is None or not self._frames:
+                    pass  # shot advanced / frames cleared — nothing to index
+                elif self._seg_start != seg_start_before:
+                    self._frame_index = min(self._seg_start, len(self._frames) - 1)
+                else:
                     self._frame_index = min(self._seg_start + local,
                                             len(self._frames) - 1)
 
@@ -286,8 +296,8 @@ class RenderEngine:
             if scene_debug:
                 self._draw_scene_panel(scene_debug)
 
-        if landmark_data:
-            self._draw_hand_mini_panel(landmark_data, handedness_data)
+        if landmark_data or pose_data:
+            self._draw_hand_mini_panel(landmark_data, handedness_data, pose_data)
 
         pygame.display.flip()
 
@@ -695,7 +705,17 @@ class RenderEngine:
         (0,17),
     ]
 
-    def _draw_hand_mini_panel(self, landmark_data, handedness_data=None):
+    # MediaPipe Pose: upper-body skeleton for the debug panel.
+    _POSE_CONNECTIONS = [
+        (11, 12),                    # shoulders
+        (11, 13), (13, 15),          # left arm
+        (12, 14), (14, 16),          # right arm
+        (11, 23), (12, 24), (23, 24),# torso
+        (0, 11), (0, 12),            # neck-ish (nose to shoulders)
+    ]
+    _POSE_KEY_POINTS = [0, 7, 8, 11, 12, 13, 14, 15, 16, 23, 24]  # nose, ears, etc.
+
+    def _draw_hand_mini_panel(self, landmark_data, handedness_data=None, pose_data=None):
         """Skeleton preview in bottom-right corner — keeps the main screen clean."""
         if not self._screen:
             return
@@ -712,7 +732,26 @@ class RenderEngine:
         inner_w = panel_w - pad * 2
         inner_h = panel_h - pad * 2
 
-        for i, hand_lm in enumerate(landmark_data):
+        # Pose skeleton first (behind hands), in amber so it's distinct.
+        if pose_data:
+            ppts = [
+                (px + pad + int((1 - lm.x) * inner_w),
+                 py + pad + int(lm.y * inner_h))
+                for lm in pose_data
+            ]
+            def _vis(idx):
+                return 0 <= idx < len(ppts)
+            for a, b in self._POSE_CONNECTIONS:
+                if _vis(a) and _vis(b):
+                    pygame.draw.line(self._screen, (255, 170, 40), ppts[a], ppts[b], 2)
+            for idx in self._POSE_KEY_POINTS:
+                if _vis(idx):
+                    pygame.draw.circle(self._screen, (255, 210, 90), ppts[idx], 3)
+            if self._small_font:
+                tag = self._small_font.render("POSE", True, (255, 190, 70))
+                self._screen.blit(tag, (px + 4, py + 2))
+
+        for i, hand_lm in enumerate(landmark_data or []):
             label = "?"
             if handedness_data and i < len(handedness_data):
                 label = handedness_data[i].classification[0].label[0]
@@ -783,6 +822,12 @@ class RenderEngine:
             lines.append(("HANDS: none", (255, 60, 60)))
 
         if gesture_debug:
+            pose_status = gesture_debug.get("pose_status", "NONE")
+            pose_color = ((255, 170, 40) if pose_status == "OK"
+                          else (180, 120, 40) if pose_status.startswith("STALE")
+                          else (120, 90, 50))
+            lines.append((f"POSE: {pose_status}", pose_color))
+
             cg = gesture_debug.get("active_cg")
             oi = gesture_debug.get("active_oi")
             lines.append((f"CG: {cg or '--'}", (255, 220, 0) if cg else (140, 140, 140)))
