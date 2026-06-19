@@ -16,6 +16,10 @@ Params:
                 the hat gesture; "temple"/"head" targets the head centre at ear
                 level with a generous radius, so a hand at the temple/side of the
                 head registers (lenient public-installation touch).
+  radius_scale (float): multiplier applied to the computed radius after pose
+                        geometry is resolved. Default 1.0. Increase (e.g. 1.5–2.0)
+                        to widen the detection zone when wrists don't quite reach
+                        the target circle.
 
 Body geometry (Pose landmarks, read from context["_pose_lm"]):
   7  (left_ear),  8 (right_ear)  → head centre X/Y
@@ -75,16 +79,25 @@ def detect(landmarks, params: dict, context: dict) -> bool:
     hold_ms = params.get("hold_ms", 500)
     hands_required = params.get("hands_required", 1)
     target = params.get("target", "crown")
+    use_pose = params.get("use_pose", False)
+    radius_scale = params.get("radius_scale", 1.0)
 
     crown_x, crown_y, radius = _target_and_radius(pose_lm, target)
+    radius *= radius_scale
+
+    # Wrist source. With use_pose we read the Pose wrists (15 left, 16 right) —
+    # robust when a hand raised to the head isn't picked up by MediaPipe Hands
+    # (occlusion / orientation). Otherwise use the Hands wrist landmark.
+    if use_pose:
+        wrists = [pose_lm[15], pose_lm[16]] if pose_lm is not None else []
+    else:
+        wrists = [hand.landmark[0] for hand in landmarks] if landmarks else []
 
     in_region = 0
-    if landmarks:
-        for hand in landmarks:
-            wrist = hand.landmark[0]
-            dist = math.hypot(wrist.x - crown_x, wrist.y - crown_y)
-            if dist < radius:
-                in_region += 1
+    for wrist in wrists:
+        dist = math.hypot(wrist.x - crown_x, wrist.y - crown_y)
+        if dist < radius:
+            in_region += 1
 
     now = time.monotonic()
     if in_region >= hands_required:

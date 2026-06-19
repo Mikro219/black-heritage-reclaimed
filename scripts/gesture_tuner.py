@@ -236,20 +236,20 @@ GESTURES = [
     # ── touch_head ────────────────────────────────────────────────────────
     dict(
         name="touch_temple",
-        label="CG · Scene 5 · AL-05-011  (one hand)",
-        desc="Touch crown of head (1 hand)  |  +/-: hold_ms",
+        label="CG · Scene 5 · AL-05-011  (one hand, Pose)",
+        desc="Touch temple/head (1 hand, Pose wrist)  |  +/-: radius_scale",
         type="touch_head",
-        params={"hands_required": 1, "hold_ms": 500},
-        tune_key="hold_ms", tune_step=50,
+        params={"hands_required": 1, "hold_ms": 500, "target": "temple", "use_pose": True, "radius_scale": 1.0},
+        tune_key="radius_scale", tune_step=0.1,
         accent=(255, 220, 80), highlights=[0],
     ),
     dict(
         name="hands_to_head",
         label="CG · Scene 8 · AL-08-005  (two hands)",
-        desc="Both hands to crown — put on hat  |  +/-: hold_ms",
+        desc="Both hands to crown — put on hat  |  +/-: radius_scale",
         type="touch_head",
-        params={"hands_required": 2, "hold_ms": 500},
-        tune_key="hold_ms", tune_step=50,
+        params={"hands_required": 2, "hold_ms": 500, "radius_scale": 2.0},
+        tune_key="radius_scale", tune_step=0.1,
         accent=(255, 220, 80), highlights=[0],
     ),
     # ── arms_crossed ─────────────────────────────────────────────────────
@@ -1576,8 +1576,8 @@ def main():
             pose_src = "pose" if pose_lm else "fixed"
             state_lines.append((f"crown geometry: {pose_src}", (160, 200, 160) if pose_lm else (120, 120, 120)))
             if lm_list and pose_lm:
-                from engines.detectors.rules.touch_head import _crown_and_radius
-                cx, cy, r = _crown_and_radius(pose_lm)
+                from engines.detectors.rules.touch_head import _target_and_radius
+                cx, cy, r = _target_and_radius(pose_lm, "crown")
                 import math as _m
                 in_region = sum(1 for hand in lm_list
                                 if _m.hypot(hand.landmark[0].x - cx, hand.landmark[0].y - cy) < r)

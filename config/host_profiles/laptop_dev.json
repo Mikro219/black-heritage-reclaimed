@@ -87,7 +87,7 @@
       "brow_y": 0.45,
       "hold_ms": 200,
       "scan_window_ms": 2000,
-      "min_x_delta": 0.06
+      "min_x_delta": 0.01
     },
     "trace_dipper \u2014 stroke 1: LEFT": {
       "direction": "left",
@@ -129,18 +129,23 @@
       "long_max_ms": 1400,
       "threshold_fraction": 0.3,
       "refractory_ms": 220,
-      "wrist_y_offset": 0.0
+      "wrist_y_offset": -0.05
     },
     "fast_gather": {
-      "speed_multiplier": 2.0
+      "speed_multiplier": 2.0,
+      "use_pose": true
     },
     "touch_temple": {
       "hands_required": 1,
-      "hold_ms": 500
+      "hold_ms": 500,
+      "target": "temple",
+      "use_pose": true,
+      "radius_scale": 1.0
     },
     "hands_to_head": {
       "hands_required": 2,
-      "hold_ms": 500
+      "hold_ms": 500,
+      "radius_scale": 4.0
     },
     "arms_crossed": {
       "hold_ms": 500,

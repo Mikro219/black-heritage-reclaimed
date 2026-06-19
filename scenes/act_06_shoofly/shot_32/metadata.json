@@ -1,0 +1,20 @@
+{
+    "shot": "32",
+    "kind": "playback",
+    "assigned_to": "TBD",
+    "audio_lines": [],
+    "audio": "audio.mp3",
+    "_note": "Reach out and hold gesture (AL-06-009 clasp_hand). Point_target_held at centre screen during window.",
+    "interaction": {
+        "tier": "OI",
+        "id": "clasp_hand",
+        "type": "point_target_held",
+        "params": {
+            "region_rect": {"x": 0.30, "y": 0.30, "w": 0.40, "h": 0.40},
+            "hold_ms": 500
+        },
+        "sfx": "detect.mp3",
+        "feedback": "green_flash",
+        "oi_frame_window": [184, 364]
+    }
+}

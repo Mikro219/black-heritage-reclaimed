@@ -205,82 +205,48 @@
       "act": "06",
       "kind": "playback",
       "reuse_of": null,
-      "audio_lines": [],
-      "tracker_type": "TITLE CARD",
-      "tracker_notes": ""
+      "audio": "audio.mp3",
+      "audio_lines": []
     },
     {
       "shot": "29",
       "act": "06",
       "kind": "playback",
       "reuse_of": null,
-      "audio_lines": [],
-      "tracker_type": "PAN",
-      "tracker_notes": ""
+      "audio": "audio.mp3",
+      "audio_lines": []
     },
     {
       "shot": "30",
       "act": "06",
       "kind": "playback",
-      "reuse_of": "30",
-      "audio_lines": [],
-      "tracker_type": "TITLE CARD, REUSE",
-      "tracker_notes": ""
+      "reuse_of": null,
+      "audio": "audio.mp3",
+      "audio_lines": []
     },
     {
       "shot": "31",
       "act": "06",
-      "kind": "interactive",
-      "reuse_of": "31",
-      "audio_lines": [],
-      "tracker_type": "REUSE, PAN",
-      "tracker_notes": "interactive",
-      "segments": {
-        "intro": "TODO",
-        "idle_loop": "TODO",
-        "resolution": "TODO"
-      },
-      "interaction": "TODO",
-      "fallback": {
-        "timeout_s": 30,
-        "reprompt_s": [
-          8,
-          16
-        ],
-        "on_timeout": "auto_advance"
-      }
+      "kind": "playback",
+      "reuse_of": null,
+      "audio": "audio.mp3",
+      "audio_lines": []
     },
     {
       "shot": "32",
       "act": "06",
-      "kind": "interactive",
+      "kind": "playback",
       "reuse_of": null,
-      "audio_lines": [],
-      "tracker_type": "CLOSE UP",
-      "tracker_notes": "interactive + door + hands animation asset",
-      "segments": {
-        "intro": "TODO",
-        "idle_loop": "TODO",
-        "resolution": "TODO"
-      },
-      "interaction": "TODO",
-      "fallback": {
-        "timeout_s": 30,
-        "reprompt_s": [
-          8,
-          16
-        ],
-        "on_timeout": "auto_advance"
-      }
+      "audio": "audio.mp3",
+      "audio_lines": []
     },
     {
       "shot": "33",
       "act": "06",
       "kind": "playback",
       "reuse_of": null,
-      "audio_lines": [],
-      "tracker_type": "",
-      "tracker_notes": ""
+      "audio": "audio.mp3",
+      "audio_lines": []
     },
     {
       "shot": "34",

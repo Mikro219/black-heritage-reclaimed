@@ -20,12 +20,79 @@ from engines.detectors import REGISTRY
 # Detectors that read MediaPipe Pose landmarks. Pose inference is the most
 # expensive call, so the capture thread only runs it when one of these is the
 # active CG/OI detector.
+#
+# Includes the detectors that need live pose-derived params injected (survey,
+# directional_head_or_hand, presence_bilateral, mouth_proximity_tip) so the
+# runtime computes the same per-player thresholds the gesture tuner does, rather
+# than falling back to fixed metadata values. See _inject_pose_params below.
 _POSE_DETECTORS = {"arms_crossed", "run_arms", "unravel", "paddle",
-                   "mouth_proximity_tip", "touch_head"}
+                   "mouth_proximity_tip", "touch_head",
+                   "survey", "directional_head_or_hand", "presence_bilateral"}
 
 # Pose-only detectors that can fire WITHOUT hand landmarks present (they read body
 # landmarks, not hands). Used to decide whether to dispatch when no hands are seen.
 _NO_HANDS_DETECTORS = {"arms_crossed", "run_arms", "unravel", "paddle"}
+
+
+def _inject_pose_params(gtype: str, params: dict, pose_lm) -> dict:
+    """Return a copy of params with live pose-derived values injected.
+
+    Mirrors scripts/gesture_tuner.py::_inject_pose_params so the runtime computes
+    the same per-player thresholds the tuner shows on-screen, instead of using the
+    fixed values baked into shot metadata. Detectors already accept these as
+    optional overrides, so no detector code changes are needed.
+
+    Returns params unchanged when pose is unavailable — detectors then fall back to
+    their fixed defaults (e.g. survey brow_y=0.45, presence_bilateral "shoulder").
+    """
+    if pose_lm is None:
+        return params
+    try:
+        if gtype == "survey":
+            # Live brow line from eye level (landmarks 2=left_eye, 5=right_eye).
+            eye_y = (pose_lm[2].y + pose_lm[5].y) / 2
+            p = dict(params)
+            p["brow_y"] = eye_y + 0.04
+            return p
+
+        if gtype == "mouth_proximity_tip":
+            p = dict(params)
+            p["mouth_x"] = (pose_lm[9].x + pose_lm[10].x) / 2
+            p["mouth_y"] = (pose_lm[9].y + pose_lm[10].y) / 2
+            return p
+
+        if gtype == "directional_head_or_hand":
+            direction = params.get("direction")
+            if direction == "ear":
+                p = dict(params)
+                p["ear_positions"] = [
+                    (pose_lm[7].x, pose_lm[7].y),
+                    (pose_lm[8].x, pose_lm[8].y),
+                ]
+                return p
+            if direction == "brow":
+                eye_y = (pose_lm[2].y + pose_lm[5].y) / 2
+                p = dict(params)
+                p["brow_y"] = eye_y + 0.04
+                return p
+            return params
+
+        if gtype == "presence_bilateral":
+            threshold_name = params.get("y_threshold", "")
+            if threshold_name == "shoulder":
+                p = dict(params)
+                p["y_threshold"] = (pose_lm[11].y + pose_lm[12].y) / 2
+                return p
+            if threshold_name == "head":
+                p = dict(params)
+                p["y_threshold"] = (pose_lm[2].y + pose_lm[5].y) / 2
+                return p
+            return params
+    except (IndexError, AttributeError, TypeError):
+        # Malformed/partial pose result — fall back to fixed params.
+        return params
+
+    return params
 
 
 class GestureEngine:
@@ -33,6 +100,7 @@ class GestureEngine:
         self.config = config
         self.event_bus = event_bus
         self._thresholds = config.get("detection_thresholds", {})
+        self._gesture_tuning: dict = config.get("_profile", {}).get("gesture_tuning", {})
 
         self._mp_hands = mp.solutions.hands
         self._hands = self._mp_hands.Hands(
@@ -264,7 +332,10 @@ class GestureEngine:
         oi = self._active_oi
         recording = self._active_cg_context.get("shape_recording")
         pose_age = now - self._last_pose_time
-        if self._last_pose_lm and pose_age < self._pose_stale_s:
+        if not self._pose_needed():
+            # Pose isn't running right now — stale data isn't misleading, but NONE is clearer.
+            pose_status = "NONE"
+        elif self._last_pose_lm and pose_age < self._pose_stale_s:
             pose_status = "OK"
         elif self._last_pose_lm:
             pose_status = f"STALE({pose_age:.1f}s)"
@@ -282,7 +353,13 @@ class GestureEngine:
 
     def _dispatch(self, interaction: dict, landmarks, context: dict) -> bool:
         detector_type = interaction.get("type")
-        params = interaction.get("params", {})
+        # Overlay tuned params saved by scripts/gesture_tuner.py. The tuner keys its
+        # saved params by gesture *name*, which doesn't always equal the shot's
+        # interaction *id* (e.g. id "scan_survey" vs tuner name "survey"). Look up by
+        # id first, then fall back to the detector type so tuned values still apply.
+        tuned = (self._gesture_tuning.get(interaction.get("id", ""))
+                 or self._gesture_tuning.get(detector_type, {}))
+        params = {**interaction.get("params", {}), **tuned}
         detector_fn = REGISTRY.get(detector_type)
         if detector_fn is None:
             if detector_type not in self._warned_missing:
@@ -293,7 +370,11 @@ class GestureEngine:
         # Inject current pose landmarks under reserved context key.
         # Body-relative detectors read context["_pose_lm"]; existing detectors ignore it.
         pose_age = time.monotonic() - self._last_pose_time
-        context["_pose_lm"] = self._last_pose_lm if pose_age < self._pose_stale_s else None
+        pose_lm = self._last_pose_lm if pose_age < self._pose_stale_s else None
+        context["_pose_lm"] = pose_lm
+        # Compute live pose-derived thresholds (brow line, shoulder height, mouth/ear
+        # positions) so detection matches the tuner instead of using fixed values.
+        params = _inject_pose_params(detector_type, params, pose_lm)
         return detector_fn(landmarks, params, context)
 
     def close(self):

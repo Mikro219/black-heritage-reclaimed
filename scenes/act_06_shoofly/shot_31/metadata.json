@@ -1,0 +1,23 @@
+{
+    "shot": "31",
+    "kind": "playback",
+    "assigned_to": "TBD",
+    "audio_lines": [],
+    "audio": "audio.mp3",
+    "_note": "Three-knock gesture short-short-LONG (AL-06-007). rhythm_bilateral detector.",
+    "interaction": {
+        "tier": "OI",
+        "id": "three_knock",
+        "type": "rhythm_bilateral",
+        "params": {
+            "short_window_ms": 500,
+            "long_min_ms": 400,
+            "long_max_ms": 1400,
+            "threshold_fraction": 0.30,
+            "refractory_ms": 220
+        },
+        "sfx": "detect.mp3",
+        "feedback": "green_flash",
+        "oi_frame_window": [136, 304]
+    }
+}

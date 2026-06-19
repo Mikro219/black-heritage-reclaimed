@@ -1,0 +1,22 @@
+{
+    "shot": "30",
+    "kind": "playback",
+    "assigned_to": "TBD",
+    "audio_lines": [],
+    "audio": "audio.mp3",
+    "_note": "Playback with frame-gated OI (shade-eyes scan). Window: AL-06-005/006 scan left/right.",
+    "interaction": {
+        "tier": "OI",
+        "id": "scan_survey",
+        "type": "survey",
+        "params": {
+            "brow_y": 0.45,
+            "scan_window_ms": 2000,
+            "min_x_delta": 0.06,
+            "hold_ms": 200
+        },
+        "sfx": "detect.mp3",
+        "feedback": "green_flash",
+        "oi_frame_window": [178, 334]
+    }
+}

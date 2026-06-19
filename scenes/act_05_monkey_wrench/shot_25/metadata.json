@@ -12,7 +12,8 @@
         "params": {
             "hands_required": 1,
             "hold_ms": 500,
-            "target": "temple"
+            "target": "temple",
+            "use_pose": true
         },
         "sfx": "detect.mp3",
         "feedback": "green_flash",
