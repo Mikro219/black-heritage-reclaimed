@@ -87,6 +87,9 @@ SHOT_FRAMES = [
     ("act_10_tumbling_blocks", "59", 35944, 36530),   # cup-ear OI local 97-275  (global 36040-36218)
     ("act_10_tumbling_blocks", "60", 36530, 37142),   # fast-gather OI local 163-329 (global 36692-36858)
     ("act_10_tumbling_blocks", "61", 37142, 38040),   # run-arms OI local 137-331 (global 37278-37472)
+
+    # Act 12 — Epilogue / Final Address  (shots 62-78 skipped on purpose)
+    ("act_12_epilogue", "79", 43054, 45631),   # epilogue playback to end of footage
 ]
 
 # ──────────────────────────────────────────────────────────────────────────────

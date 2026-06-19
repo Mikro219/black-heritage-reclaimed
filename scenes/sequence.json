@@ -629,12 +629,13 @@
       "tracker_notes": ""
     },
     {
-      "shot": "78",
+      "shot": "79",
       "act": "12",
       "kind": "playback",
       "reuse_of": null,
       "audio": "audio.mp3",
-      "audio_lines": []
+      "audio_lines": [],
+      "tracker_notes": "epilogue / final address playback to end of footage"
     }
   ]
 }
