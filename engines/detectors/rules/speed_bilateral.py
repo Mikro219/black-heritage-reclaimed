@@ -11,6 +11,9 @@ Params:
   use_pose (bool): track Pose wrists (landmarks 15/16) instead of hand wrists.
                    More robust for full-arm bilateral motion at exhibition distance.
                    Default False (uses MediaPipe Hands wrists).
+  min_visibility (float): Pose wrist visibility gate (use_pose mode only).
+                   Occluded/out-of-frame wrists get jittery phantom estimates
+                   whose noise reads as motion bursts. Default 0.5.
 
 Approach:
   Each frame, compute the summed bilateral wrist displacement from the previous frame.
@@ -25,6 +28,14 @@ import time
 _IDLE_DISPLACEMENT = 0.015  # normalised units/frame ≈ resting hand wobble
 
 
+def _reset(context: dict) -> None:
+    """Signal lost or untrustworthy — restart motion tracking from scratch.
+    Clearing burst history matters as much as prev position: bursts accumulated
+    before a dropout must not count toward a fire after the signal returns."""
+    context["prev_wrist_pos"] = None
+    context["speed_burst_times"] = []
+
+
 def detect(landmarks, params: dict, context: dict) -> bool:
     use_pose = params.get("use_pose", False)
 
@@ -32,13 +43,24 @@ def detect(landmarks, params: dict, context: dict) -> bool:
         # Pose wrists: 15 = left_wrist, 16 = right_wrist.
         pose_lm = context.get("_pose_lm")
         if pose_lm is None:
-            context["prev_wrist_pos"] = None
+            _reset(context)
             return False
-        current_pos = [(pose_lm[15].x, pose_lm[15].y),
-                       (pose_lm[16].x, pose_lm[16].y)]
+        lw, rw = pose_lm[15], pose_lm[16]
+        # Pose reports positions for occluded/out-of-frame wrists too (hands at
+        # the sides, below the frame bottom). Those phantom estimates jitter
+        # frame-to-frame, and the jitter registers as motion bursts — so a person
+        # standing still with no visible hands could fire the gesture. Gate on
+        # visibility, and drop accumulated bursts so half a gesture's worth of
+        # phantom noise can't carry over into the next valid stretch.
+        min_visibility = params.get("min_visibility", 0.5)
+        if (getattr(lw, "visibility", 1.0) < min_visibility
+                or getattr(rw, "visibility", 1.0) < min_visibility):
+            _reset(context)
+            return False
+        current_pos = [(lw.x, lw.y), (rw.x, rw.y)]
     else:
         if not landmarks or len(landmarks) < 2:
-            context["prev_wrist_pos"] = None
+            _reset(context)
             return False
         current_pos = [(hand.landmark[0].x, hand.landmark[0].y) for hand in landmarks]
 
