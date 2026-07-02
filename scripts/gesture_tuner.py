@@ -323,9 +323,9 @@ GESTURES = [
     dict(
         name="throw",
         label="OI · Scene 11 · throw_rope (act 11 one-shot, shot 66)",
-        desc="Wind up above shoulder, snap below the line to fire  |  +/-: max_stroke_ms  |  [/]: shoulder_margin  |  W/S: shoulder_y_offset",
+        desc="Wind up above shoulder, snap below the release line to fire  |  +/-: max_stroke_ms  |  [/]: shoulder_margin  |  W/S: release_y_offset",
         type="throw",
-        params={"max_stroke_ms": 600, "shoulder_margin": 0.03, "shoulder_y_offset": 0.0,
+        params={"max_stroke_ms": 600, "shoulder_margin": 0.03, "release_y_offset": 0.0,
                 "require_growth": False, "min_growth_pct": 40, "min_pose_z_delta": 0.2},
         tune_key="max_stroke_ms", tune_step=50,
         tune_key2="shoulder_margin", tune_step2=0.01,
@@ -1084,16 +1084,15 @@ def draw_throw_info(frame, context, params, pose_lm, lm_list, w, h, accent):
     if pose_lm is None:
         return
     margin = params.get("shoulder_margin", 0.03)
-    y_offset = params.get("shoulder_y_offset", 0.0)
+    release_offset = params.get("release_y_offset", 0.0)
     armed = context.get("throw_armed", {})
 
     for side, wrist_i, shoulder_i in (("L", 15, 11), ("R", 16, 12)):
         sh = pose_lm[shoulder_i]
         wr = pose_lm[wrist_i]
         sh_px = int((1 - sh.x) * w)
-        line_y = sh.y + y_offset           # offset shoulder line (W/S to adjust)
-        arm_y = int((line_y - margin) * h)   # wind-up line (must get above)
-        rel_y = int((line_y + margin) * h)   # release line (must snap below)
+        arm_y = int((sh.y - margin) * h)                     # wind-up (true shoulder)
+        rel_y = int((sh.y + release_offset + margin) * h)    # release (W/S to shift)
         x0, x1 = max(sh_px - 160, 0), min(sh_px + 160, w)
         cv2.line(frame, (x0, arm_y), (x1, arm_y), accent, 2, cv2.LINE_AA)
         cv2.line(frame, (x0, rel_y), (x1, rel_y), (150, 150, 150), 1, cv2.LINE_AA)
@@ -1109,8 +1108,9 @@ def draw_throw_info(frame, context, params, pose_lm, lm_list, w, h, accent):
             cv2.putText(frame, f"{side} ARMED", (wx + 14, wy + 4),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, accent, 1, cv2.LINE_AA)
 
-    offset_str = f"  offset={y_offset:+.3f}  [W/S]" if y_offset != 0.0 else "  [W/S: line offset]"
-    cv2.putText(frame, f"wind up ABOVE the line, snap BELOW to fire{offset_str}",
+    offset_str = (f"  release offset={release_offset:+.3f}  [W/S]"
+                  if release_offset != 0.0 else "  [W/S: release line offset]")
+    cv2.putText(frame, f"wind up ABOVE the arm line, snap BELOW the release line{offset_str}",
                 (12, h - 40), cv2.FONT_HERSHEY_SIMPLEX, 0.5, accent, 1, cv2.LINE_AA)
 
 
@@ -1960,7 +1960,7 @@ def main():
             _save_tune_params(GESTURES, profile_path)
         elif key == ord('w'):  # W — raise offset line (smaller y = higher on screen)
             _cur_g = GESTURES[gesture_idx]
-            for _ok in ("waist_y_offset", "wrist_y_offset", "shoulder_y_offset"):
+            for _ok in ("waist_y_offset", "wrist_y_offset", "release_y_offset"):
                 if _ok in _cur_g["params"]:
                     _cur_g["params"][_ok] = round(_cur_g["params"][_ok] - _WAIST_STEP, 3)
                     print(f"[tuner] {_cur_g['name']}: {_ok}={_cur_g['params'][_ok]:+.3f}")
@@ -1968,7 +1968,7 @@ def main():
             _save_tune_params(GESTURES, profile_path)
         elif key == ord('s'):  # S — lower offset line
             _cur_g = GESTURES[gesture_idx]
-            for _ok in ("waist_y_offset", "wrist_y_offset", "shoulder_y_offset"):
+            for _ok in ("waist_y_offset", "wrist_y_offset", "release_y_offset"):
                 if _ok in _cur_g["params"]:
                     _cur_g["params"][_ok] = round(_cur_g["params"][_ok] + _WAIST_STEP, 3)
                     print(f"[tuner] {_cur_g['name']}: {_ok}={_cur_g['params'][_ok]:+.3f}")
@@ -2007,7 +2007,7 @@ def _load_tune_params(gestures: list, profile_path: str) -> None:
           f"{applied} tuning override(s) loaded")
 
     # Explicitly confirm offset params so resets are visible on startup.
-    _OFFSET_KEYS = ("waist_y_offset", "wrist_y_offset", "shoulder_y_offset")
+    _OFFSET_KEYS = ("waist_y_offset", "wrist_y_offset", "release_y_offset")
     for gesture in gestures:
         for key in _OFFSET_KEYS:
             if key in gesture["params"]:

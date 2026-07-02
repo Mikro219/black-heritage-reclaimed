@@ -23,6 +23,14 @@ Params:
   shoulder_margin (float): normalised y margin around the shoulder line — the
                           wrist must be margin ABOVE it to arm and margin BELOW
                           it to release, giving the stroke hysteresis. Default 0.03.
+  release_y_offset (float): shifts the RELEASE line up (negative) or down
+                          (positive) in normalised screen coords, independent of
+                          the wind-up line (which stays at the true shoulder).
+                          Lowering it demands a deeper follow-through; raising it
+                          fires earlier in the stroke. Same convention as
+                          waist_y_offset in run_arms/paddle. Tuned with W/S in
+                          the gesture tuner; persists in the host profile's
+                          gesture_tuning section. Default 0.0.
   require_growth (bool): if True, the release must also pass the z-approach
                           growth check below. Default False (crossing suffices).
   min_growth_pct (float): required % hand-bbox area growth between the armed
@@ -80,6 +88,7 @@ def detect(landmarks, params: dict, context: dict) -> bool:
     min_z_delta     = params.get("min_pose_z_delta", 0.2)
     max_stroke_s    = params.get("max_stroke_ms", 600) / 1000.0
     margin          = params.get("shoulder_margin", 0.03)
+    release_offset  = params.get("release_y_offset", 0.0)
     min_visibility  = params.get("min_visibility", 0.5)
 
     armed: dict = context.setdefault("throw_armed", {})
@@ -95,8 +104,10 @@ def detect(landmarks, params: dict, context: dict) -> bool:
             armed.pop(side, None)
             continue
 
+        # Wind-up is judged at the true shoulder line; only the release line moves
+        # with the tuned offset.
         above = wrist.y < shoulder.y - margin
-        below = wrist.y > shoulder.y + margin
+        below = wrist.y > shoulder.y + release_offset + margin
         area  = _nearest_hand_area(landmarks, wrist.x, wrist.y)
 
         if above:
