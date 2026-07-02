@@ -34,6 +34,7 @@ from __future__ import annotations
 import json
 import logging
 import queue
+import sys
 import threading
 import time
 import uuid
@@ -51,7 +52,14 @@ except ImportError:
 
 log = logging.getLogger(__name__)
 
-VOSK_MODEL_PATH = Path(__file__).parent.parent / "models" / "vosk-model-small-en-us-0.15"
+# Frozen (PyInstaller) builds: __file__ lives inside the bundled _internal dir, so
+# resolve the model relative to the exe's folder instead (models/ is deployed
+# next to BHR.exe — see scripts/build_exe.py).
+if getattr(sys, "frozen", False):
+    _APP_ROOT = Path(sys.executable).parent
+else:
+    _APP_ROOT = Path(__file__).parent.parent
+VOSK_MODEL_PATH = _APP_ROOT / "models" / "vosk-model-small-en-us-0.15"
 
 _DEFAULT_GRAMMAR = [
     "freedom", "go", "north", "follow the gourd",

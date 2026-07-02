@@ -1,0 +1,68 @@
+{
+    "shot": "66",
+    "kind": "interactive",
+    "assigned_to": "TBD",
+    "audio_lines": [],
+    "audio": "audio.mp3",
+    "_note": "Conestogo river crossing — WHOLE ACT 11 as one shot (supersedes tracker shots 67-78). Shot-45 play-through pattern: intro plays, then five frame-gated OI windows play straight through (non-blocking); each fires detect.mp3 + green flash if performed. Flip a state to loop:true to make it pause/block on the gesture. Shot base global frame = 38040 (end 43054, 5015 frames). Windows: unravel 40284-40410, throw 40658-40858, push 41174-41386, paddle 41664-41868, spread 42512-42712.",
+    "segments": {
+        "intro":      [1,    2244],
+        "oi_unravel": [2245, 2371],
+        "mid1":       [2372, 2618],
+        "oi_throw":   [2619, 2819],
+        "mid2":       [2820, 3134],
+        "oi_push":    [3135, 3347],
+        "mid3":       [3348, 3624],
+        "oi_paddle":  [3625, 3829],
+        "mid4":       [3830, 4472],
+        "oi_spread":  [4473, 4673],
+        "outro":      [4674, 5015]
+    },
+    "interaction": {
+        "tier": "OI",
+        "interaction_fsm": {
+            "initial": "oi_unravel",
+            "states": {
+                "oi_unravel": { "segment": "oi_unravel", "loop": false,
+                                "oi": { "id": "unravel", "type": "unravel",
+                                        "params": { "min_cycles": 2 },
+                                        "sfx": "detect.mp3", "feedback": "green_flash" } },
+                "mid1":       { "segment": "mid1",       "loop": false },
+                "oi_throw":   { "segment": "oi_throw",   "loop": false,
+                                "oi": { "id": "throw_rope", "type": "throw",
+                                        "params": { "min_growth_pct": 40, "max_stroke_ms": 600 },
+                                        "sfx": "detect.mp3", "feedback": "green_flash" } },
+                "mid2":       { "segment": "mid2",       "loop": false },
+                "oi_push":    { "segment": "oi_push",    "loop": false,
+                                "oi": { "id": "launch_push", "type": "push_out",
+                                        "params": { "min_growth_pct": 35, "window_ms": 400 },
+                                        "sfx": "detect.mp3", "feedback": "green_flash" } },
+                "mid3":       { "segment": "mid3",       "loop": false },
+                "oi_paddle":  { "segment": "oi_paddle",  "loop": false,
+                                "oi": { "id": "paddle", "type": "paddle",
+                                        "params": { "min_strokes": 2 },
+                                        "sfx": "detect.mp3", "feedback": "green_flash" } },
+                "mid4":       { "segment": "mid4",       "loop": false },
+                "oi_spread":  { "segment": "oi_spread",  "loop": false,
+                                "oi": { "id": "spread_arms", "type": "spread_arms",
+                                        "params": { "hold_ms": 400 },
+                                        "sfx": "detect.mp3", "feedback": "green_flash" } },
+                "outro":      { "segment": "outro",      "loop": false }
+            },
+            "transitions": [
+                { "from": "oi_unravel", "on": "segment_end", "to": "mid1"        },
+                { "from": "mid1",       "on": "segment_end", "to": "oi_throw"    },
+                { "from": "oi_throw",   "on": "segment_end", "to": "mid2"        },
+                { "from": "mid2",       "on": "segment_end", "to": "oi_push"     },
+                { "from": "oi_push",    "on": "segment_end", "to": "mid3"        },
+                { "from": "mid3",       "on": "segment_end", "to": "oi_paddle"   },
+                { "from": "oi_paddle",  "on": "segment_end", "to": "mid4"        },
+                { "from": "mid4",       "on": "segment_end", "to": "oi_spread"   },
+                { "from": "oi_spread",  "on": "segment_end", "to": "outro"       },
+                { "from": "outro",      "on": "segment_end", "to": "__advance__" }
+            ],
+            "fallback": { "timeout_s": 300, "on_timeout": "auto_advance" }
+        }
+    },
+    "fallback": { "timeout_s": 300, "reprompt_s": [], "on_timeout": "auto_advance" }
+}

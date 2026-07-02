@@ -29,7 +29,13 @@ from engines.shot_sequence_player import ShotSequencePlayer, PLAYER_RUNNING
 from engines.narration_adapter import NarrationAdapter
 
 
-ROOT = Path(__file__).parent
+# Frozen (PyInstaller) builds: __file__ points inside the bundled _internal dir,
+# so resolve ROOT to the folder holding BHR.exe — config.json, config/, scenes/,
+# models/ and assets/ are deployed next to the exe (see scripts/build_exe.py).
+if getattr(sys, "frozen", False):
+    ROOT = Path(sys.executable).parent
+else:
+    ROOT = Path(__file__).parent
 CONFIG_PATH = ROOT / "config.json"
 PROFILES_DIR = ROOT / "config" / "host_profiles"
 SCENES_ROOT = ROOT / "scenes"
@@ -432,8 +438,23 @@ def main():
                 render.toggle_fullscreen()
             if event.type == pygame.KEYDOWN and event.key == pygame.K_d:
                 render.toggle_debug()
+            if event.type == pygame.KEYDOWN and event.key == pygame.K_s:
+                # Skip the prologue (act 0) — cut any playing narration and jump.
+                if player.skip_prologue():
+                    pygame.mixer.stop()
             if event.type == pygame.KEYDOWN and event.key == pygame.K_RIGHT and not paused:
                 player._advance()
+
+            # Pause-menu volume slider: Up/Down keys or click/drag on the bar.
+            if paused:
+                if event.type == pygame.KEYDOWN and event.key == pygame.K_UP:
+                    render.adjust_volume(+0.05)
+                if event.type == pygame.KEYDOWN and event.key == pygame.K_DOWN:
+                    render.adjust_volume(-0.05)
+                if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    render.handle_volume_click(event.pos)
+                if event.type == pygame.MOUSEMOTION and event.buttons[0]:
+                    render.handle_volume_click(event.pos)
 
         if not paused:
             gesture.update()
@@ -443,7 +464,7 @@ def main():
         render.update(
             landmark_data=gesture._last_landmarks,
             handedness_data=gesture._last_handedness,
-            pose_data=gesture._last_pose_lm,
+            pose_data=gesture.fresh_pose_lm(),
             gesture_debug=gesture.debug_info(),
             scene_debug=None,
             voice_debug=voice.debug_info(),

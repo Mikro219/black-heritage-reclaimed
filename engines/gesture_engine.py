@@ -28,7 +28,7 @@ from engines.detectors import REGISTRY
 _POSE_DETECTORS = {"arms_crossed", "run_arms", "unravel", "paddle",
                    "mouth_proximity_tip", "touch_head",
                    "survey", "directional_head_or_hand", "presence_bilateral",
-                   "point_region"}
+                   "point_region", "throw", "spread_arms"}
 
 # Pose-only detectors that can fire WITHOUT hand landmarks present (they read body
 # landmarks, not hands). Used to decide whether to dispatch when no hands are seen.
@@ -37,7 +37,7 @@ _POSE_DETECTORS = {"arms_crossed", "run_arms", "unravel", "paddle",
 # touch_head (use_pose) reads pose wrists too, so both hands raised to the crown
 # (AL-08-005 hands_to_head) still register when Hands drops them to head occlusion.
 _NO_HANDS_DETECTORS = {"arms_crossed", "run_arms", "unravel", "paddle", "point_region",
-                       "touch_head"}
+                       "touch_head", "throw", "spread_arms"}
 
 
 def _inject_pose_params(gtype: str, params: dict, pose_lm) -> dict:
@@ -226,6 +226,17 @@ class GestureEngine:
                     self._pub_pose_lm   = pose_lm
                     self._pub_pose_time = now
                 self._pub_seq += 1
+
+    def fresh_pose_lm(self):
+        """Pose landmarks for the render overlay, or None if none were detected
+        recently. `_pub_pose_lm` is never cleared once set (it only updates when a
+        pose is found), so `_last_pose_lm` alone would keep drawing the last skeleton
+        forever. Gate it on the same stale window the detectors use."""
+        if self._last_pose_lm is None:
+            return None
+        if time.monotonic() - self._last_pose_time >= self._pose_stale_s:
+            return None
+        return self._last_pose_lm
 
     def update(self) -> None:
         """Main thread: dispatch detectors on the newest published landmarks.

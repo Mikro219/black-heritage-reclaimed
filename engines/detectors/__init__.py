@@ -24,6 +24,8 @@ from .rules.push_out import detect as push_out
 from .rules.run_arms import detect as run_arms
 from .rules.unravel import detect as unravel
 from .rules.paddle import detect as paddle
+from .rules.throw import detect as throw
+from .rules.spread_arms import detect as spread_arms
 
 REGISTRY = {
     "presence_bilateral": presence_bilateral,
@@ -52,4 +54,6 @@ REGISTRY = {
     "run_arms": run_arms,
     "unravel": unravel,
     "paddle": paddle,
+    "throw": throw,
+    "spread_arms": spread_arms,
 }

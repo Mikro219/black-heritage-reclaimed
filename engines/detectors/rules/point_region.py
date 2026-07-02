@@ -29,9 +29,20 @@ Params:
                           shoulder width. A wrist within this band of the midline
                           is "centre" and selects nothing, so only a deliberate
                           reach to one side registers. Default 0.15.
-  require_raised (bool): if True (default), only wrists above the hip line are
+  require_raised (bool): if True (default), only wrists above the raise gate are
                           considered, so a relaxed arm hanging at the side (which
                           sits far from the midline) cannot trigger a selection.
+  raise_gate_frac (float): how far above the hip line the raise gate sits, as a
+                          fraction of the hip→shoulder torso height. 0.0 = the old
+                          hip-line behaviour; 0.25 (default) puts the gate at the
+                          lower chest, so hands resting at the waist — which hover
+                          right at the hip line and jitter across it — can't select.
+  min_visibility (float): minimum Pose visibility for a wrist to be considered.
+                          Pose always reports positions for all 33 landmarks, even
+                          occluded/out-of-frame ones; those phantom estimates can sit
+                          stably in one region and fire unintended selections (and
+                          then unintended SWITCHES, ping-ponging against the real
+                          hand). Default 0.5.
 
 Context keys: point_direction, point_direction_since, dominant_direction
   (named to match directional_point so the gesture engine reads `choice`
@@ -44,7 +55,8 @@ _ALL = ["left", "right"]
 
 
 def _pose_geometry(pose_lm):
-    """Return (left_wrist, right_wrist, midline_x, shoulder_width, hip_y) or None."""
+    """Return (left_wrist, right_wrist, midline_x, shoulder_width, shoulder_y, hip_y)
+    or None."""
     try:
         sh_l, sh_r   = pose_lm[11], pose_lm[12]
         lw, rw       = pose_lm[15], pose_lm[16]
@@ -53,8 +65,9 @@ def _pose_geometry(pose_lm):
         return None
     midline_x = (sh_l.x + sh_r.x) / 2
     shoulder_width = abs(sh_l.x - sh_r.x)
+    shoulder_y = (sh_l.y + sh_r.y) / 2
     hip_y = (hip_l.y + hip_r.y) / 2
-    return lw, rw, midline_x, shoulder_width, hip_y
+    return lw, rw, midline_x, shoulder_width, shoulder_y, hip_y
 
 
 def detect(landmarks, params: dict, context: dict) -> bool:
@@ -62,6 +75,8 @@ def detect(landmarks, params: dict, context: dict) -> bool:
     hold_ms = params.get("hold_ms", 500)
     dead_zone_frac = params.get("dead_zone_frac", 0.15)
     require_raised = params.get("require_raised", True)
+    raise_gate_frac = params.get("raise_gate_frac", 0.25)
+    min_visibility = params.get("min_visibility", 0.5)
 
     pose_lm = context.get("_pose_lm")
     geom = _pose_geometry(pose_lm) if pose_lm is not None else None
@@ -70,14 +85,19 @@ def detect(landmarks, params: dict, context: dict) -> bool:
     best_direction = None
 
     if geom is not None:
-        lw, rw, midline_x, shoulder_width, hip_y = geom
+        lw, rw, midline_x, shoulder_width, shoulder_y, hip_y = geom
         screen_midline = 1.0 - midline_x
         dead = dead_zone_frac * max(shoulder_width, 0.10)
+        # Raise gate sits raise_gate_frac of the torso height above the hip line
+        # (y grows downward, so "above" = smaller y).
+        gate_y = hip_y - raise_gate_frac * max(hip_y - shoulder_y, 0.0)
 
         # Consider each wrist; keep the one reaching farthest past the dead zone so a
         # resting hand near centre can't win over a clear reach by the other hand.
         for wrist in (lw, rw):
-            if require_raised and wrist.y > hip_y:
+            if getattr(wrist, "visibility", 1.0) < min_visibility:
+                continue   # occluded/out-of-frame — position is a phantom estimate
+            if require_raised and wrist.y > gate_y:
                 continue   # arm hanging / lowered — not an active selection
             screen_x = 1.0 - wrist.x
             offset = screen_x - screen_midline    # <0 = screen-left, >0 = screen-right

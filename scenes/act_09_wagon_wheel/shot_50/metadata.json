@@ -14,7 +14,7 @@
     "interaction": {
         "tier": "CG",
         "hold_ms": 600,
-        "region_dead_zone_frac": 0.15,
+        "region_dead_zone_frac": 0.25,
         "interaction_fsm": {
             "gesture_type": "region",
             "initial": "waiting",

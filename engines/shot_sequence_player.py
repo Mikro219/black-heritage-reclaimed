@@ -146,6 +146,22 @@ class ShotSequencePlayer:
         self._player_state = PLAYER_RUNNING
         self._enter_shot(max(0, min(start_index, len(self.shots) - 1)))
 
+    def skip_prologue(self) -> bool:
+        """Jump to the first shot that is not in the prologue (act "00").
+
+        Returns True if a jump happened. Reuses the normal advance path so input
+        lock, prefetch and shot entry all fire as usual. No-op once past the prologue.
+        """
+        target = next((i for i, s in enumerate(self.shots) if s.act != "00"), None)
+        if target is None or target <= self._index:
+            return False
+        dest = self.shots[target]
+        print(f"[ShotPlayer] skip prologue -> shot {dest.shot} (act {dest.act})")
+        self._fsm = None
+        self._index = target - 1   # _advance() steps to `target`
+        self._advance()
+        return True
+
     def pause(self) -> None:
         """Freeze the shot clock. Idempotent."""
         if self._paused:
@@ -551,7 +567,7 @@ class ShotSequencePlayer:
         if not shot:
             return
         state_id = self._fsm.current
-        print(f"[ShotPlayer] FSM → {state_id}  loop={self._fsm.is_loop()}")
+        print(f"[ShotPlayer] FSM -> {state_id}  loop={self._fsm.is_loop()}")
 
         # Switch render engine to this state's frame range
         seg = self._fsm.segment_range()
@@ -581,6 +597,13 @@ class ShotSequencePlayer:
         hold_ms    = (shot.interaction or {}).get("hold_ms", 500)
         fsm_spec   = (shot.interaction or {}).get("interaction_fsm", {})
         gesture_type = fsm_spec.get("gesture_type", "point")
+
+        # Switching AWAY from an existing selection must cost more than the initial
+        # pick: in a non-initial state a choice is already on screen, and each flip
+        # plays a full transition animation. Without this, an idle drift held for
+        # the same hold_ms as a deliberate pick ping-pongs the selection.
+        if directions and state_id != self._fsm.initial:
+            hold_ms = (shot.interaction or {}).get("switch_hold_ms", hold_ms * 2)
 
         # Per-state OI auto-advance deadline is (re)armed only for OI states below.
         self._fsm_state_deadline = None
@@ -698,13 +721,17 @@ class ShotSequencePlayer:
             self.event_bus.emit("cg_window_open", {"interaction": None})
 
         if keyword:
+            # Cover the shot's whole fallback window, not a fixed 10s: the selected
+            # states have no deadline of their own, so a short window silently
+            # expires and the keyword stops working while the shot sits waiting.
+            vi_window_ms = max(10000, int(shot.fallback.get("timeout_s", 30) * 1000))
             self.event_bus.emit("vi_window_open", {
                 "vi_config": {
                     "id":       f"voice_{keyword}",
                     "keywords": [keyword],
                     "mode":     "keyword",
                     "tier":     "cg_required",
-                    "window_ms": 10000,
+                    "window_ms": vi_window_ms,
                 }
             })
 
@@ -722,7 +749,7 @@ class ShotSequencePlayer:
               f"-> {next_state!r}")
         if next_state is None:
             return   # no matching transition — silent
-        print(f"[ShotPlayer] FSM event={event!r} → {next_state}")
+        print(f"[ShotPlayer] FSM event={event!r} -> {next_state}")
         if next_state == "__advance__":
             self._fsm = None
             self.event_bus.emit("input_lock", {"locked": False})
@@ -954,7 +981,8 @@ class ShotFSM:
         self.transitions = spec.get("transitions", [])
         self.fallback    = spec.get("fallback", {})
         self._segments   = segments or {}
-        self.current     = spec.get("initial", "waiting")
+        self.initial     = spec.get("initial", "waiting")
+        self.current     = self.initial
         self.done        = False
 
     def segment_range(self) -> Optional[tuple]:

@@ -145,6 +145,11 @@ class RenderEngine:
         self._paused:        bool  = False
         self._pause_started: float = 0.0
 
+        # Master volume (0.0-1.0), applied to every mixer channel. Adjustable from
+        # the pause menu (Up/Down or dragging the slider).
+        self._volume: float = float(config.get("audio", {}).get("master_volume", 1.0))
+        self._volume_slider_rect: Optional[pygame.Rect] = None  # set when drawn
+
         self.event_bus.subscribe("shot_load",     self._on_shot_load)
         self.event_bus.subscribe("prefetch_shot", self._on_prefetch_shot)
         self.event_bus.subscribe("oi_flash",          self._on_oi_flash)
@@ -198,6 +203,42 @@ class RenderEngine:
         print(f"[RenderEngine] debug_overlay={'on' if self._debug else 'off'}")
 
     # ------------------------------------------------------------------
+    # Master volume
+    # ------------------------------------------------------------------
+
+    @property
+    def volume(self) -> float:
+        return self._volume
+
+    def _apply_volume(self) -> None:
+        """Push the master volume onto every mixer channel (channel volume persists
+        across plays, so this covers current and future narration/sfx playback)."""
+        if not pygame.mixer.get_init():
+            return
+        for i in range(pygame.mixer.get_num_channels()):
+            pygame.mixer.Channel(i).set_volume(self._volume)
+
+    def set_volume(self, v: float) -> None:
+        self._volume = max(0.0, min(1.0, v))
+        self._apply_volume()
+
+    def adjust_volume(self, delta: float) -> None:
+        self.set_volume(self._volume + delta)
+
+    def handle_volume_click(self, pos) -> bool:
+        """Set volume from a mouse position over the pause-menu slider. Returns True
+        if the position hit the slider (so the caller can treat it as consumed)."""
+        rect = self._volume_slider_rect
+        if rect is None:
+            return False
+        hit = rect.inflate(20, 24)   # generous grab area around the thin bar
+        if not hit.collidepoint(pos):
+            return False
+        frac = (pos[0] - rect.x) / max(1, rect.w)
+        self.set_volume(frac)
+        return True
+
+    # ------------------------------------------------------------------
     # Pause / resume
     # ------------------------------------------------------------------
 
@@ -235,10 +276,37 @@ class RenderEngine:
 
         if self._font:
             title = self._font.render("|| PAUSED", True, (255, 255, 255))
-            self._screen.blit(title, ((sw - title.get_width()) // 2, sh // 2 - 24))
+            self._screen.blit(title, ((sw - title.get_width()) // 2, sh // 2 - 70))
         if self._small_font:
-            hint = self._small_font.render("Press Space to resume", True, (200, 200, 200))
-            self._screen.blit(hint, ((sw - hint.get_width()) // 2, sh // 2 + 16))
+            hint = self._small_font.render("Space: resume    S: skip prologue", True, (200, 200, 200))
+            self._screen.blit(hint, ((sw - hint.get_width()) // 2, sh // 2 - 34))
+
+        self._draw_volume_slider(sw, sh)
+
+    def _draw_volume_slider(self, sw: int, sh: int) -> None:
+        """Volume slider for the pause menu. Up/Down adjust; the bar is drag-clickable."""
+        bar_w, bar_h = 360, 8
+        bx = (sw - bar_w) // 2
+        by = sh // 2 + 20
+        rect = pygame.Rect(bx, by, bar_w, bar_h)
+        self._volume_slider_rect = rect
+
+        if self._small_font:
+            label = self._small_font.render(
+                f"Volume  {int(round(self._volume * 100))}%   (Up / Down)", True, (220, 220, 220))
+            self._screen.blit(label, ((sw - label.get_width()) // 2, by - 26))
+
+        # Track
+        pygame.draw.rect(self._screen, (90, 90, 90), rect, border_radius=4)
+        # Fill
+        fill_w = int(bar_w * self._volume)
+        if fill_w > 0:
+            pygame.draw.rect(self._screen, (90, 200, 120),
+                             pygame.Rect(bx, by, fill_w, bar_h), border_radius=4)
+        # Knob
+        kx = bx + fill_w
+        pygame.draw.circle(self._screen, (240, 240, 240), (kx, by + bar_h // 2), 9)
+        pygame.draw.circle(self._screen, (60, 60, 60), (kx, by + bar_h // 2), 9, 2)
 
     def update(self, landmark_data=None, handedness_data=None,
                pose_data=None,
@@ -376,9 +444,10 @@ class RenderEngine:
             self._draw_debug_panel(landmark_data, gesture_debug, voice_debug, narration_debug)
             if scene_debug:
                 self._draw_scene_panel(scene_debug)
-
-        if landmark_data or pose_data:
-            self._draw_hand_mini_panel(landmark_data, handedness_data, pose_data)
+            # Skeleton preview is a dev overlay — gate it on debug so it respects
+            # the D toggle and stays off during the live experience.
+            if landmark_data or pose_data:
+                self._draw_hand_mini_panel(landmark_data, handedness_data, pose_data)
 
         pygame.display.flip()
 
@@ -490,7 +559,9 @@ class RenderEngine:
         if self._pending_audio:
             try:
                 sound = pygame.mixer.Sound(self._pending_audio)
-                pygame.mixer.Channel(0).play(sound)
+                ch = pygame.mixer.Channel(0)
+                ch.set_volume(self._volume)
+                ch.play(sound)
             except Exception as exc:
                 print(f"[RenderEngine] audio load failed: {exc}")
             self._pending_audio = None
@@ -649,7 +720,9 @@ class RenderEngine:
         channel = data.get("channel", 1)
         try:
             sound = pygame.mixer.Sound(path)
-            pygame.mixer.Channel(channel).play(sound)
+            ch = pygame.mixer.Channel(channel)
+            ch.set_volume(self._volume)
+            ch.play(sound)
         except Exception as exc:
             print(f"[RenderEngine] SFX load failed: {exc}")
 
@@ -664,7 +737,7 @@ class RenderEngine:
         self._seg_loop   = data.get("loop", True)
         self._seg_anchor = time.monotonic()
         self._seg_done   = False
-        print(f"[RenderEngine] play_segment [{self._seg_start}–{self._seg_end}]  "
+        print(f"[RenderEngine] play_segment [{self._seg_start}-{self._seg_end}]  "
               f"loop={self._seg_loop}")
 
     def _on_render_event(self, data: dict):
