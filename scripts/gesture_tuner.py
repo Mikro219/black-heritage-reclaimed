@@ -774,8 +774,9 @@ def draw_forward_point_info(frame, params, lm_list, w, h, accent):
         break  # first hand only
 
 
-def draw_survey_info(frame, context, params, lm_list, w, h, accent):
-    """Overlay for survey: brow threshold line + phase indicator + scan direction."""
+def draw_survey_info(frame, context, params, pose_lm, w, h, accent):
+    """Overlay for survey: brow threshold line + phase indicator + scan direction.
+    Pose-based: wrist dots come from Pose landmarks 15/16, same as the detector."""
     brow_y = params.get("brow_y", 0.45)
     min_x_delta = params.get("min_x_delta", 0.06)
     phase = context.get("survey_phase", 0)
@@ -811,19 +812,24 @@ def draw_survey_info(frame, context, params, lm_list, w, h, accent):
             cv2.putText(frame, f"last scan dir: {last_dir}",
                         (8, by_px + 46), cv2.FONT_HERSHEY_SIMPLEX, 0.50, accent, 1, cv2.LINE_AA)
 
-    # Live wrist Y indicator
-    if lm_list:
-        wy = lm_list[0].landmark[0].y
-        wx_px = int((1 - lm_list[0].landmark[0].x) * w)
-        wy_px = int(wy * h)
-        above = wy < brow_y
-        dot_color = accent if above else (80, 80, 80)
-        cv2.circle(frame, (wx_px, wy_px), 8, dot_color, -1, cv2.LINE_AA)
-        cv2.line(frame, (wx_px - 14, wy_px), (wx_px + 14, wy_px),
-                 (80, 80, 80), 1, cv2.LINE_AA)
-        cv2.putText(frame, f"wrist.y={wy:.3f} {'✓ above' if above else 'below'}",
-                    (wx_px + 14, wy_px + 4),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.42, dot_color, 1, cv2.LINE_AA)
+    # Live wrist indicators — POSE wrists (15/16), matching the detector.
+    # The tracked (locked) side draws large in the accent colour.
+    if pose_lm is not None:
+        tracked_side = context.get("survey_side")
+        for side, idx in (("L", 15), ("R", 16)):
+            wr = pose_lm[idx]
+            if getattr(wr, "visibility", 1.0) < params.get("min_visibility", 0.5):
+                continue
+            wx_px = int((1 - wr.x) * w)
+            wy_px = int(wr.y * h)
+            above = wr.y < brow_y
+            is_tracked = side == tracked_side
+            dot_color = accent if (above or is_tracked) else (80, 80, 80)
+            cv2.circle(frame, (wx_px, wy_px), 10 if is_tracked else 7,
+                       dot_color, -1, cv2.LINE_AA)
+            label = f"{side}{' [tracked]' if is_tracked else ''}  y={wr.y:.3f}"
+            cv2.putText(frame, label, (wx_px + 14, wy_px + 4),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.42, dot_color, 1, cv2.LINE_AA)
 
 
 # ── Text / panel helpers ─────────────────────────────────────────────────────
@@ -1370,7 +1376,7 @@ def main():
             draw_forward_point_info(frame, live_params, lm_list, w, h, accent)
 
         elif gtype == "survey":
-            draw_survey_info(frame, context, live_params, lm_list, w, h, accent)
+            draw_survey_info(frame, context, live_params, pose_lm, w, h, accent)
 
         elif gtype == "directional_point":
             accepted = set(live_params.get("directions", ["left","right","up","down"]))
@@ -1530,11 +1536,14 @@ def main():
             pose_src = "pose" if pose_lm else "fixed"
             state_lines.append((f"brow_y={brow_y_live:.3f} ({pose_src})  min_x_delta={live_params.get('min_x_delta', 0.06):.2f}",
                                  (160, 200, 160) if pose_lm else (120, 120, 120)))
+            tracked = context.get("survey_side")
+            if tracked:
+                state_lines.append((f"tracked wrist: {tracked} (pose)", (160, 200, 160)))
             if phase == 2:
                 last_dir = context.get("scan_last_direction")
                 seg_start = context.get("scan_segment_start_x")
-                if lm_list and seg_start is not None:
-                    cur_x = lm_list[0].landmark[0].x
+                if pose_lm and tracked and seg_start is not None:
+                    cur_x = pose_lm[15 if tracked == "L" else 16].x
                     delta = abs(cur_x - seg_start)
                     state_lines.append((f"scan dx={delta:.3f}  last_dir: {last_dir or '—'}",
                                          accent if delta >= live_params.get("min_x_delta", 0.06) else (200, 200, 200)))

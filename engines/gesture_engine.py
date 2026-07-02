@@ -37,7 +37,7 @@ _POSE_DETECTORS = {"arms_crossed", "run_arms", "unravel", "paddle",
 # touch_head (use_pose) reads pose wrists too, so both hands raised to the crown
 # (AL-08-005 hands_to_head) still register when Hands drops them to head occlusion.
 _NO_HANDS_DETECTORS = {"arms_crossed", "run_arms", "unravel", "paddle", "point_region",
-                       "touch_head", "throw", "spread_arms"}
+                       "touch_head", "throw", "spread_arms", "survey"}
 
 
 def _inject_pose_params(gtype: str, params: dict, pose_lm) -> dict:
