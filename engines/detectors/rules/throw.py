@@ -1,30 +1,36 @@
 """
-throw — overhand throwing motion: one hand starts above the shoulder line, then
-within a short window snaps below it while growing sharply in apparent size
-(z-approach toward the camera / "out of the screen").
+throw — overhand throwing motion: one hand winds up above the shoulder line
+(arming stays active for as long as the hand is up there), then fires when the
+hand snaps below the shoulder line within the stroke window.
 
 Pose-primary: the above/below-shoulder phase tracking uses Pose wrists so the
 stroke still tracks when MediaPipe Hands loses the motion-blurred hand mid-throw.
-The z-growth check prefers the Hands bounding-box area (the same z-proxy used by
-push_out / forward_reach); when no matching hand bbox is available on either end
-of the stroke it falls back to the Pose wrist z delta (Pose z is hip-normalised;
-more negative = closer to the camera).
+
+By default the release check is just the above->below crossing — lenient, public
+installation. Set `require_growth: true` to additionally demand the hand grow in
+apparent size during the stroke (z-approach toward the camera): the growth check
+prefers the Hands bounding-box area (the same z-proxy as push_out /
+forward_reach) and falls back to the Pose wrist z delta when no hand bbox is
+available (Pose z is hip-normalised; more negative = closer to the camera).
 
 Either arm can throw. Both are tracked independently; the first to complete a
 valid stroke fires.
 
 Params:
-  min_growth_pct (float): required % hand-bbox area growth between the armed
-                          (above-shoulder) baseline and the release (below-
-                          shoulder) frame. Default 40.
-  min_pose_z_delta (float): fallback z-approach threshold on the Pose wrist z
-                          when hand bboxes are unavailable. Default 0.2.
   max_stroke_ms (float): max time allowed between leaving the above-shoulder
                           zone and crossing below the shoulder line. A slow
                           lower-and-drop is not a throw. Default 600.
   shoulder_margin (float): normalised y margin around the shoulder line — the
                           wrist must be margin ABOVE it to arm and margin BELOW
                           it to release, giving the stroke hysteresis. Default 0.03.
+  require_growth (bool): if True, the release must also pass the z-approach
+                          growth check below. Default False (crossing suffices).
+  min_growth_pct (float): required % hand-bbox area growth between the armed
+                          (above-shoulder) baseline and the release frame.
+                          Only used with require_growth. Default 40.
+  min_pose_z_delta (float): fallback z-approach threshold on the Pose wrist z
+                          when hand bboxes are unavailable. Only used with
+                          require_growth. Default 0.2.
   min_visibility (float): Pose wrist visibility gate (phantom estimated wrists
                           are ignored, same rule as point_region). Default 0.5.
 
@@ -32,7 +38,7 @@ Future (Orbbec Gemini 335): with a real depth stream, the growth check should be
 replaced by an actual depth delta on the wrist (see engines/depth/orbbec_camera.py);
 the params anticipate a `min_depth_delta_mm` alternative.
 
-Context keys: throw_armed (dict per side), throw_fired
+Context keys: throw_armed (dict per side)
 """
 
 import math
@@ -69,6 +75,7 @@ def detect(landmarks, params: dict, context: dict) -> bool:
         context["throw_armed"] = {}
         return False
 
+    require_growth  = params.get("require_growth", False)
     min_growth      = params.get("min_growth_pct", 40) / 100.0
     min_z_delta     = params.get("min_pose_z_delta", 0.2)
     max_stroke_s    = params.get("max_stroke_ms", 600) / 1000.0
@@ -110,16 +117,20 @@ def detect(landmarks, params: dict, context: dict) -> bool:
         if not below:
             continue   # still crossing the margin band — keep waiting
 
-        # Release frame: wrist is below the shoulder within the stroke window.
-        # z-growth check — hand bbox growth preferred, pose z delta as fallback.
-        grew = False
+        # Release frame: wrist crossed below the shoulder within the stroke window.
+        armed.pop(side, None)
+
+        if not require_growth:
+            context["throw_armed"] = {}
+            return True
+
+        # Optional strict mode: also demand z-approach growth during the stroke —
+        # hand bbox growth preferred, pose z delta as fallback.
         if state["area"] and area:
             grew = (area / state["area"]) >= 1.0 + min_growth
         else:
             z_now = getattr(wrist, "z", 0.0)
             grew = (state["z"] - z_now) >= min_z_delta
-
-        armed.pop(side, None)
         if grew:
             context["throw_armed"] = {}
             return True

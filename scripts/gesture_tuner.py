@@ -319,6 +319,18 @@ GESTURES = [
         tune_key2="sync_window_ms", tune_step2=50,
         accent=(80, 255, 160), highlights=[0, 11, 12, 15, 16],
     ),
+    # ── throw ─────────────────────────────────────────────────────────────
+    dict(
+        name="throw",
+        label="OI · Scene 11 · throw_rope (act 11 one-shot, shot 66)",
+        desc="Wind up above shoulder, snap below the line to fire  |  +/-: max_stroke_ms  |  [/]: shoulder_margin",
+        type="throw",
+        params={"max_stroke_ms": 600, "shoulder_margin": 0.03,
+                "require_growth": False, "min_growth_pct": 40, "min_pose_z_delta": 0.2},
+        tune_key="max_stroke_ms", tune_step=50,
+        tune_key2="shoulder_margin", tune_step2=0.01,
+        accent=(255, 120, 200), highlights=[0, 11, 12, 15, 16],
+    ),
 ]
 
 # ── Named thresholds (mirrors presence_bilateral.py) ────────────────────────
@@ -1066,6 +1078,39 @@ def draw_unravel_info(frame, context, params, pose_lm, w, h, accent):
                 (12, h - 40), cv2.FONT_HERSHEY_SIMPLEX, 0.55, accent, 1, cv2.LINE_AA)
 
 
+def draw_throw_info(frame, context, params, pose_lm, lm_list, w, h, accent):
+    """Per-arm shoulder line with the arm/release margin band; wrist dots show
+    the wind-up (ARMED) state read from context['throw_armed']."""
+    if pose_lm is None:
+        return
+    margin = params.get("shoulder_margin", 0.03)
+    armed = context.get("throw_armed", {})
+
+    for side, wrist_i, shoulder_i in (("L", 15, 11), ("R", 16, 12)):
+        sh = pose_lm[shoulder_i]
+        wr = pose_lm[wrist_i]
+        sh_px = int((1 - sh.x) * w)
+        arm_y = int((sh.y - margin) * h)   # wind-up line (must get above)
+        rel_y = int((sh.y + margin) * h)   # release line (must snap below)
+        x0, x1 = max(sh_px - 160, 0), min(sh_px + 160, w)
+        cv2.line(frame, (x0, arm_y), (x1, arm_y), accent, 2, cv2.LINE_AA)
+        cv2.line(frame, (x0, rel_y), (x1, rel_y), (150, 150, 150), 1, cv2.LINE_AA)
+        cv2.putText(frame, "arm", (x0 + 4, arm_y - 5),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, accent, 1, cv2.LINE_AA)
+        cv2.putText(frame, "release", (x0 + 4, rel_y + 14),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (150, 150, 150), 1, cv2.LINE_AA)
+
+        wx, wy = int((1 - wr.x) * w), int(wr.y * h)
+        is_armed = side in armed
+        cv2.circle(frame, (wx, wy), 10, accent if is_armed else (160, 160, 160), -1)
+        if is_armed:
+            cv2.putText(frame, f"{side} ARMED", (wx + 14, wy + 4),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, accent, 1, cv2.LINE_AA)
+
+    cv2.putText(frame, "wind up ABOVE the line, snap BELOW while the hand approaches the camera",
+                (12, h - 40), cv2.FONT_HERSHEY_SIMPLEX, 0.5, accent, 1, cv2.LINE_AA)
+
+
 def draw_paddle_info(frame, context, params, pose_lm, w, h, accent):
     """Show midline, stroke count, and same-side status."""
     if pose_lm is None:
@@ -1399,6 +1444,9 @@ def main():
 
         elif gtype == "paddle":
             draw_paddle_info(frame, context, live_params, pose_lm, w, h, accent)
+
+        elif gtype == "throw":
+            draw_throw_info(frame, context, live_params, pose_lm, lm_list, w, h, accent)
 
         # ── FIRED flash ───────────────────────────────────────────────────
         if time.monotonic() - fired_at < 1.0:
@@ -1799,6 +1847,48 @@ def main():
             else:
                 state_lines.append(("POSE NONE — cannot fire", (200, 80, 80)))
             state_lines.append(("stroke progress:", (200, 200, 200)))
+
+        elif gtype == "throw":
+            armed = context.get("throw_armed", {})
+            require_growth = live_params.get("require_growth", False)
+            min_growth = live_params.get("min_growth_pct", 40) / 100.0
+            max_stroke_s = live_params.get("max_stroke_ms", 600) / 1000.0
+            pct = 0.0
+            if pose_lm:
+                from engines.detectors.rules.throw import _nearest_hand_area
+                now_t = time.monotonic()
+                for side, wrist_i in (("L", 15), ("R", 16)):
+                    wr = pose_lm[wrist_i]
+                    st = armed.get(side)
+                    if st is None:
+                        state_lines.append((f"{side}: raise hand above shoulder line to arm",
+                                             (120, 120, 120)))
+                        continue
+                    elapsed = now_t - st["t"]
+                    if not require_growth:
+                        # Lenient mode: crossing below the line fires — armed = ready.
+                        pct = max(pct, 1.0)
+                        state_lines.append((f"{side}: ARMED — snap below the line to FIRE  "
+                                             f"(window {elapsed:.2f}s/{max_stroke_s:.2f}s after leaving)",
+                                             accent))
+                        continue
+                    area = _nearest_hand_area(lm_list, wr.x, wr.y)
+                    if st["area"] and area:
+                        ratio = area / st["area"] - 1.0
+                        pct = max(pct, min(max(ratio, 0.0) / min_growth, 1.0))
+                        state_lines.append((f"{side}: ARMED {elapsed:.2f}s/{max_stroke_s:.2f}s  "
+                                             f"growth={ratio:+.0%}  need={min_growth:.0%}  [hand bbox]",
+                                             accent))
+                    else:
+                        zd = st["z"] - getattr(wr, "z", 0.0)
+                        need_z = live_params.get("min_pose_z_delta", 0.2)
+                        pct = max(pct, min(max(zd, 0.0) / need_z, 1.0))
+                        state_lines.append((f"{side}: ARMED {elapsed:.2f}s/{max_stroke_s:.2f}s  "
+                                             f"z-delta={zd:+.2f}  need={need_z:.2f}  [pose-z fallback]",
+                                             accent))
+            else:
+                state_lines.append(("POSE NONE — cannot fire", (200, 80, 80)))
+            state_lines.append(("throw progress:", (200, 200, 200)))
 
         else:
             # Generic: dump any scalar context values

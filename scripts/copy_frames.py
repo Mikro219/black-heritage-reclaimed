@@ -110,11 +110,11 @@ def copy_shot(act: str, shot: str, start: int, end: int, force: bool) -> None:
     dst.mkdir(parents=True, exist_ok=True)
 
     for local_idx, global_idx in enumerate(range(start, end + 1), start=1):
-        src_file = SRC / f"{global_idx:05d}.jpg"
+        src_file = SRC / f"{global_idx:05d}.png"
         if not src_file.exists():
-            print(f"  WARN   missing source frame {global_idx:05d}.jpg  (shot_{shot} local {local_idx:04d})")
+            print(f"  WARN   missing source frame {global_idx:05d}.png  (shot_{shot} local {local_idx:04d})")
             continue
-        shutil.copy2(src_file, dst / f"{local_idx:04d}.jpg")
+        shutil.copy2(src_file, dst / f"{local_idx:04d}.png")
 
     count = end - start + 1
     print(f"  OK     {act}/shot_{shot}  {count} frames  (0001 … {count:04d})")
