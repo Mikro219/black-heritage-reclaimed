@@ -141,7 +141,7 @@ GESTURES = [
         type="survey",
         params={"brow_y": 0.45, "hold_ms": 200, "scan_window_ms": 2000, "min_x_delta": 0.06},
         tune_key="scan_window_ms", tune_step=100,
-        tune_key2="min_x_delta", tune_step2=0.01,
+        tune_key2="min_x_delta", tune_step2=0.005, tune_min2=0.005,
         accent=(200, 180, 255), highlights=[0],
     ),
     # ── directional_draw (stroke chains) ─────────────────────────────────
@@ -2050,18 +2050,25 @@ def _save_tune_params(gestures: list, profile_path: str) -> None:
 
 
 def _adjust_tune_param(gesture, param_num: int, direction: int):
-    """Adjust a tunable param. param_num: 1=primary (+/-), 2=secondary ([/])."""
+    """Adjust a tunable param. param_num: 1=primary (+/-), 2=secondary ([/]).
+
+    The lower clamp defaults to one step (a param can't reach 0 accidentally),
+    but a gesture can declare tune_min / tune_min2 to allow finer floors — e.g.
+    survey's min_x_delta can be tuned below 0.01 for subtle pose-wrist scans.
+    """
     if param_num == 1:
         key = gesture.get("tune_key")
         step = gesture.get("tune_step", 50)
+        floor = gesture.get("tune_min", step)
     else:
         key = gesture.get("tune_key2")
         step = gesture.get("tune_step2", 0.01)
+        floor = gesture.get("tune_min2", step)
     if not key:
         return
     current = gesture["params"].get(key, step * 8)
     new_val = current + direction * step
-    new_val = max(step, new_val)
+    new_val = max(floor, new_val)
     if isinstance(step, float):
         new_val = round(new_val, 4)
     gesture["params"][key] = new_val
