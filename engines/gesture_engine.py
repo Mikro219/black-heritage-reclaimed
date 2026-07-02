@@ -392,7 +392,9 @@ class GestureEngine:
         # Compute live pose-derived thresholds (brow line, shoulder height, mouth/ear
         # positions) so detection matches the tuner instead of using fixed values.
         params = _inject_pose_params(detector_type, params, pose_lm)
-        return detector_fn(landmarks, params, context)
+        # MediaPipe reports None (not []) when no hands are visible, and the no-hands
+        # pose path dispatches anyway — normalise so detectors never see None.
+        return detector_fn(landmarks or [], params, context)
 
     def close(self):
         # Stop the worker before tearing down the MediaPipe graphs / camera so the

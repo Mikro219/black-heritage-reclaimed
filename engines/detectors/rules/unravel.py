@@ -67,7 +67,8 @@ def detect(landmarks, params: dict, context: dict) -> bool:
 
     # Hand wrist landmarks (point 0) are more accurate than Pose wrists for
     # fine oscillation tracking. Fall back to pose when < 2 hands visible.
-    if len(landmarks) >= 2:
+    # (landmarks can be None on the no-hands dispatch path.)
+    if landmarks and len(landmarks) >= 2:
         sorted_hands = sorted(landmarks, key=lambda h: h.landmark[0].x)
         lw = sorted_hands[0].landmark[0]
         rw = sorted_hands[1].landmark[0]

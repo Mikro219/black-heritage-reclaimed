@@ -10,3 +10,8 @@ Thumbs.db
 # Disk-backed frame packs (huge, regenerated from frames/ on first run)
 framecache.npy
 *.npy.building
+
+# PyInstaller output (scripts/build_exe.py)
+build/
+dist/
+*.spec
