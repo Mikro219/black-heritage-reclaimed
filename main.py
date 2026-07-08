@@ -282,7 +282,7 @@ def detector_test(detector_name: str, params: dict):
     _cv2.destroyAllWindows()
 
 
-def _run_dry_run(config: dict) -> None:
+def _run_dry_run(config: dict, scenes_root=None) -> None:
     """
     Console-only dry-run: walk all 78 shots through ShotSequencePlayer.
 
@@ -292,8 +292,9 @@ def _run_dry_run(config: dict) -> None:
 
     Usage:
         py -3.12 main.py --dry-run
+        py -3.12 main.py --dry-run --scenes export/scenes_generated
     """
-    shots = load_sequence(SCENES_ROOT, config)
+    shots = load_sequence(scenes_root or SCENES_ROOT, config)
     bus   = EventBus()
 
     # Shorten every HOLD timeout so the run completes in under a second
@@ -350,6 +351,10 @@ def main():
     parser.add_argument("--profile", metavar="NAME", help="Host profile name")
     parser.add_argument("--start-shot", metavar="SHOT", default=None,
                         help="Shot number to start at (e.g. 09). Skips all earlier shots.")
+    parser.add_argument("--scenes", metavar="DIR", default=None,
+                        help="Alternate scenes root (a folder containing sequence.json), "
+                             "e.g. export/scenes_generated from the Experience Builder. "
+                             "Default: the live scenes/ tree.")
     parser.add_argument("--dry-run", action="store_true",
                         help="Console-only: walk all 78 shots through ShotSequencePlayer "
                              "with no camera, display, or audio, then exit")
@@ -359,8 +364,16 @@ def main():
                         help="JSON params dict for --detector-test (default: {})")
     args = parser.parse_args()
 
+    scenes_root = SCENES_ROOT
+    if args.scenes:
+        scenes_root = Path(args.scenes).resolve()
+        if not (scenes_root / "sequence.json").exists():
+            sys.exit(f"[main] --scenes {scenes_root} has no sequence.json — "
+                     f"point it at a scenes root (e.g. export/scenes_generated)")
+        print(f"[main] Using scenes root: {scenes_root}", file=sys.stderr)
+
     if args.dry_run:
-        _run_dry_run(load_config())
+        _run_dry_run(load_config(), scenes_root)
         return
 
     if args.detector_test:
@@ -390,7 +403,7 @@ def main():
     gesture = GestureEngine(config, bus)
     voice   = VoiceEngine(config, bus)
 
-    shots             = load_sequence(SCENES_ROOT, config)
+    shots             = load_sequence(scenes_root, config)
     player            = ShotSequencePlayer(shots, config, bus)
     narration_adapter = NarrationAdapter(config, bus, shots)
     tutorial          = TutorialEngine(config, bus, gesture)
