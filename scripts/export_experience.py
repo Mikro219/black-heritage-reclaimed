@@ -83,17 +83,17 @@ def flow_next(project: dict, block_id: str) -> str | None:
 
 
 def indegree(project: dict) -> dict:
-    """Structural fan-in per block. Timeout edges are excluded: a timeout is a
-    fallback onto an existing path, not a path of its own, so it must not make
-    its target look like a convergence point."""
+    """Structural fan-in per block. Timeout edges and voice-alias branches are
+    excluded: both are alternate triggers onto an existing path, not paths of
+    their own, so they must not make their target look like a convergence."""
     deg: dict = {}
     for e in project.get("edges", []):
         deg[e.get("to")] = deg.get(e.get("to"), 0) + 1
     for b in project["blocks"]:
         if b.get("type") == "choice":
-            for br in b.get("branches", []) or []:
-                if br.get("to"):
-                    deg[br["to"]] = deg.get(br["to"], 0) + 1
+            fork_branches, _voice = split_choice_branches(b)
+            for br in fork_branches[:2]:
+                deg[br["to"]] = deg.get(br["to"], 0) + 1
     return deg
 
 
@@ -148,10 +148,19 @@ def linearize(project: dict) -> list[dict]:
             ordered.append({"block": node, "play_if_tag": tag})
 
             if node.get("type") == "choice":
-                branches = [br for br in (node.get("branches") or []) if br.get("to")]
+                # Voice branches are spoken aliases for a fork side (wired in
+                # choice_metadata) — only GESTURE branches define the fork's
+                # left/right chains here.
+                branches, voice_branches = split_choice_branches(node)
+                fork_targets = {br["to"] for br in branches[:2]}
+                for vbr in voice_branches:
+                    if vbr.get("to") not in fork_targets:
+                        warn(f"choice {node.get('name')!r}: voice branch "
+                             f"{vbr.get('label')!r} target is not a fork side — "
+                             f"its chain is not emitted")
                 if len(branches) > 2:
-                    warn(f"choice {node.get('name')!r} has {len(branches)} branches; "
-                         f"the runtime forks two ways — extra branches dropped")
+                    warn(f"choice {node.get('name')!r} has {len(branches)} gesture "
+                         f"branches; the runtime forks two ways — extra branches dropped")
                     branches = branches[:2]
                 tt_to = (node.get("timeout") or {}).get("to")
                 if tt_to and branches and tt_to != branches[0]["to"]:
@@ -231,14 +240,26 @@ def window_frames(win: dict, n_frames: int, fps: int) -> tuple[int, int]:
 
 
 def gesture_windows(block: dict) -> list[dict]:
-    wins = []
-    for w in enabled_windows(block):
-        if w.get("detector") == "voice":
-            warn(f"block {block.get('name')!r}: voice window {w.get('label')!r} "
-                 f"needs voice-engine wiring — left out of the export")
-            continue
-        wins.append(w)
-    return sorted(wins, key=lambda w: w.get("appears_s") or 0)
+    """Enabled windows in appearance order — gesture AND voice. Voice windows
+    become keyword OI states (playback) or spoken branch picks (choice)."""
+    return sorted(enabled_windows(block), key=lambda w: w.get("appears_s") or 0)
+
+
+def is_voice(win: dict) -> bool:
+    return win.get("detector") == "voice"
+
+
+def voice_oi_dict(win: dict, idx: int) -> dict:
+    """FSM `oi` payload for a voice window: a `keywords` list makes the runtime
+    open a VI window (reaction tier) instead of arming a gesture detector."""
+    kw = (win.get("params") or {}).get("keyword") or "go"
+    return {
+        "id": slug(win.get("label"), f"vi_{idx}"),
+        "keywords": [kw],
+        "mode": (win.get("params") or {}).get("mode", "keyword"),
+        "sfx": "detect.mp3",
+        "feedback": "green_flash",
+    }
 
 
 def playback_metadata(block: dict, shot_id: str, n_frames: int, fps: int) -> dict:
@@ -251,7 +272,7 @@ def playback_metadata(block: dict, shot_id: str, n_frames: int, fps: int) -> dic
     if not wins:
         return meta
 
-    if len(wins) == 1:
+    if len(wins) == 1 and not is_voice(wins[0]):
         a, b = window_frames(wins[0], n_frames, fps)
         inter = oi_dict(wins[0], 1)
         inter["tier"] = "OI"
@@ -259,7 +280,8 @@ def playback_metadata(block: dict, shot_id: str, n_frames: int, fps: int) -> dic
         meta["interaction"] = inter
         return meta
 
-    # 2+ windows: play-through FSM with oi states (shot 24 pattern)
+    # 2+ windows (or any voice window): play-through FSM with oi states
+    # (shot 24 pattern; voice windows become keyword VI states)
     meta["kind"] = "interactive"
     segments: dict = {}
     states: dict = {}
@@ -294,7 +316,8 @@ def playback_metadata(block: dict, shot_id: str, n_frames: int, fps: int) -> dic
             order.append(gap)
         name = f"oi_{i + 1}"
         segments[name] = [a, b]
-        states[name] = {"segment": name, "loop": False, "oi": oi_dict(w, i + 1)}
+        payload = voice_oi_dict(w, i + 1) if is_voice(w) else oi_dict(w, i + 1)
+        states[name] = {"segment": name, "loop": False, "oi": payload}
         order.append(name)
         cursor = b + 1
     if cursor <= n_frames:
@@ -319,16 +342,30 @@ def playback_metadata(block: dict, shot_id: str, n_frames: int, fps: int) -> dic
     return meta
 
 
-def choice_metadata(block: dict, shot_id: str, n_frames: int, fps: int) -> dict:
+def split_choice_branches(block: dict) -> tuple[list[dict], list[dict]]:
+    """(fork_branches, voice_branches): the first two branches whose window is
+    a gesture define the runtime fork's left/right; voice-window branches are
+    spoken aliases for a side (matched by target block)."""
+    wins = {w["id"]: w for w in (block.get("windows") or [])}
     branches = [br for br in (block.get("branches") or []) if br.get("to")]
+    fork, voice = [], []
+    for br in branches:
+        w = wins.get(br.get("window"))
+        (voice if (w and is_voice(w)) else fork).append(br)
+    return fork, voice
+
+
+def choice_metadata(block: dict, shot_id: str, n_frames: int, fps: int) -> dict:
+    fork_branches, voice_branches = split_choice_branches(block)
     wins = gesture_windows(block)
+    win_by_id = {w["id"]: w for w in wins}
     hold_ms = 600
     for w in wins:
         if isinstance((w.get("params") or {}).get("hold_ms"), (int, float)):
             hold_ms = int(w["params"]["hold_ms"])
             break
     non_point = [w for w in wins
-                 if w.get("detector") not in
+                 if not is_voice(w) and w.get("detector") not in
                  ("point_region", "directional_point", "point_target_held", "forward_point")]
     if non_point:
         warn(f"choice {block.get('name')!r}: fork exported as the runtime's "
@@ -337,12 +374,13 @@ def choice_metadata(block: dict, shot_id: str, n_frames: int, fps: int) -> dict:
 
     intro_end = max(1, n_frames - 1)
     segments = {"intro": [1, intro_end], "idle_loop": [n_frames, n_frames]}
+    waiting = {"segment": "idle_loop", "loop": True,
+               "directions": ["left", "right"]}
     fsm = {
         "gesture_type": "region",
         "initial": "waiting",
         "states": {
-            "waiting":       {"segment": "idle_loop", "loop": True,
-                              "directions": ["left", "right"]},
+            "waiting":       waiting,
             "confirm_left":  {"segment": "idle_loop", "loop": False,
                               "on_enter_sfx": "detect.mp3"},
             "confirm_right": {"segment": "idle_loop", "loop": False,
@@ -359,12 +397,45 @@ def choice_metadata(block: dict, shot_id: str, n_frames: int, fps: int) -> dict:
             "on_timeout": "auto_advance",
         },
     }
+
+    # Spoken branch picks: a voice window whose branch targets the same block
+    # as a fork side becomes "say the keyword to pick that side". The runtime
+    # holds ONE voice keyword per state, so only the first is wired.
+    side_by_target = {}
+    for idx, br in enumerate(fork_branches[:2]):
+        side_by_target[br["to"]] = "left" if idx == 0 else "right"
+    voice_wired = False
+    for br in voice_branches:
+        w = win_by_id.get(br.get("window"))
+        kw = ((w or {}).get("params") or {}).get("keyword") or "go"
+        side = side_by_target.get(br.get("to"))
+        if side is None:
+            warn(f"choice {block.get('name')!r}: voice branch {br.get('label')!r} "
+                 f"targets a block that is not one of the two fork sides — skipped")
+            continue
+        if voice_wired:
+            warn(f"choice {block.get('name')!r}: the runtime supports one voice "
+                 f"keyword per hold — extra voice branch {br.get('label')!r} skipped")
+            continue
+        waiting["voice"] = kw
+        fsm["transitions"].insert(2, {"from": "waiting", "on": f"voice_{kw}",
+                                      "to": f"confirm_{side}"})
+        voice_wired = True
+        warn(f"choice {block.get('name')!r}: '{kw}' picks the {side} side by "
+             f"voice — note the runtime records fork choices from GESTURE picks "
+             f"only, so branch-gated shots after a voice pick fall back to the "
+             f"first branch")
+    for w in wins:
+        if is_voice(w) and not any(br.get("window") == w["id"] for br in voice_branches):
+            warn(f"choice {block.get('name')!r}: voice window {w.get('label')!r} "
+                 f"has no 'go to block' target — give it one to make it a spoken "
+                 f"branch pick (left out of the export)")
     return {
         "shot": shot_id,
         "kind": "interactive",
         "hold_ms": hold_ms,
         "_generated_from": {"block": block["id"], "name": block.get("name"),
-                            "branch_labels": [br.get("label") for br in branches[:2]]},
+                            "branch_labels": [br.get("label") for br in fork_branches[:2]]},
         "segments": segments,
         "interaction": {"tier": "CG", "hold_ms": hold_ms, "interaction_fsm": fsm},
         "fallback": {"timeout_s": int((block.get("timeout") or {}).get("seconds") or 30),
@@ -425,7 +496,11 @@ def resolve_detect_sound(project: dict, project_path: Path,
     for candidate in (project_path.parent / name, ROOT / "assets" / name, Path(name)):
         if candidate.exists():
             return candidate
-    return None
+    # Fall back to any copy in the live scenes tree (the runtime ships one per
+    # interactive shot, so the first hit is as good as any).
+    hits = sorted((ROOT / "scenes").glob(f"*/*/{name}")) + \
+           sorted((ROOT / "scenes").glob(f"*/*/audio/{name}"))
+    return hits[0] if hits else None
 
 
 # ---------------------------------------------------------------------------

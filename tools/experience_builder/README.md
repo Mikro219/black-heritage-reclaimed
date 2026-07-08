@@ -58,9 +58,20 @@ install). Everything runs locally; the MP4 never leaves your machine.
 | Choice (2 branches) | interactive region-fork FSM (point left/right, shot 09 pattern); branch chains gated with `play_if` |
 | Merge | no shot — it just ends `play_if` gating |
 
+**Voice windows** (detector "Voice keyword") export as real runtime wiring:
+
+- on a **playback block** they become keyword VI states in the play-through
+  FSM — saying the keyword during the window fires the detect sound + flash;
+- on a **choice block**, give the voice window a "go to block" target that
+  matches one of the two gesture branches and it becomes a *spoken branch
+  pick* (`"voice"` on the waiting state + a `voice_<keyword>` transition —
+  the shot 09 pattern). One keyword per choice; a voice window without a
+  target is preview-only and the export warns.
+
 Runtime constraints the editor inherits: forks are two-way (left/right),
-one `play_if` per shot, and `voice` windows are exported as a warning (they
-need the voice engine's per-shot wiring).
+one `play_if` per shot, one voice keyword per choice hold, and the runtime
+records fork choices from gesture picks only (a voice pick leaves branch-gated
+shots on the first-branch default — the export warns when this applies).
 
 ## Importing the existing experience
 

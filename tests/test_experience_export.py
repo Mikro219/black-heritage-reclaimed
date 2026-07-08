@@ -40,7 +40,8 @@ def fixture_project() -> dict:
              "range_s": [6.0, 12.0], "hold": "pause_end", "pos": [0, 0],
              "branches": [
                  {"id": "br_l", "window": "w_left", "to": "b_forest", "label": "Go Left"},
-                 {"id": "br_r", "window": "w_right", "to": "b_river", "label": "Go Right"}],
+                 {"id": "br_r", "window": "w_right", "to": "b_river", "label": "Go Right"},
+                 {"id": "br_v", "window": "w_say", "to": "b_river", "label": "Say river"}],
              "timeout": {"seconds": 20, "to": "b_forest"},
              "windows": [
                  {"id": "w_left", "label": "Go Left", "detector": "point_region",
@@ -50,6 +51,9 @@ def fixture_project() -> dict:
                  {"id": "w_right", "label": "Go Right", "detector": "point_region",
                   "params": {"hold_ms": 700},
                   "region": {"shape": "rect", "x": 0.7, "y": 0.3, "w": 0.25, "h": 0.4},
+                  "appears_s": 0.0, "duration_s": None},
+                 {"id": "w_say", "label": "Say river", "detector": "voice",
+                  "params": {"keyword": "river"}, "region": None,
                   "appears_s": 0.0, "duration_s": None}]},
             {"id": "b_forest", "type": "playback", "name": "Forest Path", "media": "m1",
              "range_s": [12.0, 21.0], "pos": [0, 0],
@@ -61,7 +65,7 @@ def fixture_project() -> dict:
                   "appears_s": 5.0, "duration_s": 2.0},
                  {"id": "w_voice", "label": "Say go", "detector": "voice",
                   "params": {"keyword": "go"}, "region": None,
-                  "appears_s": 6.0, "duration_s": 1.0}]},
+                  "appears_s": 7.5, "duration_s": 1.0}]},
             {"id": "b_river", "type": "playback", "name": "River Path", "media": "m1",
              "range_s": [21.0, 29.0], "pos": [0, 0], "windows": []},
             {"id": "b_merge", "type": "merge", "name": "Merge", "pos": [0, 0]},
@@ -89,6 +93,7 @@ class TestExperienceExport(unittest.TestCase):
         export_experience.warnings.clear()
         export_experience.export(cls.project_path, cls.out, do_frames=False,
                                  video_override=None, sound_override=None)
+        cls.export_warnings = list(export_experience.warnings)
         cls.shots = load_sequence(cls.out, {"fps": 30})
         cls.by_id = {s.shot: s for s in cls.shots}
 
@@ -145,11 +150,28 @@ class TestExperienceExport(unittest.TestCase):
         self.assertEqual(fsm["fallback"]["timeout_s"], 20)
         self.assertEqual(choice.interaction["hold_ms"], 700)  # from window params
 
-    def test_voice_window_excluded_with_warning(self):
+    def test_choice_voice_branch_is_spoken_pick(self):
+        """The 'Say river' voice branch targets the same block as Go Right, so
+        the fork's waiting state gains the keyword and a voice_<kw> transition
+        to confirm_right (the shot 09 pattern)."""
+        fsm = self.shots[1].interaction["interaction_fsm"]
+        self.assertEqual(fsm["states"]["waiting"].get("voice"), "river")
+        self.assertIn({"from": "waiting", "on": "voice_river", "to": "confirm_right"},
+                      fsm["transitions"])
+
+    def test_playback_voice_window_exports_as_keyword_oi(self):
+        """Forest Path's voice window becomes a keyword VI state in the
+        play-through FSM (shot 24 pattern with a `keywords` oi payload)."""
         forest = self.shots[2]
-        text = json.dumps(forest.interaction)
-        self.assertNotIn("voice", text)
-        self.assertTrue(any("voice window" in w for w in export_experience.warnings))
+        states = forest.interaction["interaction_fsm"]["states"]
+        voice_states = [st for st in states.values()
+                        if (st.get("oi") or {}).get("keywords")]
+        self.assertEqual(len(voice_states), 1)
+        self.assertEqual(voice_states[0]["oi"]["keywords"], ["go"])
+        self.assertEqual(voice_states[0]["oi"]["mode"], "keyword")
+        self.assertFalse(any("left out of the export" in w
+                             for w in self.export_warnings),
+                         "voice windows must export, not be dropped")
 
     # ── the live-tree invariants, applied to the generated tree ────────────
 

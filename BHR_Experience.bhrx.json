@@ -23,10 +23,10 @@
     {
       "id": "b_01",
       "type": "playback",
-      "name": "01 \u00b7 Prologue",
+      "name": "01 · Prologue",
       "media": "m1",
       "range_s": [
-        0.0,
+        0,
         172.333
       ],
       "pos": [
@@ -38,7 +38,7 @@
     {
       "id": "b_02",
       "type": "playback",
-      "name": "02 \u00b7 Quilt Awakens",
+      "name": "02 · Quilt Awakens",
       "media": "m1",
       "range_s": [
         172.333,
@@ -57,7 +57,13 @@
             "y_threshold": "shoulder",
             "hold_ms": 300
           },
-          "region": null,
+          "region": {
+            "shape": "rect",
+            "x": 0.24322796537074776,
+            "y": 0.5321043084849981,
+            "w": 0.5332956926919944,
+            "h": 0.4394281414597442
+          },
           "appears_s": 12.63,
           "duration_s": 5.2
         }
@@ -66,7 +72,7 @@
     {
       "id": "b_03",
       "type": "playback",
-      "name": "03 \u00b7 Quilt Awakens",
+      "name": "03 · Quilt Awakens",
       "media": "m1",
       "range_s": [
         200.6,
@@ -81,7 +87,7 @@
     {
       "id": "b_04",
       "type": "playback",
-      "name": "04 \u00b7 Quilt Awakens",
+      "name": "04 · Quilt Awakens",
       "media": "m1",
       "range_s": [
         213.433,
@@ -109,7 +115,7 @@
     {
       "id": "b_05",
       "type": "playback",
-      "name": "05 \u00b7 Quilt Awakens",
+      "name": "05 · Quilt Awakens",
       "media": "m1",
       "range_s": [
         235.067,
@@ -129,10 +135,10 @@
           },
           "region": {
             "shape": "rect",
-            "x": 0.55,
-            "y": 0.08,
-            "w": 0.28,
-            "h": 0.32
+            "x": 0.261850989559992,
+            "y": 0.07461747628033295,
+            "w": 0.20993227267875336,
+            "h": 0.3551542513167795
           },
           "appears_s": 10.83,
           "duration_s": 6.03
@@ -142,7 +148,7 @@
     {
       "id": "b_06",
       "type": "playback",
-      "name": "06 \u00b7 Crossroads",
+      "name": "06 · Crossroads",
       "media": "m1",
       "range_s": [
         261.867,
@@ -157,7 +163,7 @@
     {
       "id": "b_07",
       "type": "playback",
-      "name": "07 \u00b7 Crossroads",
+      "name": "07 · Crossroads",
       "media": "m1",
       "range_s": [
         271.867,
@@ -172,7 +178,7 @@
     {
       "id": "b_08",
       "type": "playback",
-      "name": "08 \u00b7 Crossroads",
+      "name": "08 · Crossroads",
       "media": "m1",
       "range_s": [
         285.8,
@@ -187,7 +193,7 @@
     {
       "id": "b_09",
       "type": "choice",
-      "name": "09 \u00b7 Crossroads",
+      "name": "09 · Crossroads",
       "media": "m1",
       "range_s": [
         304.933,
@@ -213,7 +219,7 @@
             "w": 0.3,
             "h": 0.5
           },
-          "appears_s": 0.0,
+          "appears_s": 0,
           "duration_s": null
         },
         {
@@ -230,7 +236,7 @@
             "w": 0.3,
             "h": 0.5
           },
-          "appears_s": 0.0,
+          "appears_s": 0,
           "duration_s": null
         },
         {
@@ -241,7 +247,7 @@
             "keyword": "go"
           },
           "region": null,
-          "appears_s": 0.0,
+          "appears_s": 0,
           "duration_s": null
         }
       ],
@@ -267,7 +273,7 @@
     {
       "id": "b_09_left",
       "type": "playback",
-      "name": "09L \u00b7 confirm_left",
+      "name": "09L · confirm_left",
       "media": "m1",
       "range_s": [
         336.033,
@@ -282,11 +288,11 @@
     {
       "id": "b_09_right",
       "type": "playback",
-      "name": "09R \u00b7 confirm_right",
+      "name": "09R · confirm_right",
       "media": "m1",
       "range_s": [
         352.033,
-        359.0
+        359
       ],
       "pos": [
         2310,
@@ -297,10 +303,10 @@
     {
       "id": "b_10",
       "type": "playback",
-      "name": "10 \u00b7 Flying Geese",
+      "name": "10 · Flying Geese",
       "media": "m1",
       "range_s": [
-        359.0,
+        359,
         367.933
       ],
       "pos": [
@@ -312,7 +318,7 @@
     {
       "id": "b_11",
       "type": "playback",
-      "name": "11 \u00b7 Flying Geese",
+      "name": "11 · Flying Geese",
       "media": "m1",
       "range_s": [
         367.933,
@@ -327,7 +333,7 @@
     {
       "id": "b_12",
       "type": "playback",
-      "name": "12 \u00b7 Flying Geese",
+      "name": "12 · Flying Geese",
       "media": "m1",
       "range_s": [
         383.133,
@@ -342,7 +348,7 @@
     {
       "id": "b_13",
       "type": "playback",
-      "name": "13 \u00b7 Flying Geese",
+      "name": "13 · Flying Geese",
       "media": "m1",
       "range_s": [
         395.9,
@@ -367,12 +373,12 @@
           },
           "region": {
             "shape": "rect",
-            "x": 0.0,
+            "x": 0,
             "y": 0.72,
-            "w": 1.0,
+            "w": 1,
             "h": 0.28
           },
-          "appears_s": 16.0,
+          "appears_s": 16,
           "duration_s": 7.9
         }
       ]
@@ -380,7 +386,7 @@
     {
       "id": "b_14",
       "type": "playback",
-      "name": "14 \u00b7 North Star",
+      "name": "14 · North Star",
       "media": "m1",
       "range_s": [
         435.267,
@@ -395,7 +401,7 @@
     {
       "id": "b_15",
       "type": "playback",
-      "name": "15 \u00b7 North Star",
+      "name": "15 · North Star",
       "media": "m1",
       "range_s": [
         445.2,
@@ -410,7 +416,7 @@
     {
       "id": "b_16",
       "type": "playback",
-      "name": "16 \u00b7 North Star",
+      "name": "16 · North Star",
       "media": "m1",
       "range_s": [
         455.667,
@@ -425,7 +431,7 @@
     {
       "id": "b_17",
       "type": "playback",
-      "name": "17 \u00b7 North Star",
+      "name": "17 · North Star",
       "media": "m1",
       "range_s": [
         473.4,
@@ -440,7 +446,7 @@
     {
       "id": "b_18",
       "type": "playback",
-      "name": "18 \u00b7 North Star",
+      "name": "18 · North Star",
       "media": "m1",
       "range_s": [
         483.333,
@@ -455,7 +461,7 @@
     {
       "id": "b_19",
       "type": "playback",
-      "name": "19 \u00b7 North Star (draw chain)",
+      "name": "19 · North Star (draw chain)",
       "media": "m1",
       "range_s": [
         489.167,
@@ -475,7 +481,7 @@
           },
           "region": null,
           "appears_s": 15.47,
-          "duration_s": 2.0
+          "duration_s": 2
         },
         {
           "id": "w_19_s1",
@@ -486,7 +492,7 @@
           },
           "region": null,
           "appears_s": 18.3,
-          "duration_s": 2.0
+          "duration_s": 2
         },
         {
           "id": "w_19_s2",
@@ -497,7 +503,7 @@
           },
           "region": null,
           "appears_s": 21.97,
-          "duration_s": 2.0
+          "duration_s": 2
         },
         {
           "id": "w_19_s3",
@@ -508,7 +514,7 @@
           },
           "region": null,
           "appears_s": 23.93,
-          "duration_s": 2.0
+          "duration_s": 2
         },
         {
           "id": "w_19_s4",
@@ -519,7 +525,7 @@
           },
           "region": null,
           "appears_s": 39.67,
-          "duration_s": 2.0
+          "duration_s": 2
         },
         {
           "id": "w_19_s5",
@@ -530,7 +536,7 @@
           },
           "region": null,
           "appears_s": 42.2,
-          "duration_s": 2.0
+          "duration_s": 2
         },
         {
           "id": "w_19_s6",
@@ -541,14 +547,14 @@
           },
           "region": null,
           "appears_s": 46.2,
-          "duration_s": 2.0
+          "duration_s": 2
         }
       ]
     },
     {
       "id": "b_20",
       "type": "playback",
-      "name": "20 \u00b7 North Star (draw chain)",
+      "name": "20 · North Star (draw chain)",
       "media": "m1",
       "range_s": [
         545.333,
@@ -568,7 +574,7 @@
           },
           "region": null,
           "appears_s": 13.97,
-          "duration_s": 2.0
+          "duration_s": 2
         },
         {
           "id": "w_20_s1",
@@ -579,7 +585,7 @@
           },
           "region": null,
           "appears_s": 18.23,
-          "duration_s": 2.0
+          "duration_s": 2
         },
         {
           "id": "w_20_s2",
@@ -590,7 +596,7 @@
           },
           "region": null,
           "appears_s": 22.1,
-          "duration_s": 2.0
+          "duration_s": 2
         },
         {
           "id": "w_20_s3",
@@ -601,7 +607,7 @@
           },
           "region": null,
           "appears_s": 25.9,
-          "duration_s": 2.0
+          "duration_s": 2
         },
         {
           "id": "w_20_oi4",
@@ -625,7 +631,7 @@
     {
       "id": "b_21",
       "type": "playback",
-      "name": "21 \u00b7 North Star",
+      "name": "21 · North Star",
       "media": "m1",
       "range_s": [
         616.4,
@@ -640,11 +646,11 @@
     {
       "id": "b_22",
       "type": "playback",
-      "name": "22 \u00b7 Monkey Wrench",
+      "name": "22 · Monkey Wrench",
       "media": "m1",
       "range_s": [
         621.4,
-        631.0
+        631
       ],
       "pos": [
         5560,
@@ -655,11 +661,11 @@
     {
       "id": "b_23",
       "type": "playback",
-      "name": "23 \u00b7 Monkey Wrench",
+      "name": "23 · Monkey Wrench",
       "media": "m1",
       "range_s": [
         630.967,
-        656.0
+        656
       ],
       "pos": [
         5810,
@@ -670,10 +676,10 @@
     {
       "id": "b_24",
       "type": "playback",
-      "name": "24 \u00b7 Monkey Wrench",
+      "name": "24 · Monkey Wrench",
       "media": "m1",
       "range_s": [
-        656.0,
+        656,
         712.933
       ],
       "pos": [
@@ -720,7 +726,7 @@
     {
       "id": "b_25",
       "type": "playback",
-      "name": "25 \u00b7 Monkey Wrench",
+      "name": "25 · Monkey Wrench",
       "media": "m1",
       "range_s": [
         712.933,
@@ -750,7 +756,7 @@
     {
       "id": "b_28",
       "type": "playback",
-      "name": "28 \u00b7 Shoofly",
+      "name": "28 · Shoofly",
       "media": "m1",
       "range_s": [
         751.933,
@@ -765,7 +771,7 @@
     {
       "id": "b_29",
       "type": "playback",
-      "name": "29 \u00b7 Shoofly",
+      "name": "29 · Shoofly",
       "media": "m1",
       "range_s": [
         760.267,
@@ -780,11 +786,11 @@
     {
       "id": "b_30",
       "type": "playback",
-      "name": "30 \u00b7 Shoofly",
+      "name": "30 · Shoofly",
       "media": "m1",
       "range_s": [
         795.267,
-        815.0
+        815
       ],
       "pos": [
         7060,
@@ -810,10 +816,10 @@
     {
       "id": "b_31",
       "type": "playback",
-      "name": "31 \u00b7 Shoofly",
+      "name": "31 · Shoofly",
       "media": "m1",
       "range_s": [
-        815.0,
+        815,
         834.467
       ],
       "pos": [
@@ -841,7 +847,7 @@
     {
       "id": "b_32",
       "type": "playback",
-      "name": "32 \u00b7 Shoofly",
+      "name": "32 · Shoofly",
       "media": "m1",
       "range_s": [
         834.467,
@@ -874,7 +880,7 @@
     {
       "id": "b_33",
       "type": "playback",
-      "name": "33 \u00b7 Shoofly",
+      "name": "33 · Shoofly",
       "media": "m1",
       "range_s": [
         855.767,
@@ -889,7 +895,7 @@
     {
       "id": "b_34",
       "type": "playback",
-      "name": "34 \u00b7 Bear Paw",
+      "name": "34 · Bear Paw",
       "media": "m1",
       "range_s": [
         875.9,
@@ -904,7 +910,7 @@
     {
       "id": "b_35",
       "type": "playback",
-      "name": "35 \u00b7 Bear Paw",
+      "name": "35 · Bear Paw",
       "media": "m1",
       "range_s": [
         884.567,
@@ -919,7 +925,7 @@
     {
       "id": "b_36",
       "type": "playback",
-      "name": "36 \u00b7 Bear Paw",
+      "name": "36 · Bear Paw",
       "media": "m1",
       "range_s": [
         915.167,
@@ -949,7 +955,7 @@
     {
       "id": "b_37",
       "type": "choice",
-      "name": "37 \u00b7 Bear Paw",
+      "name": "37 · Bear Paw",
       "media": "m1",
       "range_s": [
         935.167,
@@ -975,7 +981,7 @@
             "w": 0.3,
             "h": 0.5
           },
-          "appears_s": 0.0,
+          "appears_s": 0,
           "duration_s": null
         },
         {
@@ -992,7 +998,7 @@
             "w": 0.3,
             "h": 0.5
           },
-          "appears_s": 0.0,
+          "appears_s": 0,
           "duration_s": null
         }
       ],
@@ -1018,7 +1024,7 @@
     {
       "id": "b_37_left",
       "type": "playback",
-      "name": "37L \u00b7 wrong_path",
+      "name": "37L · wrong_path",
       "media": "m1",
       "range_s": [
         952.5,
@@ -1033,7 +1039,7 @@
     {
       "id": "b_37_right",
       "type": "playback",
-      "name": "37R \u00b7 correct_path",
+      "name": "37R · correct_path",
       "media": "m1",
       "range_s": [
         957.6,
@@ -1048,7 +1054,7 @@
     {
       "id": "b_38",
       "type": "playback",
-      "name": "38 \u00b7 Bear Paw",
+      "name": "38 · Bear Paw",
       "media": "m1",
       "range_s": [
         961.433,
@@ -1063,7 +1069,7 @@
     {
       "id": "b_43",
       "type": "playback",
-      "name": "43 \u00b7 Bowtie Hourglass",
+      "name": "43 · Bowtie Hourglass",
       "media": "m1",
       "range_s": [
         975.233,
@@ -1078,7 +1084,7 @@
     {
       "id": "b_44",
       "type": "playback",
-      "name": "44 \u00b7 Bowtie Hourglass",
+      "name": "44 · Bowtie Hourglass",
       "media": "m1",
       "range_s": [
         984.167,
@@ -1093,7 +1099,7 @@
     {
       "id": "b_45",
       "type": "playback",
-      "name": "45 \u00b7 Bowtie Hourglass",
+      "name": "45 · Bowtie Hourglass",
       "media": "m1",
       "range_s": [
         1001.967,
@@ -1136,7 +1142,7 @@
     {
       "id": "b_49",
       "type": "playback",
-      "name": "49 \u00b7 Wagon Wheel",
+      "name": "49 · Wagon Wheel",
       "media": "m1",
       "range_s": [
         1070.933,
@@ -1151,11 +1157,11 @@
     {
       "id": "b_50",
       "type": "choice",
-      "name": "50 \u00b7 Wagon Wheel",
+      "name": "50 · Wagon Wheel",
       "media": "m1",
       "range_s": [
         1079.3,
-        1112.0
+        1112
       ],
       "hold": "pause_end",
       "pos": [
@@ -1177,7 +1183,7 @@
             "w": 0.3,
             "h": 0.5
           },
-          "appears_s": 0.0,
+          "appears_s": 0,
           "duration_s": null
         },
         {
@@ -1194,7 +1200,7 @@
             "w": 0.3,
             "h": 0.5
           },
-          "appears_s": 0.0,
+          "appears_s": 0,
           "duration_s": null
         }
       ],
@@ -1220,7 +1226,7 @@
     {
       "id": "b_50_left",
       "type": "playback",
-      "name": "50L \u00b7 path_a",
+      "name": "50L · path_a",
       "media": "m1",
       "range_s": [
         1121.567,
@@ -1235,7 +1241,7 @@
     {
       "id": "b_50_right",
       "type": "playback",
-      "name": "50R \u00b7 path_b",
+      "name": "50R · path_b",
       "media": "m1",
       "range_s": [
         1143.467,
@@ -1250,7 +1256,7 @@
     {
       "id": "b_57_l",
       "type": "playback",
-      "name": "57 \u00b7 Tumbling Blocks (L)",
+      "name": "57 · Tumbling Blocks (L)",
       "media": "m1",
       "range_s": [
         1166.567,
@@ -1265,7 +1271,7 @@
     {
       "id": "b_58",
       "type": "playback",
-      "name": "58 \u00b7 Tumbling Blocks",
+      "name": "58 · Tumbling Blocks",
       "media": "m1",
       "range_s": [
         1174.433,
@@ -1285,7 +1291,7 @@
             "hold_ms": 400
           },
           "region": null,
-          "appears_s": 7.0,
+          "appears_s": 7,
           "duration_s": 6.17
         }
       ]
@@ -1293,7 +1299,7 @@
     {
       "id": "b_57_r",
       "type": "playback",
-      "name": "57 \u00b7 Tumbling Blocks (R)",
+      "name": "57 · Tumbling Blocks (R)",
       "media": "m1",
       "range_s": [
         1166.567,
@@ -1308,7 +1314,7 @@
     {
       "id": "b_59",
       "type": "playback",
-      "name": "59 \u00b7 Tumbling Blocks",
+      "name": "59 · Tumbling Blocks",
       "media": "m1",
       "range_s": [
         1198.1,
@@ -1336,7 +1342,7 @@
     {
       "id": "b_60",
       "type": "playback",
-      "name": "60 \u00b7 Tumbling Blocks",
+      "name": "60 · Tumbling Blocks",
       "media": "m1",
       "range_s": [
         1217.633,
@@ -1354,7 +1360,7 @@
           "params": {
             "min_bursts": 3,
             "burst_window_ms": 3000,
-            "velocity_multiplier": 2.0,
+            "velocity_multiplier": 2,
             "use_pose": true
           },
           "region": null,
@@ -1366,11 +1372,11 @@
     {
       "id": "b_61",
       "type": "playback",
-      "name": "61 \u00b7 Tumbling Blocks",
+      "name": "61 · Tumbling Blocks",
       "media": "m1",
       "range_s": [
         1238.033,
-        1268.0
+        1268
       ],
       "pos": [
         11810,
@@ -1394,7 +1400,7 @@
     {
       "id": "b_66",
       "type": "playback",
-      "name": "66 \u00b7 Conestogo",
+      "name": "66 · Conestogo",
       "media": "m1",
       "range_s": [
         1267.967,
@@ -1467,7 +1473,7 @@
     {
       "id": "b_79",
       "type": "playback",
-      "name": "79 \u00b7 Epilogue",
+      "name": "79 · Epilogue",
       "media": "m1",
       "range_s": [
         1435.1,

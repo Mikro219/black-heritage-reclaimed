@@ -170,6 +170,14 @@
   function updateHint() {
     const d = EB.detectorByType($("ix-detector").value);
     $("ix-detector-hint").textContent = d ? d.hint : "";
+    const voice = !!(d && d.voice);
+    // Voice windows need a keyword, not a region — the drawn region (optional)
+    // is only the preview click target.
+    $("ix-shape-field").style.display = voice ? "none" : "block";
+    const hint = $("ix-stage-hint");
+    hint.innerHTML = voice
+      ? '<span class="msr" style="color:var(--violet);">mic</span>Voice window — fires when the player says the keyword (set it under Parameters). No region needed; draw one only if you want a preview click target. On a choice block, set "go to block" to make it a spoken branch pick.'
+      : '<span class="msr">info</span>Drag on the frame to draw the region the player interacts with. Player view is mirrored — draw where the player sees it.';
   }
 
   function renderParams(existing) {
