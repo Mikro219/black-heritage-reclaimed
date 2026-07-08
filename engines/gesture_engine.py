@@ -16,6 +16,7 @@ import time
 
 from engines.detectors import REGISTRY
 from engines.depth.fusion import PoseDepth
+from engines import pose_hand_filter
 
 
 # Detectors that read MediaPipe Pose landmarks. Pose inference is the most
@@ -167,6 +168,20 @@ class GestureEngine:
         self._phantom_behind_mm = depth_cfg.get("phantom_behind_mm", 400)
         self._player_gated = False   # debug: pose currently rejected by the band
 
+        # Pose-hand fusion: pose skeleton validates the Hands output (phantom
+        # veto, handedness from pose side, stale-track arbitration) and can
+        # optionally rescue a missed hand via a cropped re-inference. With no
+        # fresh pose the filter passes everything through unchanged.
+        ph_cfg = config.get("pose_hand", {})
+        self._ph_filter = ph_cfg.get("filter", True)
+        self._ph_rescue = ph_cfg.get("rescue", False)
+        self._ph_match_dist = ph_cfg.get("max_match_dist", 0.25)
+        self._ph_arb_scale = ph_cfg.get("arbitration_scale", 1.3)
+        self._ph_pose_every_n = max(1, ph_cfg.get("pose_every_n", 2))
+        self._ph_stats = {"dropped": 0, "corrected": 0, "rescued": 0}
+        self._rescue_hands = None      # lazy second Hands instance (crop inference)
+        self._capture_frame_i = 0
+
         self.event_bus.subscribe("cg_window_open", self._on_cg_window_open)
         self.event_bus.subscribe("oi_window_open", self._on_oi_window_open)
         self.event_bus.subscribe("input_lock", self._on_input_lock)
@@ -219,10 +234,14 @@ class GestureEngine:
 
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             hand_results = self._hands.process(rgb)
+            self._capture_frame_i += 1
 
-            # Pose only when a body-relative detector is armed (#3 — halves cost
-            # during the hands-only holds that make up most of acts 1–4).
-            run_pose = self._pose_needed()
+            # Pose runs when a body-relative detector is armed (full rate), or —
+            # with the pose-hand filter on — at a throttled cadence so the
+            # skeleton can validate the Hands output during hands-only holds.
+            run_pose = self._pose_needed() or (
+                self._ph_filter
+                and self._capture_frame_i % self._ph_pose_every_n == 0)
             pose_lm = None
             if run_pose:
                 pose_results = self._pose.process(rgb)
@@ -230,13 +249,73 @@ class GestureEngine:
                     pose_lm = pose_results.pose_landmarks.landmark
 
             now = time.monotonic()
+            landmarks  = hand_results.multi_hand_landmarks
+            handedness = hand_results.multi_handedness
+
+            # Freshest skeleton for the filter: this frame's if pose ran, else
+            # the last published one while still inside the stale window.
+            # (_pub_* are written only by this thread — reading unlocked is safe.)
+            filter_pose = pose_lm
+            if filter_pose is None and self._pub_pose_lm is not None \
+                    and now - self._pub_pose_time < self._pose_stale_s:
+                filter_pose = self._pub_pose_lm
+
+            if self._ph_rescue and filter_pose is not None:
+                landmarks, handedness = self._rescue_missed_hands(
+                    rgb, landmarks, handedness, filter_pose)
+
+            if self._ph_filter and filter_pose is not None:
+                landmarks, handedness, stats = pose_hand_filter.filter_hands(
+                    landmarks, handedness, filter_pose,
+                    max_match_dist=self._ph_match_dist,
+                    arbitration_scale=self._ph_arb_scale)
+                self._ph_stats["dropped"] += stats["dropped"]
+                self._ph_stats["corrected"] += stats["corrected"]
+
             with self._frame_lock:
-                self._pub_hand_landmarks = hand_results.multi_hand_landmarks
-                self._pub_handedness     = hand_results.multi_handedness
+                self._pub_hand_landmarks = landmarks
+                self._pub_handedness     = handedness
                 if run_pose and pose_lm is not None:
                     self._pub_pose_lm   = pose_lm
                     self._pub_pose_time = now
                 self._pub_seq += 1
+
+    def _rescue_missed_hands(self, rgb, landmarks, handedness, pose_lm):
+        """Pose sees a wrist Hands missed -> re-run Hands on a crop around the
+        pose wrist and remap the result to frame coordinates (the MediaPipe
+        Holistic trick, paid only on miss frames)."""
+        wrists = pose_hand_filter.trusted_wrists(pose_lm)
+        if not wrists:
+            return landmarks, handedness
+        hands = list(landmarks) if landmarks else []
+        hnd   = list(handedness) if handedness else []
+        h, w = rgb.shape[:2]
+        for side, pw in wrists.items():
+            near = any(
+                pose_hand_filter._dist(hd.landmark[0].x, hd.landmark[0].y,
+                                       pw.x, pw.y) <= self._ph_match_dist
+                for hd in hands)
+            if near:
+                continue
+            box = pose_hand_filter.wrist_crop_box(pose_lm, side, w, h)
+            if box is None:
+                continue
+            if self._rescue_hands is None:
+                self._rescue_hands = self._mp_hands.Hands(
+                    static_image_mode=True, max_num_hands=1,
+                    min_detection_confidence=0.5)
+            x0, y0, x1, y1 = box
+            crop = rgb[y0:y1, x0:x1]
+            if crop.size == 0:
+                continue
+            result = self._rescue_hands.process(crop)
+            if not result.multi_hand_landmarks:
+                continue
+            hands.append(pose_hand_filter.remap_crop_landmarks(
+                result.multi_hand_landmarks[0], box, w, h))
+            hnd.append(pose_hand_filter.synth_handedness(side))
+            self._ph_stats["rescued"] += 1
+        return (hands or None), (hnd or None)
 
     def fresh_pose_lm(self):
         """Pose landmarks for the render overlay, or None if none were detected
@@ -382,6 +461,7 @@ class GestureEngine:
             "recording_pts": len(recording) if recording else 0,
             "pose_status": pose_status,
             "player_gated": self._player_gated,
+            "pose_hand": dict(self._ph_stats) if self._ph_filter else None,
             "point_dir": self._active_cg_context.get("dominant_direction"),
         }
 
@@ -445,3 +525,5 @@ class GestureEngine:
             self._capture_thread = None
         self._hands.close()
         self._pose.close()
+        if self._rescue_hands is not None:
+            self._rescue_hands.close()

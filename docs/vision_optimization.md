@@ -176,11 +176,40 @@ Ranked by feasibility for this project:
   image replicated to 3 channels — landmarks come out in the same normalised
   space. Worth a 30-minute experiment on-site with `enable_stream(IR)`; wire as a
   `use_ir_for_landmarks` fallback flag only if RGB proves unreliable.
-- **Depth-ROI hand rescue.** When Hands fails on a foreshortened hand, the depth
-  frame still shows a close blob; cropping the color frame around the
-  nearest-blob ROI and re-running Hands on the crop recovers detections. Adds a
-  second Hands inference — only pursue if `forward_point`'s pose+reach fallback
-  proves insufficient.
+- ~~Depth-ROI hand rescue~~ — **superseded by the pose-guided version, BUILT
+  July 2026** (see next section). The pose wrist is a better ROI anchor than a
+  depth blob: it's already tracked, side-labelled, and works on plain webcams.
+
+## Pose-hand fusion layer (BUILT, July 2026)
+
+`engines/pose_hand_filter.py`, wired into the gesture engine's capture loop
+(config `"pose_hand"`). MediaPipe Holistic's pose→hand coupling, à la carte,
+without Holistic's CPU cost:
+
+- **Phantom-hand veto** — a Hands detection matching no trusted pose wrist is
+  dropped, but only when BOTH wrists are trusted (full skeleton). Passer-by
+  hands and face/pattern false positives stop reaching detectors. With the
+  depth player-band gating the pose, this extends passer-by protection to all
+  hand gestures.
+- **Handedness from pose** — matched hands take Left/Right from the pose side
+  (landmark 15/16), replacing the Hands classifier's guess (unreliable when
+  mirrored). Fixes cursor L/R dots and anything reading handedness.
+- **Stale-track arbitration** — a matched hand lagging more than
+  `arbitration_scale` × its own bbox size behind the pose wrist is a
+  motion-blur ghost; dropped for the frame (the regime where `throw` already
+  ignores Hands).
+- **Pose-guided hand rescue** (`"rescue": true`, default off) — when Pose sees
+  a wrist Hands missed, a second Hands inference (static, max 1 hand) runs on
+  a crop centred on the pose wrist, sized from the forearm length, and the
+  landmarks are remapped to frame space. Costs one 192×192 inference only on
+  miss frames — flip on during on-site testing and watch the `pose_hand`
+  counters in `debug_info()`.
+- Pose now runs at a throttled cadence (`pose_every_n`, default every 2nd
+  frame) even during hands-only holds so the skeleton is available for the
+  filter; full rate whenever a pose-reading detector is armed.
+- **Pose vetoes, never rescues** (rescue is explicit opt-in): with no fresh
+  pose the Hands output passes through byte-for-byte. Contract pinned by
+  `tests/test_pose_hand_filter.py`.
 - **Per-pixel person mask** (depth threshold at torso ± 500mm) for compositing
   the player's silhouette into scenes — a render-side effect, not a detection
   need.
@@ -194,5 +223,7 @@ Ranked by feasibility for this project:
 | GestureRecognizer for Layer A | only if GRLib shadow logs disappoint | low |
 | ONNX+DirectML pose offload | only if budget blows on-site | medium-high |
 | ~~Orbbec depth for z-gestures~~ | **DONE July 2026** — fusion layer wired | — |
+| ~~Pose-hand fusion (veto/handedness/arbitration)~~ | **DONE July 2026** — on by default, `"pose_hand"` config | — |
+| Pose-guided hand rescue | built; flip `"pose_hand".rescue` on-site, watch fps | low |
 | Learned fused gesture classifier (sklearn, shadow mode) | only if rule fusion hits a ceiling on-site | low |
 | IR-stream landmark fallback | on-site experiment if lighting hurts RGB | low |
