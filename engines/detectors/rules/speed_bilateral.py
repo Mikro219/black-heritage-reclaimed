@@ -1,31 +1,42 @@
 """
-speed_bilateral — both hands moving at or above a velocity threshold, with
-enough burst events to confirm fast deliberate movement.
+speed_bilateral — hands moving fast (rapid gathering / shaking motion).
 
-Used for Scene 10 `fast_gather` CG (≥3 bursts in 3s) and `forward_push` CG.
+Used for Scene 10 `fast_gather` (AL-10-004) and `forward_push`.
+
+REWORKED (July 2026 playtest): the old model summed per-FRAME displacement of
+both pose wrists against a fixed per-frame threshold. Two problems: the
+threshold silently changed meaning with camera fps (a 15fps Orbbec frame covers
+twice the motion of a 30fps one), and requiring BOTH wrists visible meant the
+gesture died the moment motion blur dropped one wrist — precisely when the
+player is moving fastest. What it's searching for now, concretely: ANY visible
+wrist moving faster than idle_velocity × velocity_multiplier (screen units per
+SECOND), sustained — min_bursts fast frames spanning at least min_active_ms
+inside burst_window_ms.
 
 Params:
-  min_bursts (int): minimum burst count within burst_window_ms. Default 3.
+  min_bursts (int): fast frames required within burst_window_ms. Default 3.
   burst_window_ms (int): rolling window to accumulate bursts. Default 3000.
-  velocity_multiplier (float): threshold as a multiple of a nominal idle velocity. Default 2.0.
-  use_pose (bool): track Pose wrists (landmarks 15/16) instead of hand wrists.
-                   More robust for full-arm bilateral motion at exhibition distance.
-                   Default False (uses MediaPipe Hands wrists).
-  min_visibility (float): Pose wrist visibility gate (use_pose mode only).
-                   Occluded/out-of-frame wrists get jittery phantom estimates
-                   whose noise reads as motion bursts. Default 0.5.
+  velocity_multiplier (float): threshold as a multiple of idle_velocity. Default 2.0.
+  idle_velocity (float): nominal resting wrist speed in screen units/second.
+                  Default 0.45 (≈ the old 0.015/frame at 30fps).
+  min_active_ms (int): bursts must span at least this long — a single jitter
+                  spike can't fire. Default 250.
+  use_pose (bool): track Pose wrists (15/16) instead of Hands wrists. Default False.
+  min_visibility (float): Pose wrist visibility gate (use_pose mode). Default 0.5.
+  min_speed_mm_s (float): METRIC burst threshold used when the Gemini 335 depth
+                  sampler provides real wrist depth — the same physical hand
+                  speed fires at any distance from the camera. Default 800 mm/s.
+                  (The idle_velocity × multiplier path is the webcam fallback.)
 
-Approach:
-  Each frame, compute the summed bilateral wrist displacement from the previous frame.
-  A "burst" is a frame where this displacement exceeds the idle threshold.
-  Fire when min_bursts bursts occur within burst_window_ms.
-
-Context keys: speed_burst_times, prev_wrist_pos
+Context keys: speed_burst_times, prev_wrist_pos, prev_wrist_time
 """
 
+import math
 import time
 
-_IDLE_DISPLACEMENT = 0.015  # normalised units/frame ≈ resting hand wobble
+from ...depth.fusion import PoseDepth, metric_point, trusted_landmark
+
+_MAX_DT_S = 0.25   # gap longer than this = tracking dropout, not motion
 
 
 def _reset(context: dict) -> None:
@@ -33,65 +44,100 @@ def _reset(context: dict) -> None:
     Clearing burst history matters as much as prev position: bursts accumulated
     before a dropout must not count toward a fire after the signal returns."""
     context["prev_wrist_pos"] = None
+    context["prev_wrist_time"] = None
     context["speed_burst_times"] = []
 
 
 def detect(landmarks, params: dict, context: dict) -> bool:
     use_pose = params.get("use_pose", False)
 
+    # Collect currently-trusted wrist positions keyed by identity, so velocity
+    # is always computed against the same physical wrist. With the Gemini depth
+    # sampler present, positions carry real depth so speeds become mm/s.
+    fusion = context.get("_pose_depth")
+    if not isinstance(fusion, PoseDepth):
+        fusion = None
+    current: dict = {}
     if use_pose:
-        # Pose wrists: 15 = left_wrist, 16 = right_wrist.
         pose_lm = context.get("_pose_lm")
         if pose_lm is None:
             _reset(context)
             return False
-        lw, rw = pose_lm[15], pose_lm[16]
-        # Pose reports positions for occluded/out-of-frame wrists too (hands at
-        # the sides, below the frame bottom). Those phantom estimates jitter
-        # frame-to-frame, and the jitter registers as motion bursts — so a person
-        # standing still with no visible hands could fire the gesture. Gate on
-        # visibility, and drop accumulated bursts so half a gesture's worth of
-        # phantom noise can't carry over into the next valid stretch.
         min_visibility = params.get("min_visibility", 0.5)
-        if (getattr(lw, "visibility", 1.0) < min_visibility
-                or getattr(rw, "visibility", 1.0) < min_visibility):
+        for key, idx in (("L", 15), ("R", 16)):
+            try:
+                w = pose_lm[idx]
+            except (IndexError, TypeError):
+                continue
+            # Phantom low-visibility estimates jitter frame-to-frame and read
+            # as motion — skip them (visibility gate + Gemini depth veto), but
+            # keep the other wrist if it's trusted.
+            if not trusted_landmark(context, idx, w, min_visibility):
+                continue
+            depth = fusion.landmark_mm(idx) if fusion is not None else None
+            current[key] = (w.x, w.y, depth)
+        if not current:
             _reset(context)
             return False
-        current_pos = [(lw.x, lw.y), (rw.x, rw.y)]
     else:
-        if not landmarks or len(landmarks) < 2:
+        if not landmarks:
             _reset(context)
             return False
-        current_pos = [(hand.landmark[0].x, hand.landmark[0].y) for hand in landmarks]
+        for i, hand in enumerate(landmarks[:2]):
+            hw = hand.landmark[0]
+            current[i] = (hw.x, hw.y, None)
 
     if "speed_burst_times" not in context:
-        context["speed_burst_times"] = []
-        context["prev_wrist_pos"] = None
+        _reset(context)
 
-    min_bursts = params.get("min_bursts", 3)
+    min_bursts      = params.get("min_bursts", 3)
     burst_window_ms = params.get("burst_window_ms", 3000)
-    multiplier = params.get("velocity_multiplier", 2.0)
-    threshold = _IDLE_DISPLACEMENT * multiplier
-
-    prev_pos = context.get("prev_wrist_pos")
+    multiplier      = params.get("velocity_multiplier", 2.0)
+    idle_velocity   = params.get("idle_velocity", 0.45)
+    min_active_ms   = params.get("min_active_ms", 250)
+    min_speed_mm_s  = params.get("min_speed_mm_s", 800)
+    threshold = idle_velocity * multiplier
 
     now = time.monotonic()
-    if prev_pos and len(prev_pos) == len(current_pos):
-        displacement = sum(
-            ((cx - px) ** 2 + (cy - py) ** 2) ** 0.5
-            for (cx, cy), (px, py) in zip(current_pos, prev_pos)
-        )
-        if displacement >= threshold:
-            context["speed_burst_times"].append(now)
+    prev_pos: dict = context.get("prev_wrist_pos") or {}
+    prev_time = context.get("prev_wrist_time")
+
+    if prev_time is not None:
+        dt = now - prev_time
+        if 0 < dt <= _MAX_DT_S:
+            # Fastest currently-tracked wrist. When both frames carry real
+            # depth (Gemini 335), speed is METRIC (mm/s) — the same physical
+            # shake fires identically at 1 m and at 3 m from the camera. The
+            # normalised units/s path is the webcam fallback.
+            burst = False
+            for key, (cx, cy, cd) in current.items():
+                prev = prev_pos.get(key)
+                if prev is None:
+                    continue
+                px, py, pd = prev
+                if cd is not None and pd is not None:
+                    v = math.dist(metric_point(px, py, pd),
+                                  metric_point(cx, cy, cd)) / dt
+                    if v >= min_speed_mm_s:
+                        burst = True
+                else:
+                    if math.hypot(cx - px, cy - py) / dt >= threshold:
+                        burst = True
+            if burst:
+                context["speed_burst_times"].append(now)
+        elif dt > _MAX_DT_S:
+            context["speed_burst_times"] = []   # dropout — stale bursts out
 
     # Trim expired bursts
     window_s = burst_window_ms / 1000.0
     context["speed_burst_times"] = [
         t for t in context["speed_burst_times"] if now - t <= window_s
     ]
-    context["prev_wrist_pos"] = current_pos
+    context["prev_wrist_pos"] = current
+    context["prev_wrist_time"] = now
 
-    if len(context["speed_burst_times"]) >= min_bursts:
+    bursts = context["speed_burst_times"]
+    if len(bursts) >= min_bursts and (bursts[-1] - bursts[0]) * 1000 >= min_active_ms:
         context["speed_burst_times"] = []  # reset so it can fire again after cooldown
         return True
     return False

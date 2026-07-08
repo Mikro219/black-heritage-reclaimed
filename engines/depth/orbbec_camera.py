@@ -1,14 +1,24 @@
 """
-orbbec_camera — Orbbec Gemini 335 adapter (color + aligned depth), for later use.
+orbbec_camera — Orbbec Gemini 335 adapter (color + aligned depth).
 
-STATUS: standalone, NOT wired into the runtime. Written ahead of hardware arrival
-so the integration is a config change plus one capture-thread swap, not a redesign.
+STATUS: WIRED (July 2026). `config.json` key `use_orbbec_camera: true` makes both
+main.py and scripts/gesture_tuner.py open the Gemini 335 via `try_open_orbbec()`
+(an OrbbecCapture cv2-style shim), falling back to the webcam when the SDK or
+camera is unavailable. The gesture engine injects `context["_depth_mm_at"]` so
+detectors can sample real wrist depth. Verified against hardware 2026-07-03:
+color+depth 720p30, MediaPipe coexistence OK in both import orders (the crash in
+github.com/orbbec/pyorbbecsdk#184 does not reproduce with pyorbbecsdk2 2.1.1 +
+mediapipe 0.10.14).
 
 Hardware: Orbbec Gemini 335 — active stereo depth (0.25–6m usable), RGB up to
-1280×800@30, USB 3.0, works through Orbbec SDK v2 / `pyorbbecsdk`.
+1280×800@30, USB 3.0, works through Orbbec SDK v2.
 
-Install:  py -3.12 -m pip install pyorbbecsdk numpy
+Install:  py -3.12 -m pip install pyorbbecsdk2 numpy
+          (PyPI package is pyorbbecsdk2; the import name is pyorbbecsdk)
 Preview:  py -3.12 -m engines.depth.orbbec_camera   (color + colorized depth windows)
+
+Gotcha: only one process can hold the camera — close OrbbecViewer before running
+(symptom: OBError "Hardware MFT failed to start streaming ... hardware resources").
 
 Integration plan (when the camera arrives)
 ------------------------------------------
@@ -46,6 +56,7 @@ _build_pipeline / read() only; the public surface (read/depth_at) must not chang
 
 from __future__ import annotations
 
+import threading
 from typing import Optional, Tuple
 
 import numpy as np
@@ -178,6 +189,85 @@ def landmark_depth_mm(depth_mm: np.ndarray, landmark,
                       patch_px: int = 5) -> Optional[float]:
     """Depth (mm) at a MediaPipe landmark (any object with .x/.y in 0-1)."""
     return depth_at(depth_mm, landmark.x, landmark.y, patch_px)
+
+
+# ---------------------------------------------------------------------------
+# cv2.VideoCapture-compatible shim + opener
+# ---------------------------------------------------------------------------
+
+class OrbbecCapture:
+    """Drop-in stand-in for cv2.VideoCapture backed by the Gemini 335.
+
+    read() returns (ret, bgr_frame) exactly like a webcam, so GestureEngine's
+    capture loop and the tuner work unchanged. The latest aligned depth frame is
+    kept under a lock; depth_mm_at(x, y) samples it from any thread (the gesture
+    engine injects it into detector context as "_depth_mm_at").
+    """
+
+    def __init__(self, resolution: Tuple[int, int] = (1280, 720), fps: int = 30):
+        self._cam = OrbbecGemini335(resolution=resolution, fps=fps)
+        self._cam.start()
+        self._open = True
+        self._lock = threading.Lock()
+        self._depth: Optional[np.ndarray] = None
+
+    # -- cv2.VideoCapture surface ------------------------------------------
+
+    def isOpened(self) -> bool:
+        return self._open
+
+    def read(self):
+        if not self._open:
+            return False, None
+        color, depth = self._cam.read()
+        if color is None:
+            return False, None
+        if depth is not None:
+            with self._lock:
+                self._depth = depth
+        return True, color
+
+    def set(self, prop, value) -> bool:   # resolution/fps are fixed at open
+        return False
+
+    def get(self, prop) -> float:
+        return 0.0
+
+    def release(self) -> None:
+        if self._open:
+            self._open = False
+            self._cam.stop()
+
+    # -- depth --------------------------------------------------------------
+
+    def depth_mm_at(self, x_norm: float, y_norm: float,
+                    patch_px: int = 5) -> Optional[float]:
+        """Median depth (mm) at a normalized RAW-camera-space coordinate, from
+        the most recent frame. None until the first depth frame arrives."""
+        with self._lock:
+            d = self._depth
+        if d is None:
+            return None
+        return depth_at(d, x_norm, y_norm, patch_px)
+
+
+def try_open_orbbec(resolution: Tuple[int, int] = (1280, 720),
+                    fps: int = 30) -> Optional["OrbbecCapture"]:
+    """Open the Gemini 335 as an OrbbecCapture, or None if unavailable.
+
+    Callers fall back to a plain webcam on None, so a missing SDK or unplugged
+    camera degrades gracefully instead of killing the app.
+    """
+    if not ORBBEC_AVAILABLE:
+        print("[orbbec] pyorbbecsdk not installed (pip install pyorbbecsdk2) "
+              "— falling back to webcam")
+        return None
+    try:
+        return OrbbecCapture(resolution=resolution, fps=fps)
+    except Exception as exc:
+        print(f"[orbbec] Gemini 335 open failed: {exc}")
+        print("[orbbec] (is OrbbecViewer or another app holding the camera?)")
+        return None
 
 
 # ---------------------------------------------------------------------------

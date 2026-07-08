@@ -34,6 +34,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 from engines.detectors import REGISTRY
+from engines.depth.fusion import PoseDepth
 
 # ── MediaPipe hand connections ───────────────────────────────────────────────
 CONNECTIONS = [
@@ -137,10 +138,11 @@ GESTURES = [
     dict(
         name="survey",
         label="CG · Scene 3 · AL-03-004",
-        desc="Raise hand to brow, then scan left↔right  |  +/-: scan_window_ms  |  [/]: min_x_delta",
+        desc="SALUTE: hold hand at brow  |  +/-: salute_hold_ms  |  [/]: min_x_delta (scan mode)",
         type="survey",
-        params={"brow_y": 0.45, "hold_ms": 200, "scan_window_ms": 2000, "min_x_delta": 0.06},
-        tune_key="scan_window_ms", tune_step=100,
+        params={"brow_y": 0.45, "hold_ms": 200, "salute_hold_ms": 500,
+                "scan_window_ms": 2000, "min_x_delta": 0.06},
+        tune_key="salute_hold_ms", tune_step=100,
         tune_key2="min_x_delta", tune_step2=0.005, tune_min2=0.005,
         accent=(200, 180, 255), highlights=[0],
     ),
@@ -209,7 +211,7 @@ GESTURES = [
     dict(
         name="drink_gesture",
         label="OI · Scene 1 · AL-01-002 step 2",
-        desc="Tipping hand-to-mouth: wrist above tip, tip near mouth region",
+        desc="Tipping hand-to-mouth: tips near mouth, wrist at/below tips",
         type="mouth_proximity_tip",
         params={"hold_ms": 400, "proximity_threshold": 0.12},
         tune_key="hold_ms", accent=(80, 255, 200), highlights=[0, 4, 8],
@@ -218,22 +220,25 @@ GESTURES = [
     dict(
         name="three_knock",
         label="CG · Scene 6 · AL-06-007",
-        desc="knock-knock...KNOCK (knuckle threshold)  |  +/-: short_window_ms  |  [/]: threshold_fraction  |  W/S: wrist_y_offset",
+        desc="KNOCK = push hand at camera (grows bigger), x2  |  +/-: min_growth_pct  |  [/]: knock_window_ms",
         type="rhythm_bilateral",
-        params={"short_window_ms": 500, "long_min_ms": 400, "long_max_ms": 1400,
-                "threshold_fraction": 0.30, "refractory_ms": 220, "wrist_y_offset": 0.0},
-        tune_key="short_window_ms", tune_step=50,
-        tune_key2="threshold_fraction", tune_step2=0.05,
+        params={"knock_count": 2, "min_growth_pct": 30, "knock_window_ms": 2500,
+                "baseline_window_ms": 1200, "refractory_ms": 300},
+        tune_key="min_growth_pct", tune_step=5,
+        tune_key2="knock_window_ms", tune_step2=250,
         accent=(255, 100, 180), highlights=[0, 5],
     ),
     # ── speed_bilateral ───────────────────────────────────────────────────
     dict(
         name="fast_gather",
         label="CG · Scene 10 · AL-10-004",
-        desc="Both arms rapid gathering (Pose) — speed multiplier ≥2× idle",
+        desc="Fast hand shaking/gathering (Pose wrists, units/s)  |  +/-: velocity_multiplier  |  [/]: min_bursts",
         type="speed_bilateral",
-        params={"speed_multiplier": 2.0, "use_pose": True},
-        tune_key=None, accent=(255, 80, 80), highlights=[0, 8],
+        params={"velocity_multiplier": 2.0, "min_bursts": 3, "burst_window_ms": 3000,
+                "idle_velocity": 0.45, "use_pose": True},
+        tune_key="velocity_multiplier", tune_step=0.25,
+        tune_key2="min_bursts", tune_step2=1,
+        accent=(255, 80, 80), highlights=[0, 8],
     ),
     # ── touch_head ────────────────────────────────────────────────────────
     dict(
@@ -489,26 +494,37 @@ def draw_bilateral_threshold(frame, y_threshold_raw, w, h, accent):
                 0.45, accent, 1, cv2.LINE_AA)
 
 
+def _draw_track_histories(context) -> dict:
+    """directional_draw keeps one history per tracked point (pose wrists draw
+    independently). Normalise the legacy list form to a single-track dict."""
+    hist = context.get("draw_history")
+    if isinstance(hist, dict):
+        return hist
+    if isinstance(hist, list) and hist:
+        return {"track": hist}
+    return {}
+
+
 def draw_draw_trail(frame, context, w, h, accent):
-    """Draw the directional_draw motion trail from context."""
-    history = context.get("draw_history", [])
-    if len(history) < 2:
-        return
-    pts = [raw_to_px(p[0], p[1], w, h, mirror=True) for p in history]
-    for i in range(1, len(pts)):
-        alpha = i / len(pts)
-        c = tuple(int(v * alpha) for v in accent)
-        cv2.line(frame, pts[i-1], pts[i], c, 2, cv2.LINE_AA)
-    # Show displacement vector
-    raw_dx = history[-1][0] - history[0][0]
-    raw_dy = history[-1][1] - history[0][1]
-    screen_dx = -raw_dx
-    screen_dy = raw_dy
-    mag = math.hypot(screen_dx, screen_dy)
-    angle_deg = math.degrees(math.atan2(screen_dy, screen_dx))
-    cv2.putText(frame, f"disp={mag:.3f}  angle={angle_deg:.0f}deg",
-                (pts[-1][0] + 8, pts[-1][1]),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.45, accent, 1, cv2.LINE_AA)
+    """Draw the directional_draw motion trail(s) from context."""
+    for key, history in _draw_track_histories(context).items():
+        if len(history) < 2:
+            continue
+        pts = [raw_to_px(p[0], p[1], w, h, mirror=True) for p in history]
+        for i in range(1, len(pts)):
+            alpha = i / len(pts)
+            c = tuple(int(v * alpha) for v in accent)
+            cv2.line(frame, pts[i-1], pts[i], c, 2, cv2.LINE_AA)
+        # Show displacement vector
+        raw_dx = history[-1][0] - history[0][0]
+        raw_dy = history[-1][1] - history[0][1]
+        screen_dx = -raw_dx
+        screen_dy = raw_dy
+        mag = math.hypot(screen_dx, screen_dy)
+        angle_deg = math.degrees(math.atan2(screen_dy, screen_dx))
+        cv2.putText(frame, f"{key}: disp={mag:.3f}  angle={angle_deg:.0f}deg",
+                    (pts[-1][0] + 8, pts[-1][1]),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, accent, 1, cv2.LINE_AA)
 
 
 def draw_mouth_marker(frame, w, h, accent, context, mouth_x=None, mouth_y=None,
@@ -542,86 +558,62 @@ def draw_mouth_marker(frame, w, h, accent, context, mouth_x=None, mouth_y=None,
 
 
 def draw_knock_progress(frame, context, params, w, h, accent):
-    """Draw three-knock progress circles with timing window bars."""
+    """Approach-knock panel: one circle per required push-toward-camera knock,
+    plus a live hand-growth bar (current bbox area vs pulled-back baseline)."""
     now = time.monotonic()
-    knock_count = context.get("knock_count", 0)
-    knock_times = context.get("knock_times", [])
-    short_window_ms = params.get("short_window_ms", 500)
-    long_min_ms = params.get("long_min_ms", 400)
-    long_max_ms = params.get("long_max_ms", 1400)
+    knock_count_req = params.get("knock_count", 2)
+    knock_window_ms = params.get("knock_window_ms", 2500)
+    min_growth      = params.get("min_growth_pct", 30)
+    knock_times = [t for t in context.get("knock_times", [])
+                   if (now - t) * 1000 <= knock_window_ms]
 
-    # Three circles centred on screen
     cy = h // 2 - 50
     spacing = 110
     r = 30
-    cx_base = w // 2 - spacing
+    cx_base = w // 2 - spacing * (knock_count_req - 1) // 2
 
-    for i, label in enumerate(["K1", "K2", "LONG"]):
+    for i in range(knock_count_req):
         cx = cx_base + i * spacing
-        filled = knock_count > i
+        filled = len(knock_times) > i
         fill_color = accent if filled else (30, 30, 30)
         ring_color = accent if filled else (80, 80, 80)
         cv2.circle(frame, (cx, cy), r, fill_color, -1)
         cv2.circle(frame, (cx, cy), r, ring_color, 2, cv2.LINE_AA)
         txt_color = (255, 255, 255) if filled else (100, 100, 100)
-        cv2.putText(frame, label, (cx - 14, cy + 6),
+        cv2.putText(frame, f"K{i + 1}", (cx - 14, cy + 6),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.55, txt_color, 1, cv2.LINE_AA)
 
     bar_y = cy + r + 18
-    bar_w = 90
+    bar_w = 220
+    bar_x = w // 2 - bar_w // 2
 
-    # Short-window countdown bar under K2 while waiting for second knock
-    if knock_count == 1 and knock_times:
-        elapsed_ms = (now - knock_times[0]) * 1000
-        remaining_ms = max(0.0, short_window_ms - elapsed_ms)
-        pct_left = remaining_ms / short_window_ms
-        bar_x = cx_base + spacing - bar_w // 2
+    # Live growth bar: current bbox area vs the rolling pulled-back baseline.
+    hist = context.get("knock_area_hist") or []
+    if hist:
+        baseline = min(a for _, a in hist)
+        area = hist[-1][1]
+        growth_pct = (area / baseline - 1.0) * 100 if baseline > 0 else 0.0
+        pct = max(0.0, min(1.5, growth_pct / max(1e-6, min_growth)))
         cv2.rectangle(frame, (bar_x, bar_y), (bar_x + bar_w, bar_y + 12), (50, 50, 50), -1)
-        filled_w = int(pct_left * bar_w)
+        filled_w = int(min(1.0, pct) * bar_w)
+        color = accent if growth_pct >= min_growth else (90, 160, 90)
         if filled_w > 0:
-            cv2.rectangle(frame, (bar_x, bar_y), (bar_x + filled_w, bar_y + 12), accent, -1)
+            cv2.rectangle(frame, (bar_x, bar_y), (bar_x + filled_w, bar_y + 12), color, -1)
         cv2.rectangle(frame, (bar_x, bar_y), (bar_x + bar_w, bar_y + 12), (120, 120, 120), 1)
-        cv2.putText(frame, f"K2 window: {remaining_ms:.0f}ms",
-                    (bar_x + bar_w + 6, bar_y + 10),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.42, accent, 1, cv2.LINE_AA)
+        cv2.putText(frame, f"growth {growth_pct:+.0f}%  need {min_growth:.0f}%",
+                    (bar_x, bar_y + 28), cv2.FONT_HERSHEY_SIMPLEX, 0.45,
+                    color, 1, cv2.LINE_AA)
+    else:
+        cv2.putText(frame, "push your hand toward the camera",
+                    (bar_x, bar_y + 10), cv2.FONT_HERSHEY_SIMPLEX, 0.45,
+                    (150, 150, 150), 1, cv2.LINE_AA)
 
-    # Two-zone bar under LONG while waiting for third knock
-    if knock_count == 2 and len(knock_times) >= 2:
-        elapsed_ms = (now - knock_times[1]) * 1000
-        bar_x = cx_base + 2 * spacing - bar_w // 2
-        wait_w = max(1, int(bar_w * long_min_ms / long_max_ms))
-        fire_w = bar_w - wait_w
-        # Background
-        cv2.rectangle(frame, (bar_x, bar_y), (bar_x + bar_w, bar_y + 12), (50, 50, 50), -1)
-        # Wait zone (red-ish)
-        cv2.rectangle(frame, (bar_x, bar_y), (bar_x + wait_w, bar_y + 12), (120, 50, 50), -1)
-        # Fire zone (green-ish)
-        cv2.rectangle(frame, (bar_x + wait_w, bar_y), (bar_x + bar_w, bar_y + 12), (30, 80, 30), -1)
-        # Moving marker
-        if elapsed_ms <= long_min_ms:
-            wait_pct = elapsed_ms / long_min_ms
-            marker_x = bar_x + int(wait_pct * wait_w)
-            cv2.line(frame, (marker_x, bar_y - 2), (marker_x, bar_y + 14), (255, 220, 80), 2)
-            remaining = long_min_ms - elapsed_ms
-            cv2.putText(frame, f"wait: {remaining:.0f}ms",
-                        (bar_x + bar_w + 6, bar_y + 10),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.42, (200, 120, 80), 1, cv2.LINE_AA)
-        elif elapsed_ms <= long_max_ms:
-            fire_elapsed = elapsed_ms - long_min_ms
-            fire_range = long_max_ms - long_min_ms
-            fire_pct = fire_elapsed / fire_range
-            marker_x = bar_x + wait_w + int(fire_pct * fire_w)
-            cv2.line(frame, (marker_x, bar_y - 2), (marker_x, bar_y + 14), accent, 2)
-            remaining = long_max_ms - elapsed_ms
-            cv2.putText(frame, f"KNOCK! {remaining:.0f}ms left",
-                        (bar_x + bar_w + 6, bar_y + 10),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.42, accent, 1, cv2.LINE_AA)
-        cv2.rectangle(frame, (bar_x, bar_y), (bar_x + bar_w, bar_y + 12), (120, 120, 120), 1)
-        # Zone labels
-        cv2.putText(frame, "wait", (bar_x + 2, bar_y - 4),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.35, (180, 80, 80), 1, cv2.LINE_AA)
-        cv2.putText(frame, "fire", (bar_x + wait_w + 2, bar_y - 4),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.35, (80, 180, 80), 1, cv2.LINE_AA)
+    # Countdown until the accumulated knocks expire
+    if knock_times:
+        remaining_ms = knock_window_ms - (now - knock_times[0]) * 1000
+        cv2.putText(frame, f"window: {max(0.0, remaining_ms):.0f}ms",
+                    (bar_x, bar_y + 46), cv2.FONT_HERSHEY_SIMPLEX, 0.42,
+                    accent, 1, cv2.LINE_AA)
 
 
 def draw_head_or_hand_zones(frame, direction, w, h, accent,
@@ -1024,7 +1016,15 @@ def draw_run_arms_info(frame, context, params, pose_lm, w, h, accent):
     if pose_lm is None:
         return
     hip_l, hip_r = pose_lm[23], pose_lm[24]
-    waist_y = (hip_l.y + hip_r.y) / 2 + params.get("waist_y_offset", 0.0)
+    sh_l, sh_r = pose_lm[11], pose_lm[12]
+    # Match run_arms.py: default reference is the WAIST (shoulder/hip midpoint),
+    # not the hip line — natural arm-pumping crosses it.
+    hip_y = (hip_l.y + hip_r.y) / 2
+    shoulder_y = (sh_l.y + sh_r.y) / 2
+    if params.get("reference", "waist") == "hips":
+        waist_y = hip_y + params.get("waist_y_offset", 0.0)
+    else:
+        waist_y = (shoulder_y + hip_y) / 2 + params.get("waist_y_offset", 0.0)
     wy_px = int(waist_y * h)
     cv2.line(frame, (0, wy_px), (w, wy_px), accent, 2, cv2.LINE_AA)
     offset_val = params.get("waist_y_offset", 0.0)
@@ -1131,30 +1131,32 @@ def draw_paddle_info(frame, context, params, pose_lm, w, h, accent):
     midline_x    = (sh_l.x + sh_r.x) / 2
     shoulder_y   = (sh_l.y + sh_r.y) / 2
     waist_offset = params.get("waist_y_offset", 0.0)
-    waist_y      = (hip_l.y + hip_r.y) / 2 + waist_offset
+    hip_y        = (hip_l.y + hip_r.y) / 2 + waist_offset
+    # Match paddle.py: strokes are counted against the shoulder/hip MIDLINE with
+    # a hysteresis band — draw exactly what the detector evaluates.
+    mid_y        = (shoulder_y + hip_y) / 2
+    band         = params.get("band_frac", 0.12) * max(hip_y - shoulder_y, 0.05)
 
     mx_px = int((1 - midline_x) * w)
-    sy_px = int(shoulder_y * h)
-    wy_px = int(waist_y * h)
+    my_px = int(mid_y * h)
+    b_px  = max(1, int(band * h))
 
     cv2.line(frame, (mx_px, 0), (mx_px, h), (80, 80, 80), 1)
-    cv2.line(frame, (0, sy_px), (w, sy_px), accent, 1)
-    cv2.line(frame, (0, wy_px), (w, wy_px), accent, 1)
-    cv2.putText(frame, "shoulder", (4, sy_px - 4),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.40, accent, 1, cv2.LINE_AA)
+    cv2.line(frame, (0, my_px - b_px), (w, my_px - b_px), (110, 110, 110), 1)
+    cv2.line(frame, (0, my_px), (w, my_px), accent, 2)
+    cv2.line(frame, (0, my_px + b_px), (w, my_px + b_px), (110, 110, 110), 1)
     offset_str = f"  offset={waist_offset:+.2f}" if waist_offset != 0.0 else ""
-    cv2.putText(frame, f"waist{offset_str}", (4, wy_px - 4),
+    cv2.putText(frame, f"stroke midline (±band){offset_str}", (4, my_px - b_px - 6),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.40, accent, 1, cv2.LINE_AA)
 
-    locked_side   = context.get("paddle_side", "—")
-    stroke_count  = context.get("paddle_stroke_count", 0)
-    min_strokes   = params.get("min_strokes", 4)
-    cv2.putText(frame, f"side: {locked_side}  strokes: {stroke_count}/{min_strokes}",
+    stroke_count = len(context.get("paddle_stroke_times", []))
+    min_strokes  = params.get("min_strokes", 4)
+    cv2.putText(frame, f"strokes: {stroke_count}/{min_strokes}",
                 (12, h - 40), cv2.FONT_HERSHEY_SIMPLEX, 0.55, accent, 1, cv2.LINE_AA)
 
-    for idx in [15, 16]:
+    for idx, crossed_key in ((15, "paddle_l_crossed"), (16, "paddle_r_crossed")):
         lm = pose_lm[idx]
-        color = accent if locked_side and locked_side != "—" else (140, 140, 140)
+        color = accent if context.get(crossed_key) else (140, 140, 140)
         px, py = int((1 - lm.x) * w), int(lm.y * h)
         cv2.circle(frame, (px, py), 10, color, -1)
 
@@ -1268,6 +1270,20 @@ def open_camera(config_path):
             cfg = json.load(f)
     except Exception:
         cfg = {}
+
+    # Orbbec Gemini 335 first when enabled in config.json (use_orbbec_camera).
+    # Same selection logic as main.py; falls back to the webcam below.
+    if cfg.get("use_orbbec_camera"):
+        try:
+            from engines.depth.orbbec_camera import try_open_orbbec
+            cap = try_open_orbbec(resolution=(1280, 720), fps=30)
+            if cap is not None:
+                print("[tuner] Using Orbbec Gemini 335 (color + depth)")
+                return cap
+        except Exception as e:
+            print(f"[tuner] Orbbec import/open error: {e}", file=sys.stderr)
+        print("[tuner] Orbbec unavailable — falling back to webcam")
+
     backend = cv2.CAP_DSHOW
     cap = cv2.VideoCapture(0, backend)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
@@ -1350,8 +1366,14 @@ def main():
         # ── Run detector ──────────────────────────────────────────────────
         # Inject pose landmarks so body-relative detectors (touch_head, arms_crossed,
         # run_arms, unravel, paddle) can read context["_pose_lm"] the same way
-        # the runtime's gesture_engine does.
+        # the runtime's gesture_engine does. Same for the depth sampler when the
+        # capture device is the Orbbec shim.
         context["_pose_lm"] = pose_lm
+        _sampler = getattr(cap, "depth_mm_at", None)
+        context["_depth_mm_at"] = _sampler
+        # Depth fusion view (same as the runtime injects): phantom veto, reach
+        # metering and metric velocity all read from context["_pose_depth"].
+        context["_pose_depth"] = PoseDepth(_sampler, pose_lm)
 
         detector_fn = REGISTRY.get(gtype)
         fired = False
@@ -1367,6 +1389,24 @@ def main():
 
         # ── Pose body markers (always, when pose is available) ────────────
         draw_pose_markers(frame, pose_lm, w, h)
+
+        # ── Depth fusion badge (Gemini 335 present) ───────────────────────
+        if _sampler is not None:
+            _fus = context["_pose_depth"]
+            _torso = _fus.torso_depth_mm() if _fus.available else None
+            if _torso is not None:
+                _reach_bits = []
+                for _s, _wi in (("L", 15), ("R", 16)):
+                    _r = _fus.reach_mm(_wi)
+                    if _r is not None:
+                        _reach_bits.append(f"{_s}{_r:+.0f}")
+                _label = f"DEPTH torso {_torso:.0f}mm"
+                if _reach_bits:
+                    _label += "  reach " + " ".join(_reach_bits)
+            else:
+                _label = "DEPTH on (no torso lock)"
+            cv2.putText(frame, _label, (12, h - 64),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (80, 220, 255), 1, cv2.LINE_AA)
 
         # ── Gesture-specific overlays ─────────────────────────────────────
         if gtype == "forward_reach":
@@ -1519,17 +1559,49 @@ def main():
                 px, py = 1.0 - tip.x, tip.y
                 state_lines.append((f"index extended: {'YES' if extended else 'NO'}  tip: px={px:.2f} py={py:.2f}",
                                      accent if extended else (200, 80, 80)))
+            else:
+                state_lines.append(("hands: none — pose+depth fallback active", (255, 200, 80)))
+            # Pose+depth fallback readout (hand aimed at the camera).
+            _sampler = context.get("_depth_mm_at")
+            if pose_lm is not None:
+                need_mm = live_params.get("min_reach_depth_mm", 300)
+                need_z = live_params.get("min_pose_z_delta", 0.25)
+                for _side, _wi, _si in (("L", 15, 11), ("R", 16, 12)):
+                    _wr, _sh = pose_lm[_wi], pose_lm[_si]
+                    if getattr(_wr, "visibility", 1.0) < live_params.get("min_visibility", 0.5):
+                        continue
+                    _wmm = _smm = None
+                    if callable(_sampler):
+                        _wmm = _sampler(_wr.x, _wr.y)
+                        _smm = _sampler(_sh.x, _sh.y)
+                    if _wmm is not None and _smm is not None:
+                        _reach = _smm - _wmm
+                        _ok = _reach >= need_mm
+                        state_lines.append((f"{_side} reach: {_reach:+.0f}mm  need {need_mm}mm  {'OK' if _ok else '...'}  [depth]",
+                                             accent if _ok else (160, 160, 160)))
+                    else:
+                        _zd = getattr(_sh, "z", 0.0) - getattr(_wr, "z", 0.0)
+                        _ok = _zd >= need_z
+                        state_lines.append((f"{_side} reach: z-delta={_zd:+.2f}  need {need_z:.2f}  {'OK' if _ok else '...'}  [pose-z]",
+                                             accent if _ok else (160, 160, 160)))
             state_lines.append((f"on target since: {'YES' if since else 'no'}",
                                  accent if since else (120, 120, 120)))
             state_lines.append(("hold progress:", (200, 200, 200)))
 
         elif gtype == "survey":
             phase = context.get("survey_phase", 0)
-            phase_labels = {0: "waiting for wrist above brow",
-                            1: "holding at brow",
-                            2: "scanning ← →",
-                            3: "DONE"}
-            pct = phase / 3.0
+            if live_params.get("require_scan", False):
+                phase_labels = {0: "waiting for wrist above brow",
+                                1: "holding at brow",
+                                2: "scanning ← →",
+                                3: "DONE"}
+                pct = phase / 3.0
+            else:
+                # Salute mode (default): phase 1 = holding at brow toward fire.
+                phase_labels = {0: "waiting for wrist above brow",
+                                1: "SALUTE — holding at brow"}
+                pct = hold_progress(context, "survey_phase1_since",
+                                    live_params.get("salute_hold_ms", 500)) if phase == 1 else 0.0
             state_lines.append((f"phase {phase}: {phase_labels.get(phase, '?')}",
                                  accent if phase > 0 else (120, 120, 120)))
             brow_y_live = live_params.get("brow_y", 0.45)
@@ -1598,17 +1670,17 @@ def main():
             state_lines.append(("hold progress:", (200, 200, 200)))
 
         elif gtype == "directional_draw":
-            hist = context.get("draw_history", [])
-            state_lines.append((f"history pts: {len(hist)}", accent))
-            if len(hist) >= 2:
-                raw_dx = hist[-1][0] - hist[0][0]
-                raw_dy = hist[-1][1] - hist[0][1]
-                screen_dx = -raw_dx
-                screen_dy = raw_dy
-                mag = math.hypot(screen_dx, screen_dy)
-                ang = math.degrees(math.atan2(screen_dy, screen_dx))
-                state_lines.append((f"disp={mag:.3f}  angle={ang:.0f}deg", accent))
-            pct = min(len(hist) / 10, 1.0)
+            tracks = _draw_track_histories(context)
+            total_pts = sum(len(hh) for hh in tracks.values())
+            state_lines.append((f"tracks: {len(tracks)}  history pts: {total_pts}", accent))
+            for tkey, hist in tracks.items():
+                if len(hist) >= 2:
+                    screen_dx = -(hist[-1][0] - hist[0][0])
+                    screen_dy = hist[-1][1] - hist[0][1]
+                    mag = math.hypot(screen_dx, screen_dy)
+                    ang = math.degrees(math.atan2(screen_dy, screen_dx))
+                    state_lines.append((f"{tkey}: disp={mag:.3f}  angle={ang:.0f}deg", accent))
+            pct = min(total_pts / 10, 1.0)
             state_lines.append(("buffer fill:", (200, 200, 200)))
 
         elif gtype == "directional_head_or_hand":
@@ -1662,50 +1734,35 @@ def main():
             state_lines.append(("hold progress:", (200, 200, 200)))
 
         elif gtype == "rhythm_bilateral":
-            knock_count = context.get("knock_count", 0)
-            knock_times = context.get("knock_times", [])
             now_ts = time.monotonic()
-            short_window_ms = live_params.get("short_window_ms", 500)
-            long_min_ms = live_params.get("long_min_ms", 400)
-            long_max_ms = live_params.get("long_max_ms", 1400)
-            pct = knock_count / 3.0
-            state_lines.append((f"knocks: {knock_count}/3",
-                                 accent if knock_count > 0 else (120, 120, 120)))
-            if knock_count == 1 and knock_times:
-                elapsed_ms = (now_ts - knock_times[0]) * 1000
-                remaining = max(0.0, short_window_ms - elapsed_ms)
-                ok = remaining > 0
-                state_lines.append((f"K2 window: {remaining:.0f}ms left  (max={short_window_ms}ms)",
-                                     (255, 200, 80) if ok else (200, 80, 80)))
-            elif knock_count == 2 and len(knock_times) >= 2:
-                elapsed_ms = (now_ts - knock_times[1]) * 1000
-                if elapsed_ms < long_min_ms:
-                    remaining = long_min_ms - elapsed_ms
-                    state_lines.append((f"wait before K3: {remaining:.0f}ms  (min={long_min_ms}ms)",
-                                         (200, 120, 80)))
-                else:
-                    remaining = max(0.0, long_max_ms - elapsed_ms)
-                    state_lines.append((f"KNOCK NOW!  {remaining:.0f}ms left  (max={long_max_ms}ms)",
-                                         accent))
+            knock_count_req = live_params.get("knock_count", 2)
+            knock_window_ms = live_params.get("knock_window_ms", 2500)
+            min_growth = live_params.get("min_growth_pct", 30)
+            knock_times = [t for t in context.get("knock_times", [])
+                           if (now_ts - t) * 1000 <= knock_window_ms]
+            knocks = len(knock_times)
+            pct = knocks / max(1, knock_count_req)
+            state_lines.append((f"knocks: {knocks}/{knock_count_req}  "
+                                 f"(push hand toward camera)",
+                                 accent if knocks > 0 else (120, 120, 120)))
+            hist = context.get("knock_area_hist") or []
+            if hist:
+                baseline = min(a for _, a in hist)
+                area = hist[-1][1]
+                growth_pct = (area / baseline - 1.0) * 100 if baseline > 0 else 0.0
+                ok = growth_pct >= min_growth
+                state_lines.append((f"growth {growth_pct:+.0f}%  need {min_growth:.0f}%",
+                                     accent if ok else (160, 160, 160)))
             else:
-                state_lines.append((f"short_window={short_window_ms}ms  long_min={long_min_ms}ms  long_max={long_max_ms}ms",
-                                     (120, 120, 120)))
-            threshold_fraction = live_params.get("threshold_fraction", 0.30)
-            refrac = live_params.get("refractory_ms", 220)
-            knuckle_below = context.get("knuckle_below_threshold", False)
-            state_lines.append((f"threshold_fraction={threshold_fraction:.2f}  refractory={refrac}ms",
+                state_lines.append(("no hand in frame", (200, 80, 80)))
+            if knock_times:
+                remaining = max(0.0, knock_window_ms - (now_ts - knock_times[0]) * 1000)
+                state_lines.append((f"window: {remaining:.0f}ms left  (max={knock_window_ms}ms)",
+                                     (255, 200, 80)))
+            refrac = live_params.get("refractory_ms", 300)
+            state_lines.append((f"refractory={refrac}ms  baseline_window="
+                                 f"{live_params.get('baseline_window_ms', 1200)}ms",
                                  (120, 120, 120)))
-            # Show live knuckle vs threshold distance if we have hands
-            if lm_list:
-                lm = lm_list[0].landmark
-                wrist_y = lm[0].y
-                hand_top_y = min(lm[i].y for i in range(21))
-                hand_height = max(wrist_y - hand_top_y, 0.05)
-                threshold_y = wrist_y - threshold_fraction * hand_height
-                knuckle_y = lm[5].y
-                dist = knuckle_y - threshold_y
-                state_lines.append((f"knuckle_y={knuckle_y:.3f}  thresh_y={threshold_y:.3f}  delta={dist:+.3f}  {'BELOW' if knuckle_below else 'above'}",
-                                     accent if knuckle_below else (200, 200, 200)))
             state_lines.append(("progress:", (200, 200, 200)))
 
         elif gtype == "touch_head":
@@ -1783,7 +1840,12 @@ def main():
             alt_state = context.get("run_prev_alt_state")
             if pose_lm:
                 _wo = live_params.get("waist_y_offset", 0.0)
-                waist_y = (pose_lm[23].y + pose_lm[24].y) / 2 + _wo
+                _hip_y = (pose_lm[23].y + pose_lm[24].y) / 2
+                _sh_y = (pose_lm[11].y + pose_lm[12].y) / 2
+                if live_params.get("reference", "waist") == "hips":
+                    waist_y = _hip_y + _wo
+                else:
+                    waist_y = (_sh_y + _hip_y) / 2 + _wo
                 lw, rw = pose_lm[15], pose_lm[16]
                 above_l = lw.y < waist_y
                 above_r = rw.y < waist_y
@@ -1830,32 +1892,24 @@ def main():
             state_lines.append(("winding progress:", (200, 200, 200)))
 
         elif gtype == "paddle":
-            stroke_count = context.get("paddle_stroke_count", 0)
+            stroke_count = len(context.get("paddle_stroke_times", []))
             min_strokes  = live_params.get("min_strokes", 4)
             pct = min(stroke_count / min_strokes, 1.0) if min_strokes > 0 else 0.0
             state_lines.append((f"strokes: {stroke_count}/{min_strokes}",
                                  accent if stroke_count >= min_strokes else (200, 200, 200)))
             if pose_lm:
-                sh_l, sh_r = pose_lm[11], pose_lm[12]
-                hip_l, hip_r = pose_lm[23], pose_lm[24]
-                lw, rw = pose_lm[15], pose_lm[16]
-                shoulder_y = (sh_l.y + sh_r.y) / 2
+                l_crossed = context.get("paddle_l_crossed", False)
+                r_crossed = context.get("paddle_r_crossed", False)
+                l_above = context.get("paddle_l_above")
+                r_above = context.get("paddle_r_above")
                 _wo = live_params.get("waist_y_offset", 0.0)
-                hip_y = (hip_l.y + hip_r.y) / 2 + _wo
-                l_above_sh = lw.y < shoulder_y
-                l_below_hip = lw.y > hip_y
-                r_above_sh = rw.y < shoulder_y
-                r_below_hip = rw.y > hip_y
-                phase_l = context.get("paddle_phase_l", "—")
-                phase_r = context.get("paddle_phase_r", "—")
-                l_done = context.get("paddle_l_completed", False)
-                r_done = context.get("paddle_r_completed", False)
-                state_lines.append((f"phase_L={phase_l} {'DONE' if l_done else ''}  phase_R={phase_r} {'DONE' if r_done else ''}",
-                                     accent if (l_done and r_done) else (160, 160, 200)))
-                state_lines.append((f"L: {'above_sh' if l_above_sh else 'below_hip' if l_below_hip else 'mid'}  "
-                                     f"R: {'above_sh' if r_above_sh else 'below_hip' if r_below_hip else 'mid'}  "
-                                     f"offset={_wo:+.2f}",
-                                     (160, 160, 200)))
+                state_lines.append((f"L {'above' if l_above else 'below'}"
+                                     f"{' CROSSED' if l_crossed else ''}   "
+                                     f"R {'above' if r_above else 'below'}"
+                                     f"{' CROSSED' if r_crossed else ''}   offset={_wo:+.2f}",
+                                     accent if (l_crossed and r_crossed) else (160, 160, 200)))
+                state_lines.append(("stroke = both wrists cross the midline "
+                                     "(hysteresis band, ≥250ms apart)", (120, 120, 120)))
             else:
                 state_lines.append(("POSE NONE — cannot fire", (200, 80, 80)))
             state_lines.append(("stroke progress:", (200, 200, 200)))

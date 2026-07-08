@@ -92,20 +92,98 @@ urgent shots where Pose + Hands + Vosk all run).
 
 ## Depth camera (Orbbec Gemini 335) — the real z axis
 
-Every z-approach gesture today (`forward_reach`, `push_out`, `throw`) uses hand-bbox
-growth as a monocular depth proxy. It works but is scale-confounded (a hand moving
-sideways toward the camera edge grows too) and fails when Hands loses the hand.
+Every z-approach gesture originally used hand-bbox growth as a monocular depth
+proxy. It works but is scale-confounded (a hand moving sideways toward the camera
+edge grows too) and fails when Hands loses the hand.
 
-With the Gemini 335's aligned depth stream:
-- z-gestures read **real wrist depth in mm** (e.g. throw release = 250mm approach
-  within 400ms) — far more robust and tunable in physical units.
-- Background subtraction by depth (visitor vs. passers-by behind them) becomes
-  trivial, which matters for a public installation.
-- MediaPipe keeps doing what it's good at (landmarks on the color stream); depth is
-  sampled at landmark coordinates. No model changes.
+Adapter: `engines/depth/orbbec_camera.py` (WIRED July 2026 — color+aligned depth,
+`depth_mm_at` sampler). SDK: `pyorbbecsdk2` (import name `pyorbbecsdk`), UVC on USB3.
 
-Adapter code (not yet wired): `engines/depth/orbbec_camera.py`. See its docstring
-for the integration plan. SDK: `pyorbbecsdk` (Orbbec SDK v2), UVC on USB3.
+## Depth fusion layer (BUILT, July 2026) — `engines/depth/fusion.py`
+
+The question was raised: *can we train a model that uses both depth and MediaPipe
+to detect hands/pose better?* Short answer: **retraining the landmark models is the
+wrong tool for this project; fusing real depth with MediaPipe's outputs at the
+detector layer captures most of the benefit at ~zero CPU cost.** That fusion is now
+built and wired. Details below, training analysis after.
+
+`PoseDepth` (constructed per dispatch tick by `gesture_engine._dispatch` and the
+tuner loop, injected as `context["_pose_depth"]`) gives every detector five fused
+capabilities:
+
+1. **Lift** — `landmark_mm(idx)`: real millimetre depth sampled at any Pose
+   landmark (median of a 5px patch, lazily cached per frame).
+2. **Veto** — `plausible(idx)`: MediaPipe reports positions for occluded/
+   out-of-frame joints ("phantom landmarks"); sampling depth at those spots hits
+   the BACKGROUND, metres behind the torso. Landmarks whose depth sits >
+   `phantom_behind_mm` (400) behind the torso plane are vetoed. This stacks with
+   the visibility gate via `trusted_landmark()` — used by `point_region`,
+   `survey`, `throw`, `directional_draw`, `speed_bilateral`. Design rule:
+   **depth vetoes, never rescues** — false positives stay strictly below the
+   visibility-only baseline, and everything degrades to the old behaviour on a
+   plain webcam.
+3. **Meter** — `reach_mm(idx)`: how far a joint reaches toward the camera from
+   the torso plane. `forward_point` uses it for hands aimed at the camera;
+   `throw` (`require_growth`), `push_out` and `forward_reach` now use REAL depth
+   deltas (`min_depth_delta_mm`) instead of bbox growth whenever depth flows —
+   and when depth is flowing it is authoritative (the bbox proxy is suppressed).
+4. **Metric velocity** — `metric_point()` converts (normalised x, y, depth) to
+   millimetres via the G335 FOV; `speed_bilateral` measures hand speed in
+   **mm/s** (`min_speed_mm_s`, default 800). The same physical shake now fires
+   identically at 1m and 3m from the camera — normalised velocity thresholds
+   silently favoured close-standing players.
+5. **Player band gate** — `torso_depth_mm()` is the tracked person's distance;
+   the gesture engine drops poses whose torso is outside
+   `config.depth.player_min_mm..player_max_mm` (500–3200). A passer-by 4m behind
+   the visitor can no longer steer detections — the cheapest, most reliable form
+   of "person segmentation" for a public installation.
+
+Config: `config.json` `"depth": { player_min_mm, player_max_mm, phantom_behind_mm }`.
+The tuner shows a live `DEPTH torso NNNNmm reach L+NNN R+NNN` badge when the
+Gemini is the capture device.
+
+## Can we train a fused RGB-D hand/pose model? (analysis)
+
+Ranked by feasibility for this project:
+
+- **Retrain/fine-tune MediaPipe on RGB-D — not possible.** The Hands/Pose models
+  ship as closed, frozen TFLite graphs; there is no upstream training pipeline for
+  them, and their input is strictly 3-channel RGB.
+- **Train a new RGB-D landmark model from scratch — not worth it here.** Serious
+  RGB-D hand-pose models (research lineage: DeepPrior++, A2J, HandFoldingNet on
+  ICVL/NYU/BigHand2.2M) need 100k+ annotated frames, GPU training, and would land
+  on our CPU-only Ryzen at a fraction of MediaPipe's XNNPACK-optimised speed. We'd
+  trade a solved problem (landmarks) for an unsolved one (our budget).
+- **Train a small fused GESTURE classifier — feasible, and the right "phase 2" if
+  rule-based fusion ever hits a ceiling.** Feature vector per frame: 33 pose
+  landmarks (x, y, visibility) + per-landmark fused depth + torso-relative reach
+  from `PoseDepth` — ~150 floats. A gradient-boosted tree or tiny MLP over a
+  ~0.5s window classifies gesture/no-gesture per interaction. Trainable on the
+  mini PC itself with sklearn from data recorded during tuner sessions (label =
+  which gesture you were performing). The existing per-gesture
+  `detector_authority` / `shadow_layer` mechanism means such a classifier can run
+  in shadow mode against the rule-based layer on-site and be promoted per gesture
+  by config flip — zero code risk. Do this only for gestures whose shadow logs
+  show the rules underperforming.
+- **MediaPipe GestureRecognizer + Model Maker** (RGB only) remains the low-risk
+  Layer A upgrade — see the section above.
+
+## Remaining Gemini 335 capabilities on the table
+
+- **IR stream for dark venues.** The G335 has two IR imagers with active
+  illumination; the left IR image is registered to depth. If exhibition lighting
+  (projection wash, dim room) degrades RGB landmarks, MediaPipe can be fed the IR
+  image replicated to 3 channels — landmarks come out in the same normalised
+  space. Worth a 30-minute experiment on-site with `enable_stream(IR)`; wire as a
+  `use_ir_for_landmarks` fallback flag only if RGB proves unreliable.
+- **Depth-ROI hand rescue.** When Hands fails on a foreshortened hand, the depth
+  frame still shows a close blob; cropping the color frame around the
+  nearest-blob ROI and re-running Hands on the crop recovers detections. Adds a
+  second Hands inference — only pursue if `forward_point`'s pose+reach fallback
+  proves insufficient.
+- **Per-pixel person mask** (depth threshold at torso ± 500mm) for compositing
+  the player's silhouette into scenes — a render-side effect, not a detection
+  need.
 
 ## Decision summary
 
@@ -115,4 +193,6 @@ for the integration plan. SDK: `pyorbbecsdk` (Orbbec SDK v2), UVC on USB3.
 | Tasks API migration behind `vision_backend` profile flag | post-wiring, pre-launch calibration | medium |
 | GestureRecognizer for Layer A | only if GRLib shadow logs disappoint | low |
 | ONNX+DirectML pose offload | only if budget blows on-site | medium-high |
-| Orbbec depth for z-gestures | when hardware arrives (adapter ready) | medium |
+| ~~Orbbec depth for z-gestures~~ | **DONE July 2026** — fusion layer wired | — |
+| Learned fused gesture classifier (sklearn, shadow mode) | only if rule fusion hits a ceiling on-site | low |
+| IR-stream landmark fallback | on-site experiment if lighting hurts RGB | low |

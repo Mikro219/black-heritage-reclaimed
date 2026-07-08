@@ -37,6 +37,16 @@ Params:
                           hip-line behaviour; 0.25 (default) puts the gate at the
                           lower chest, so hands resting at the waist — which hover
                           right at the hip line and jitter across it — can't select.
+  reject_open_palm (bool): when the Hands model resolves the selecting hand and
+                          sees an open palm (not a pointing finger), the wrist
+                          doesn't select — the choice must read as a POINT.
+                          Pose-only selection (no resolvable hand) is unaffected.
+                          Default True. (July 2026 playtest.)
+  allow_low_reach (bool) / low_reach_frac (float): accept a wrist below the raise
+                          gate when it reaches at least low_reach_frac shoulder
+                          widths from the midline — natural pointing at LOW
+                          on-screen targets (Scene 9 hidden compartment) happens
+                          at waist height. Defaults True / 0.9.
   min_visibility (float): minimum Pose visibility for a wrist to be considered.
                           Pose always reports positions for all 33 landmarks, even
                           occluded/out-of-frame ones; those phantom estimates can sit
@@ -50,6 +60,9 @@ Context keys: point_direction, point_direction_since, dominant_direction
 """
 
 import time
+
+from . import hand_pose
+from ...depth.fusion import trusted_landmark
 
 _ALL = ["left", "right"]
 
@@ -94,18 +107,37 @@ def detect(landmarks, params: dict, context: dict) -> bool:
 
         # Consider each wrist; keep the one reaching farthest past the dead zone so a
         # resting hand near centre can't win over a clear reach by the other hand.
-        for wrist in (lw, rw):
-            if getattr(wrist, "visibility", 1.0) < min_visibility:
-                continue   # occluded/out-of-frame — position is a phantom estimate
-            if require_raised and wrist.y > gate_y:
-                continue   # arm hanging / lowered — not an active selection
+        for wrist_idx, wrist in ((15, lw), (16, rw)):
+            # Visibility gate + Gemini depth veto: a "wrist" whose sampled depth
+            # is the back wall is a phantom, whatever visibility claims.
+            if not trusted_landmark(context, wrist_idx, wrist, min_visibility):
+                continue
             screen_x = 1.0 - wrist.x
             offset = screen_x - screen_midline    # <0 = screen-left, >0 = screen-right
+            if require_raised and wrist.y > gate_y:
+                # Below the raise gate. A fork target low on screen (Scene 9's
+                # hidden compartment) draws a natural point at waist height —
+                # accept it anyway when the reach is unambiguous: well past the
+                # dead zone, at low_reach_frac of a shoulder width from midline.
+                low_reach = params.get("low_reach_frac", 0.9) * max(shoulder_width, 0.10)
+                if not (params.get("allow_low_reach", True) and abs(offset) >= low_reach):
+                    continue
             if abs(offset) < dead:
                 continue   # inside centre dead zone — selects nothing
             direction = "left" if offset < 0 else "right"
             if direction not in accepted:
                 continue
+            # Finger-vs-palm check (July 2026 playtest: selection must read as a
+            # POINT, not any raised open hand). When the Hands model resolves
+            # this hand and sees an unambiguous open palm, it doesn't select.
+            # No resolvable hand (common at arm's reach to the side) still
+            # selects on pose alone — rejecting there would kill the gesture at
+            # exhibition distance.
+            if params.get("reject_open_palm", True):
+                hand = hand_pose.nearest_hand(landmarks, wrist.x, wrist.y)
+                if hand is not None and hand_pose.is_open_palm(hand) \
+                        and not hand_pose.is_pointing(hand):
+                    continue
             if abs(offset) > abs(best_offset):
                 best_offset = offset
                 best_direction = direction

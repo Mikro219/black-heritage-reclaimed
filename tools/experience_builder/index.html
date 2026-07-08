@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BHR Experience Builder</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,400..700,0..1,0">
+<link rel="stylesheet" href="css/builder.css">
+</head>
+<body>
+
+<div id="app">
+
+  <!-- ═══ TOP TOOLBAR ═══ -->
+  <div id="toolbar">
+    <div class="tb-group">
+      <div id="tb-logo"><span class="msr fill" style="font-size:19px;">account_tree</span></div>
+      <div id="tb-crumbs">
+        <span class="crumb-proj">BHR</span>
+        <span class="msr" style="font-size:16px;">chevron_right</span>
+        <input id="tb-project-name" type="text" value="Untitled Experience" spellcheck="false">
+        <span id="tb-dirty-dot" title="unsaved changes"></span>
+      </div>
+    </div>
+
+    <div class="tb-group">
+      <div class="tb-pill">
+        <button class="tb-icon-btn" id="tb-undo" title="Undo (Ctrl+Z)"><span class="msr">undo</span></button>
+        <button class="tb-icon-btn" id="tb-redo" title="Redo (Ctrl+Y)"><span class="msr">redo</span></button>
+      </div>
+      <div class="tb-sep"></div>
+      <button id="tb-preview-btn" title="Play the experience from Start">
+        <span class="play-dot"><span class="msr fill">play_arrow</span></span>
+        Preview flow
+      </button>
+    </div>
+
+    <div class="tb-group">
+      <div id="tb-zoom"><span class="msr" style="font-size:15px;">zoom_in</span><span id="tb-zoom-val">100%</span></div>
+      <button class="tb-btn" id="tb-open"><span class="msr" style="font-size:17px;">folder_open</span>Open</button>
+      <button class="tb-btn" id="tb-save"><span class="msr" style="font-size:17px;">save</span>Save</button>
+      <button class="tb-btn primary" id="tb-export"><span class="msr fill" style="font-size:17px;">rocket_launch</span>Export</button>
+    </div>
+  </div>
+
+  <!-- ═══ LEFT LIBRARY ═══ -->
+  <div id="library">
+    <div id="lib-tabs">
+      <button class="lib-tab active" data-tab="media">Media</button>
+      <button class="lib-tab" data-tab="sounds">Sounds</button>
+      <button class="lib-tab" data-tab="actions">Actions</button>
+    </div>
+
+    <div class="lib-page active" data-page="media">
+      <div id="lib-drop" title="Import video">
+        <span class="msr">upload_file</span>
+        <div class="d1">Drop MP4 to import</div>
+        <div class="d2">or click to browse</div>
+      </div>
+      <div class="lib-section-head"><span>Clips · <span id="lib-clip-count">0</span></span></div>
+      <div class="lib-list" id="lib-media-list"></div>
+      <div class="lib-hint">Drag a clip onto the canvas to create a playback block from it.</div>
+    </div>
+
+    <div class="lib-page" data-page="sounds">
+      <div id="lib-drop-sound" class="lib-hint" style="padding:0;">
+        <div id="lib-drop2" style="margin:12px;padding:16px 10px;text-align:center;border:1.5px dashed var(--border-2);border-radius:10px;color:var(--text-mute);cursor:pointer;">
+          <span class="msr" style="font-size:24px;color:var(--text-faint);display:block;margin:0 auto 6px;">music_note</span>
+          <div class="d1" style="font-size:12.5px;font-weight:600;color:var(--text-dim);">Drop MP3 / WAV</div>
+          <div class="d2" style="font-size:11.5px;margin-top:2px;">or click to browse</div>
+        </div>
+      </div>
+      <div class="lib-section-head"><span>Sounds · <span id="lib-sound-count">0</span></span></div>
+      <div class="lib-list" id="lib-sound-list"></div>
+      <div class="lib-hint">The <b style="color:var(--amber);">DETECT</b> sound plays every time any interaction fires — in preview and in the exported experience. Click the bolt on a sound to make it the global detect sound.</div>
+    </div>
+
+    <div class="lib-page" data-page="actions">
+      <div class="lib-section-head" style="padding-top:12px;"><span>BHR gesture detectors</span></div>
+      <div class="lib-list" id="lib-actions-list"></div>
+      <div class="lib-hint">These are the real detector types from <code style="font-family:var(--mono);font-size:10.5px;">engines/detectors</code>. Assign one to each interaction window; in preview, clicking the window's region simulates the detection.</div>
+    </div>
+  </div>
+
+  <!-- ═══ CENTER CANVAS ═══ -->
+  <div id="canvas-wrap">
+    <div id="graph">
+      <svg id="edges-svg" width="10" height="10"></svg>
+      <div id="blocks-layer"></div>
+    </div>
+
+    <div id="canvas-empty">
+      <span class="msr">account_tree</span>
+      <div class="e1">Build your flow</div>
+      <div class="e2">Import an MP4 in the library, then drag it here to create your first playback block. Connect blocks by dragging from their right-edge port.</div>
+    </div>
+
+    <div class="canvas-fab" id="canvas-tools">
+      <button class="fab-btn" id="add-choice" title="Add choice block"><span class="msr">call_split</span><span class="lbl">Choice</span></button>
+      <button class="fab-btn" id="add-merge" title="Add merge block"><span class="msr">call_merge</span><span class="lbl">Merge</span></button>
+    </div>
+
+    <div class="canvas-fab" id="canvas-zoomer">
+      <button class="fab-btn" id="zoom-out" title="Zoom out"><span class="msr">remove</span></button>
+      <span class="fab-zoom-val" id="zoom-val">100%</span>
+      <button class="fab-btn" id="zoom-in" title="Zoom in"><span class="msr">add</span></button>
+      <button class="fab-btn" id="zoom-fit" title="Fit to view"><span class="msr">fit_screen</span></button>
+    </div>
+  </div>
+
+  <!-- ═══ RIGHT INSPECTOR ═══ -->
+  <div id="inspector">
+    <div class="insp-empty">Select a block to edit its clip range, interaction windows and branches.<br><br>
+      <b>Shortcuts</b><br>
+      Space — play/pause timeline<br>
+      ←/→ — step one frame<br>
+      Del — delete selection<br>
+      Ctrl+Z / Ctrl+Y — undo / redo<br>
+      Ctrl+S — save project</div>
+  </div>
+
+  <!-- ═══ BOTTOM TIMELINE ═══ -->
+  <div id="timeline">
+    <div id="tl-empty"><span class="msr" style="font-size:18px;color:var(--text-faint);">movie</span>Select a playback or choice block to edit its timeline.</div>
+    <div id="tl-body">
+      <div id="tl-head">
+        <div class="tl-title"><span class="msr" id="tl-kind-icon">movie</span><span id="tl-block-name"></span></div>
+        <span class="tl-clip" id="tl-clip-name"></span>
+        <div id="tl-transport">
+          <button class="fab-btn" id="tl-prev-frame" title="Previous frame (←)"><span class="msr">skip_previous</span></button>
+          <button class="fab-btn" id="tl-play" title="Play/pause (Space)"><span class="msr">play_arrow</span></button>
+          <button class="fab-btn" id="tl-next-frame" title="Next frame (→)"><span class="msr">skip_next</span></button>
+        </div>
+        <span id="tl-timecode">0:00.00 <span class="tc-total">/ 0:00.00</span></span>
+        <button class="fab-btn" id="tl-add-window" title="Add interaction window at playhead"><span class="msr">touch_app</span><span class="lbl">Add window</span></button>
+      </div>
+      <div id="tl-source" title="Block's slice of the source video — drag edges to trim, drag middle to move">
+        <div id="tl-src-others"></div>
+        <div id="tl-src-range">
+          <div class="brush-handle l"></div>
+          <div class="brush-handle r"></div>
+        </div>
+        <span id="tl-src-label"></span>
+      </div>
+      <div id="tl-track-wrap">
+        <div id="tl-ruler"></div>
+        <div id="tl-track">
+          <div id="tl-playhead" style="left:0;"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ═══ ADD/EDIT INTERACTION MODAL (mockup 1B) ═══ -->
+<div class="modal-scrim" id="ix-modal">
+  <div class="modal">
+    <div class="modal-head">
+      <span class="msr">touch_app</span>
+      <span class="m-title" id="ix-title">Add Interaction Window</span>
+      <span class="m-sub" id="ix-frame-label">frame @ 0:00</span>
+      <button class="m-close" id="ix-close"><span class="msr">close</span></button>
+    </div>
+    <div id="ix-body">
+      <div id="ix-stage-col">
+        <div id="ix-stage">
+          <canvas class="frame" id="ix-frame-canvas"></canvas>
+          <div id="ix-region"><span class="rg-label" id="ix-region-label"></span></div>
+        </div>
+        <div id="ix-stage-hint"><span class="msr">info</span>Drag on the frame to draw the region the player interacts with. Player view is mirrored — draw where the player sees it.</div>
+      </div>
+      <div id="ix-form-col">
+        <div class="insp-field">
+          <label>Label</label>
+          <input type="text" id="ix-label" placeholder="Go Left" spellcheck="false">
+        </div>
+        <div class="insp-field">
+          <label>Shape</label>
+          <div class="shape-row">
+            <button class="shape-btn active" data-shape="rect"><span class="msr">crop_square</span>Rectangle</button>
+            <button class="shape-btn" data-shape="circle"><span class="msr">circle</span>Circle</button>
+          </div>
+        </div>
+        <div class="insp-field">
+          <label>Detector (BHR gesture)</label>
+          <select id="ix-detector"></select>
+          <div class="detector-hint" id="ix-detector-hint"></div>
+        </div>
+        <div class="insp-field" id="ix-params-field">
+          <label>Parameters</label>
+          <div id="ix-params"></div>
+        </div>
+        <div class="insp-row">
+          <div class="insp-field">
+            <label>Appears at</label>
+            <input type="text" id="ix-appears" value="0:00.00" spellcheck="false">
+          </div>
+          <div class="insp-field">
+            <label>Duration</label>
+            <input type="text" id="ix-duration" placeholder="until end" spellcheck="false">
+          </div>
+        </div>
+        <div class="insp-field" id="ix-goto-field">
+          <label>On trigger → go to block</label>
+          <select id="ix-goto"></select>
+        </div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="tb-btn" id="ix-delete" style="color:var(--red);border-color:rgba(248,113,113,.4);display:none;"><span class="msr" style="font-size:16px;">delete</span>Delete</button>
+      <span class="spacer"></span>
+      <button class="tb-btn" id="ix-cancel">Cancel</button>
+      <button class="tb-btn primary" id="ix-save"><span class="msr" style="font-size:16px;">touch_app</span><span id="ix-save-label">Add interaction</span></button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ EXPORT MODAL ═══ -->
+<div class="modal-scrim" id="export-modal">
+  <div class="modal">
+    <div class="modal-head">
+      <span class="msr" style="color:var(--sky);">rocket_launch</span>
+      <span class="m-title">Export to BHR runtime</span>
+      <button class="m-close" id="export-close"><span class="msr">close</span></button>
+    </div>
+    <div id="export-body">
+      <p>The project file has been saved. To generate the BHR scenes tree (per-shot
+      <code>metadata.json</code> + <code>sequence.json</code> + extracted frames), run this from the
+      repo root:</p>
+      <code id="export-cmd">py -3.12 scripts/export_experience.py "project.bhrx.json"</code>
+      <p>Output goes to <code>export/scenes_generated/</code> — the live <code>scenes/</code> tree is
+      never touched. Add <code>--no-frames</code> to skip ffmpeg frame extraction and only write
+      metadata (fast; good for a first look).</p>
+      <p id="export-warnings" style="color:var(--amber);"></p>
+    </div>
+    <div class="modal-foot">
+      <button class="tb-btn primary" id="export-ok">Done</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ PREVIEW OVERLAY ═══ -->
+<div id="preview-overlay">
+  <div id="pv-topbar">
+    <span class="pv-badge">PREVIEW</span>
+    <span id="pv-crumb"></span>
+    <span id="pv-timeout"></span>
+    <button id="pv-close" title="Exit preview (Esc)"><span class="msr">close</span></button>
+  </div>
+  <div id="pv-stage">
+    <div id="pv-video-box">
+      <video id="pv-video" playsinline></video>
+      <div id="pv-flash"></div>
+      <div id="pv-ended">
+        <span class="msr fill">flag_circle</span>
+        <div class="e-title">End of experience</div>
+        <button class="tb-btn primary" id="pv-restart"><span class="msr" style="font-size:16px;">replay</span>Play again</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="toasts"></div>
+
+<!-- hidden file inputs (fallback when File System Access API is unavailable) -->
+<input type="file" id="file-video" accept="video/mp4,video/webm,video/*" style="display:none">
+<input type="file" id="file-sound" accept="audio/*" style="display:none">
+<input type="file" id="file-project" accept=".json,.bhrx" style="display:none">
+
+<script src="js/detectors.js"></script>
+<script src="js/state.js"></script>
+<script src="js/library.js"></script>
+<script src="js/graph.js"></script>
+<script src="js/timeline.js"></script>
+<script src="js/interaction.js"></script>
+<script src="js/inspector.js"></script>
+<script src="js/preview.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,1689 @@
+{
+  "version": 1,
+  "name": "BHR Experience",
+  "fps": 30,
+  "media": [
+    {
+      "id": "m1",
+      "name": "BHR Draft 1.mp4",
+      "duration_s": 1521.03
+    }
+  ],
+  "sounds": [
+    {
+      "id": "s1",
+      "name": "detect.mp3"
+    }
+  ],
+  "settings": {
+    "global_detect_sound": "s1"
+  },
+  "start": "b_01",
+  "blocks": [
+    {
+      "id": "b_01",
+      "type": "playback",
+      "name": "01 \u00b7 Prologue",
+      "media": "m1",
+      "range_s": [
+        0.0,
+        172.333
+      ],
+      "pos": [
+        60,
+        340
+      ],
+      "windows": []
+    },
+    {
+      "id": "b_02",
+      "type": "playback",
+      "name": "02 \u00b7 Quilt Awakens",
+      "media": "m1",
+      "range_s": [
+        172.333,
+        200.6
+      ],
+      "pos": [
+        310,
+        340
+      ],
+      "windows": [
+        {
+          "id": "w_02_oi",
+          "label": "quilt_gesture",
+          "detector": "mouth_proximity_tip",
+          "params": {
+            "y_threshold": "shoulder",
+            "hold_ms": 300
+          },
+          "region": null,
+          "appears_s": 12.63,
+          "duration_s": 5.2
+        }
+      ]
+    },
+    {
+      "id": "b_03",
+      "type": "playback",
+      "name": "03 \u00b7 Quilt Awakens",
+      "media": "m1",
+      "range_s": [
+        200.6,
+        213.433
+      ],
+      "pos": [
+        560,
+        340
+      ],
+      "windows": []
+    },
+    {
+      "id": "b_04",
+      "type": "playback",
+      "name": "04 \u00b7 Quilt Awakens",
+      "media": "m1",
+      "range_s": [
+        213.433,
+        235.067
+      ],
+      "pos": [
+        810,
+        340
+      ],
+      "windows": [
+        {
+          "id": "w_04_oi",
+          "label": "raise_hands",
+          "detector": "presence_bilateral",
+          "params": {
+            "y_threshold": "shoulder",
+            "hold_ms": 500
+          },
+          "region": null,
+          "appears_s": 10.57,
+          "duration_s": 8.43
+        }
+      ]
+    },
+    {
+      "id": "b_05",
+      "type": "playback",
+      "name": "05 \u00b7 Quilt Awakens",
+      "media": "m1",
+      "range_s": [
+        235.067,
+        261.867
+      ],
+      "pos": [
+        1060,
+        340
+      ],
+      "windows": [
+        {
+          "id": "w_05_oi",
+          "label": "point_quilt_block",
+          "detector": "point_target_held",
+          "params": {
+            "hold_ms": 600
+          },
+          "region": {
+            "shape": "rect",
+            "x": 0.55,
+            "y": 0.08,
+            "w": 0.28,
+            "h": 0.32
+          },
+          "appears_s": 10.83,
+          "duration_s": 6.03
+        }
+      ]
+    },
+    {
+      "id": "b_06",
+      "type": "playback",
+      "name": "06 \u00b7 Crossroads",
+      "media": "m1",
+      "range_s": [
+        261.867,
+        271.867
+      ],
+      "pos": [
+        1310,
+        340
+      ],
+      "windows": []
+    },
+    {
+      "id": "b_07",
+      "type": "playback",
+      "name": "07 \u00b7 Crossroads",
+      "media": "m1",
+      "range_s": [
+        271.867,
+        285.8
+      ],
+      "pos": [
+        1560,
+        340
+      ],
+      "windows": []
+    },
+    {
+      "id": "b_08",
+      "type": "playback",
+      "name": "08 \u00b7 Crossroads",
+      "media": "m1",
+      "range_s": [
+        285.8,
+        304.933
+      ],
+      "pos": [
+        1810,
+        340
+      ],
+      "windows": []
+    },
+    {
+      "id": "b_09",
+      "type": "choice",
+      "name": "09 \u00b7 Crossroads",
+      "media": "m1",
+      "range_s": [
+        304.933,
+        315.267
+      ],
+      "hold": "pause_end",
+      "pos": [
+        2060,
+        340
+      ],
+      "windows": [
+        {
+          "id": "w_09_left",
+          "label": "Go Left",
+          "detector": "point_region",
+          "params": {
+            "hold_ms": 600
+          },
+          "region": {
+            "shape": "rect",
+            "x": 0.05,
+            "y": 0.25,
+            "w": 0.3,
+            "h": 0.5
+          },
+          "appears_s": 0.0,
+          "duration_s": null
+        },
+        {
+          "id": "w_09_right",
+          "label": "Go Right",
+          "detector": "point_region",
+          "params": {
+            "hold_ms": 600
+          },
+          "region": {
+            "shape": "rect",
+            "x": 0.65,
+            "y": 0.25,
+            "w": 0.3,
+            "h": 0.5
+          },
+          "appears_s": 0.0,
+          "duration_s": null
+        },
+        {
+          "id": "w_09_voice",
+          "label": "Say \"go\"",
+          "detector": "voice",
+          "params": {
+            "keyword": "go"
+          },
+          "region": null,
+          "appears_s": 0.0,
+          "duration_s": null
+        }
+      ],
+      "branches": [
+        {
+          "id": "br_09_left",
+          "window": "w_09_left",
+          "to": "b_09_left",
+          "label": "Go Left"
+        },
+        {
+          "id": "br_09_right",
+          "window": "w_09_right",
+          "to": "b_09_right",
+          "label": "Go Right"
+        }
+      ],
+      "timeout": {
+        "seconds": 60,
+        "to": "b_09_left"
+      }
+    },
+    {
+      "id": "b_09_left",
+      "type": "playback",
+      "name": "09L \u00b7 confirm_left",
+      "media": "m1",
+      "range_s": [
+        336.033,
+        342.867
+      ],
+      "pos": [
+        2310,
+        150
+      ],
+      "windows": []
+    },
+    {
+      "id": "b_09_right",
+      "type": "playback",
+      "name": "09R \u00b7 confirm_right",
+      "media": "m1",
+      "range_s": [
+        352.033,
+        359.0
+      ],
+      "pos": [
+        2310,
+        530
+      ],
+      "windows": []
+    },
+    {
+      "id": "b_10",
+      "type": "playback",
+      "name": "10 \u00b7 Flying Geese",
+      "media": "m1",
+      "range_s": [
+        359.0,
+        367.933
+      ],
+      "pos": [
+        2560,
+        340
+      ],
+      "windows": []
+    },
+    {
+      "id": "b_11",
+      "type": "playback",
+      "name": "11 \u00b7 Flying Geese",
+      "media": "m1",
+      "range_s": [
+        367.933,
+        383.133
+      ],
+      "pos": [
+        2810,
+        340
+      ],
+      "windows": []
+    },
+    {
+      "id": "b_12",
+      "type": "playback",
+      "name": "12 \u00b7 Flying Geese",
+      "media": "m1",
+      "range_s": [
+        383.133,
+        395.9
+      ],
+      "pos": [
+        3060,
+        340
+      ],
+      "windows": []
+    },
+    {
+      "id": "b_13",
+      "type": "playback",
+      "name": "13 \u00b7 Flying Geese",
+      "media": "m1",
+      "range_s": [
+        395.9,
+        435.267
+      ],
+      "pos": [
+        3310,
+        340
+      ],
+      "windows": [
+        {
+          "id": "w_13_oi",
+          "label": "point_river_marker",
+          "detector": "point_target_held",
+          "params": {
+            "hold_ms": 500,
+            "directions": [
+              "down",
+              "down_left",
+              "down_right"
+            ]
+          },
+          "region": {
+            "shape": "rect",
+            "x": 0.0,
+            "y": 0.72,
+            "w": 1.0,
+            "h": 0.28
+          },
+          "appears_s": 16.0,
+          "duration_s": 7.9
+        }
+      ]
+    },
+    {
+      "id": "b_14",
+      "type": "playback",
+      "name": "14 \u00b7 North Star",
+      "media": "m1",
+      "range_s": [
+        435.267,
+        445.2
+      ],
+      "pos": [
+        3560,
+        340
+      ],
+      "windows": []
+    },
+    {
+      "id": "b_15",
+      "type": "playback",
+      "name": "15 \u00b7 North Star",
+      "media": "m1",
+      "range_s": [
+        445.2,
+        455.667
+      ],
+      "pos": [
+        3810,
+        340
+      ],
+      "windows": []
+    },
+    {
+      "id": "b_16",
+      "type": "playback",
+      "name": "16 \u00b7 North Star",
+      "media": "m1",
+      "range_s": [
+        455.667,
+        473.4
+      ],
+      "pos": [
+        4060,
+        340
+      ],
+      "windows": []
+    },
+    {
+      "id": "b_17",
+      "type": "playback",
+      "name": "17 \u00b7 North Star",
+      "media": "m1",
+      "range_s": [
+        473.4,
+        483.333
+      ],
+      "pos": [
+        4310,
+        340
+      ],
+      "windows": []
+    },
+    {
+      "id": "b_18",
+      "type": "playback",
+      "name": "18 \u00b7 North Star",
+      "media": "m1",
+      "range_s": [
+        483.333,
+        489.2
+      ],
+      "pos": [
+        4560,
+        340
+      ],
+      "windows": []
+    },
+    {
+      "id": "b_19",
+      "type": "playback",
+      "name": "19 \u00b7 North Star (draw chain)",
+      "media": "m1",
+      "range_s": [
+        489.167,
+        545.367
+      ],
+      "pos": [
+        4810,
+        340
+      ],
+      "windows": [
+        {
+          "id": "w_19_s0",
+          "label": "Draw left",
+          "detector": "directional_draw",
+          "params": {
+            "direction": "left"
+          },
+          "region": null,
+          "appears_s": 15.47,
+          "duration_s": 2.0
+        },
+        {
+          "id": "w_19_s1",
+          "label": "Draw down",
+          "detector": "directional_draw",
+          "params": {
+            "direction": "down"
+          },
+          "region": null,
+          "appears_s": 18.3,
+          "duration_s": 2.0
+        },
+        {
+          "id": "w_19_s2",
+          "label": "Draw right",
+          "detector": "directional_draw",
+          "params": {
+            "direction": "right"
+          },
+          "region": null,
+          "appears_s": 21.97,
+          "duration_s": 2.0
+        },
+        {
+          "id": "w_19_s3",
+          "label": "Draw up",
+          "detector": "directional_draw",
+          "params": {
+            "direction": "up"
+          },
+          "region": null,
+          "appears_s": 23.93,
+          "duration_s": 2.0
+        },
+        {
+          "id": "w_19_s4",
+          "label": "Draw up_left",
+          "detector": "directional_draw",
+          "params": {
+            "direction": "up_left"
+          },
+          "region": null,
+          "appears_s": 39.67,
+          "duration_s": 2.0
+        },
+        {
+          "id": "w_19_s5",
+          "label": "Draw up_left",
+          "detector": "directional_draw",
+          "params": {
+            "direction": "up_left"
+          },
+          "region": null,
+          "appears_s": 42.2,
+          "duration_s": 2.0
+        },
+        {
+          "id": "w_19_s6",
+          "label": "Draw left",
+          "detector": "directional_draw",
+          "params": {
+            "direction": "left"
+          },
+          "region": null,
+          "appears_s": 46.2,
+          "duration_s": 2.0
+        }
+      ]
+    },
+    {
+      "id": "b_20",
+      "type": "playback",
+      "name": "20 \u00b7 North Star (draw chain)",
+      "media": "m1",
+      "range_s": [
+        545.333,
+        616.4
+      ],
+      "pos": [
+        5060,
+        340
+      ],
+      "windows": [
+        {
+          "id": "w_20_s0",
+          "label": "Draw up_left",
+          "detector": "directional_draw",
+          "params": {
+            "direction": "up_left"
+          },
+          "region": null,
+          "appears_s": 13.97,
+          "duration_s": 2.0
+        },
+        {
+          "id": "w_20_s1",
+          "label": "Draw down_left",
+          "detector": "directional_draw",
+          "params": {
+            "direction": "down_left"
+          },
+          "region": null,
+          "appears_s": 18.23,
+          "duration_s": 2.0
+        },
+        {
+          "id": "w_20_s2",
+          "label": "Draw down_right",
+          "detector": "directional_draw",
+          "params": {
+            "direction": "down_right"
+          },
+          "region": null,
+          "appears_s": 22.1,
+          "duration_s": 2.0
+        },
+        {
+          "id": "w_20_s3",
+          "label": "Draw up_right",
+          "detector": "directional_draw",
+          "params": {
+            "direction": "up_right"
+          },
+          "region": null,
+          "appears_s": 25.9,
+          "duration_s": 2.0
+        },
+        {
+          "id": "w_20_oi4",
+          "label": "reach_star",
+          "detector": "point_target_held",
+          "params": {
+            "hold_ms": 400
+          },
+          "region": {
+            "shape": "rect",
+            "x": 0.4,
+            "y": 0.36,
+            "w": 0.2,
+            "h": 0.28
+          },
+          "appears_s": 51.97,
+          "duration_s": 5.43
+        }
+      ]
+    },
+    {
+      "id": "b_21",
+      "type": "playback",
+      "name": "21 \u00b7 North Star",
+      "media": "m1",
+      "range_s": [
+        616.4,
+        621.4
+      ],
+      "pos": [
+        5310,
+        340
+      ],
+      "windows": []
+    },
+    {
+      "id": "b_22",
+      "type": "playback",
+      "name": "22 \u00b7 Monkey Wrench",
+      "media": "m1",
+      "range_s": [
+        621.4,
+        631.0
+      ],
+      "pos": [
+        5560,
+        340
+      ],
+      "windows": []
+    },
+    {
+      "id": "b_23",
+      "type": "playback",
+      "name": "23 \u00b7 Monkey Wrench",
+      "media": "m1",
+      "range_s": [
+        630.967,
+        656.0
+      ],
+      "pos": [
+        5810,
+        340
+      ],
+      "windows": []
+    },
+    {
+      "id": "b_24",
+      "type": "playback",
+      "name": "24 \u00b7 Monkey Wrench",
+      "media": "m1",
+      "range_s": [
+        656.0,
+        712.933
+      ],
+      "pos": [
+        6060,
+        340
+      ],
+      "windows": [
+        {
+          "id": "w_24_oi0",
+          "label": "oi_1",
+          "detector": "point_target_held",
+          "params": {
+            "hold_ms": 600
+          },
+          "region": {
+            "shape": "rect",
+            "x": 0.4,
+            "y": 0.36,
+            "w": 0.2,
+            "h": 0.28
+          },
+          "appears_s": 11.17,
+          "duration_s": 6.37
+        },
+        {
+          "id": "w_24_oi1",
+          "label": "oi_2",
+          "detector": "point_target_held",
+          "params": {
+            "hold_ms": 600
+          },
+          "region": {
+            "shape": "rect",
+            "x": 0.4,
+            "y": 0.36,
+            "w": 0.2,
+            "h": 0.28
+          },
+          "appears_s": 23.5,
+          "duration_s": 6.17
+        }
+      ]
+    },
+    {
+      "id": "b_25",
+      "type": "playback",
+      "name": "25 \u00b7 Monkey Wrench",
+      "media": "m1",
+      "range_s": [
+        712.933,
+        751.933
+      ],
+      "pos": [
+        6310,
+        340
+      ],
+      "windows": [
+        {
+          "id": "w_25_oi",
+          "label": "touch_temple",
+          "detector": "touch_head",
+          "params": {
+            "hands_required": 1,
+            "hold_ms": 500,
+            "target": "temple",
+            "use_pose": true
+          },
+          "region": null,
+          "appears_s": 14.07,
+          "duration_s": 6.3
+        }
+      ]
+    },
+    {
+      "id": "b_28",
+      "type": "playback",
+      "name": "28 \u00b7 Shoofly",
+      "media": "m1",
+      "range_s": [
+        751.933,
+        760.267
+      ],
+      "pos": [
+        6560,
+        340
+      ],
+      "windows": []
+    },
+    {
+      "id": "b_29",
+      "type": "playback",
+      "name": "29 \u00b7 Shoofly",
+      "media": "m1",
+      "range_s": [
+        760.267,
+        795.267
+      ],
+      "pos": [
+        6810,
+        340
+      ],
+      "windows": []
+    },
+    {
+      "id": "b_30",
+      "type": "playback",
+      "name": "30 \u00b7 Shoofly",
+      "media": "m1",
+      "range_s": [
+        795.267,
+        815.0
+      ],
+      "pos": [
+        7060,
+        340
+      ],
+      "windows": [
+        {
+          "id": "w_30_oi",
+          "label": "scan_survey",
+          "detector": "survey",
+          "params": {
+            "brow_y": 0.45,
+            "scan_window_ms": 2000,
+            "min_x_delta": 0.06,
+            "hold_ms": 200
+          },
+          "region": null,
+          "appears_s": 5.9,
+          "duration_s": 5.23
+        }
+      ]
+    },
+    {
+      "id": "b_31",
+      "type": "playback",
+      "name": "31 \u00b7 Shoofly",
+      "media": "m1",
+      "range_s": [
+        815.0,
+        834.467
+      ],
+      "pos": [
+        7310,
+        340
+      ],
+      "windows": [
+        {
+          "id": "w_31_oi",
+          "label": "three_knock",
+          "detector": "rhythm_bilateral",
+          "params": {
+            "short_window_ms": 500,
+            "long_min_ms": 400,
+            "long_max_ms": 1400,
+            "threshold_fraction": 0.3,
+            "refractory_ms": 220
+          },
+          "region": null,
+          "appears_s": 4.5,
+          "duration_s": 5.63
+        }
+      ]
+    },
+    {
+      "id": "b_32",
+      "type": "playback",
+      "name": "32 \u00b7 Shoofly",
+      "media": "m1",
+      "range_s": [
+        834.467,
+        855.767
+      ],
+      "pos": [
+        7560,
+        340
+      ],
+      "windows": [
+        {
+          "id": "w_32_oi",
+          "label": "clasp_hand",
+          "detector": "point_target_held",
+          "params": {
+            "hold_ms": 500
+          },
+          "region": {
+            "shape": "rect",
+            "x": 0.3,
+            "y": 0.3,
+            "w": 0.4,
+            "h": 0.4
+          },
+          "appears_s": 6.1,
+          "duration_s": 6.03
+        }
+      ]
+    },
+    {
+      "id": "b_33",
+      "type": "playback",
+      "name": "33 \u00b7 Shoofly",
+      "media": "m1",
+      "range_s": [
+        855.767,
+        875.933
+      ],
+      "pos": [
+        7810,
+        340
+      ],
+      "windows": []
+    },
+    {
+      "id": "b_34",
+      "type": "playback",
+      "name": "34 \u00b7 Bear Paw",
+      "media": "m1",
+      "range_s": [
+        875.9,
+        884.567
+      ],
+      "pos": [
+        8060,
+        340
+      ],
+      "windows": []
+    },
+    {
+      "id": "b_35",
+      "type": "playback",
+      "name": "35 \u00b7 Bear Paw",
+      "media": "m1",
+      "range_s": [
+        884.567,
+        915.167
+      ],
+      "pos": [
+        8310,
+        340
+      ],
+      "windows": []
+    },
+    {
+      "id": "b_36",
+      "type": "playback",
+      "name": "36 \u00b7 Bear Paw",
+      "media": "m1",
+      "range_s": [
+        915.167,
+        935.167
+      ],
+      "pos": [
+        8560,
+        340
+      ],
+      "windows": [
+        {
+          "id": "w_36_oi",
+          "label": "scan_survey",
+          "detector": "survey",
+          "params": {
+            "brow_y": 0.45,
+            "scan_window_ms": 2000,
+            "min_x_delta": 0.06,
+            "hold_ms": 200
+          },
+          "region": null,
+          "appears_s": 9.8,
+          "duration_s": 5.5
+        }
+      ]
+    },
+    {
+      "id": "b_37",
+      "type": "choice",
+      "name": "37 \u00b7 Bear Paw",
+      "media": "m1",
+      "range_s": [
+        935.167,
+        941.933
+      ],
+      "hold": "pause_end",
+      "pos": [
+        8810,
+        340
+      ],
+      "windows": [
+        {
+          "id": "w_37_left",
+          "label": "Go Left",
+          "detector": "point_region",
+          "params": {
+            "hold_ms": 600
+          },
+          "region": {
+            "shape": "rect",
+            "x": 0.05,
+            "y": 0.25,
+            "w": 0.3,
+            "h": 0.5
+          },
+          "appears_s": 0.0,
+          "duration_s": null
+        },
+        {
+          "id": "w_37_right",
+          "label": "Go Right",
+          "detector": "point_region",
+          "params": {
+            "hold_ms": 600
+          },
+          "region": {
+            "shape": "rect",
+            "x": 0.65,
+            "y": 0.25,
+            "w": 0.3,
+            "h": 0.5
+          },
+          "appears_s": 0.0,
+          "duration_s": null
+        }
+      ],
+      "branches": [
+        {
+          "id": "br_37_left",
+          "window": "w_37_left",
+          "to": "b_37_left",
+          "label": "Go Left"
+        },
+        {
+          "id": "br_37_right",
+          "window": "w_37_right",
+          "to": "b_37_right",
+          "label": "Go Right"
+        }
+      ],
+      "timeout": {
+        "seconds": 60,
+        "to": "b_37_left"
+      }
+    },
+    {
+      "id": "b_37_left",
+      "type": "playback",
+      "name": "37L \u00b7 wrong_path",
+      "media": "m1",
+      "range_s": [
+        952.5,
+        957.6
+      ],
+      "pos": [
+        9060,
+        150
+      ],
+      "windows": []
+    },
+    {
+      "id": "b_37_right",
+      "type": "playback",
+      "name": "37R \u00b7 correct_path",
+      "media": "m1",
+      "range_s": [
+        957.6,
+        961.467
+      ],
+      "pos": [
+        9060,
+        530
+      ],
+      "windows": []
+    },
+    {
+      "id": "b_38",
+      "type": "playback",
+      "name": "38 \u00b7 Bear Paw",
+      "media": "m1",
+      "range_s": [
+        961.433,
+        975.267
+      ],
+      "pos": [
+        9310,
+        340
+      ],
+      "windows": []
+    },
+    {
+      "id": "b_43",
+      "type": "playback",
+      "name": "43 \u00b7 Bowtie Hourglass",
+      "media": "m1",
+      "range_s": [
+        975.233,
+        984.167
+      ],
+      "pos": [
+        9560,
+        340
+      ],
+      "windows": []
+    },
+    {
+      "id": "b_44",
+      "type": "playback",
+      "name": "44 \u00b7 Bowtie Hourglass",
+      "media": "m1",
+      "range_s": [
+        984.167,
+        1001.967
+      ],
+      "pos": [
+        9810,
+        340
+      ],
+      "windows": []
+    },
+    {
+      "id": "b_45",
+      "type": "playback",
+      "name": "45 \u00b7 Bowtie Hourglass",
+      "media": "m1",
+      "range_s": [
+        1001.967,
+        1070.967
+      ],
+      "pos": [
+        10060,
+        340
+      ],
+      "windows": [
+        {
+          "id": "w_45_oi0",
+          "label": "hands_to_head",
+          "detector": "touch_head",
+          "params": {
+            "hands_required": 2,
+            "hold_ms": 400,
+            "target": "crown",
+            "use_pose": true,
+            "radius_scale": 1.4
+          },
+          "region": null,
+          "appears_s": 21.6,
+          "duration_s": 5.77
+        },
+        {
+          "id": "w_45_oi1",
+          "label": "arms_crossed",
+          "detector": "arms_crossed",
+          "params": {
+            "hold_ms": 400,
+            "dead_zone_frac": 0.05
+          },
+          "region": null,
+          "appears_s": 36.53,
+          "duration_s": 5.83
+        }
+      ]
+    },
+    {
+      "id": "b_49",
+      "type": "playback",
+      "name": "49 \u00b7 Wagon Wheel",
+      "media": "m1",
+      "range_s": [
+        1070.933,
+        1079.3
+      ],
+      "pos": [
+        10310,
+        340
+      ],
+      "windows": []
+    },
+    {
+      "id": "b_50",
+      "type": "choice",
+      "name": "50 \u00b7 Wagon Wheel",
+      "media": "m1",
+      "range_s": [
+        1079.3,
+        1112.0
+      ],
+      "hold": "pause_end",
+      "pos": [
+        10560,
+        340
+      ],
+      "windows": [
+        {
+          "id": "w_50_left",
+          "label": "Go Left",
+          "detector": "point_region",
+          "params": {
+            "hold_ms": 600
+          },
+          "region": {
+            "shape": "rect",
+            "x": 0.05,
+            "y": 0.25,
+            "w": 0.3,
+            "h": 0.5
+          },
+          "appears_s": 0.0,
+          "duration_s": null
+        },
+        {
+          "id": "w_50_right",
+          "label": "Go Right",
+          "detector": "point_region",
+          "params": {
+            "hold_ms": 600
+          },
+          "region": {
+            "shape": "rect",
+            "x": 0.65,
+            "y": 0.25,
+            "w": 0.3,
+            "h": 0.5
+          },
+          "appears_s": 0.0,
+          "duration_s": null
+        }
+      ],
+      "branches": [
+        {
+          "id": "br_50_left",
+          "window": "w_50_left",
+          "to": "b_50_left",
+          "label": "Go Left"
+        },
+        {
+          "id": "br_50_right",
+          "window": "w_50_right",
+          "to": "b_50_right",
+          "label": "Go Right"
+        }
+      ],
+      "timeout": {
+        "seconds": 60,
+        "to": "b_50_left"
+      }
+    },
+    {
+      "id": "b_50_left",
+      "type": "playback",
+      "name": "50L \u00b7 path_a",
+      "media": "m1",
+      "range_s": [
+        1121.567,
+        1143.467
+      ],
+      "pos": [
+        10810,
+        150
+      ],
+      "windows": []
+    },
+    {
+      "id": "b_50_right",
+      "type": "playback",
+      "name": "50R \u00b7 path_b",
+      "media": "m1",
+      "range_s": [
+        1143.467,
+        1166.6
+      ],
+      "pos": [
+        10810,
+        530
+      ],
+      "windows": []
+    },
+    {
+      "id": "b_57_l",
+      "type": "playback",
+      "name": "57 \u00b7 Tumbling Blocks (L)",
+      "media": "m1",
+      "range_s": [
+        1166.567,
+        1174.467
+      ],
+      "pos": [
+        11060,
+        150
+      ],
+      "windows": []
+    },
+    {
+      "id": "b_58",
+      "type": "playback",
+      "name": "58 \u00b7 Tumbling Blocks",
+      "media": "m1",
+      "range_s": [
+        1174.433,
+        1198.133
+      ],
+      "pos": [
+        11310,
+        150
+      ],
+      "windows": [
+        {
+          "id": "w_58_oi",
+          "label": "cup_ear_listen",
+          "detector": "directional_head_or_hand",
+          "params": {
+            "direction": "ear",
+            "hold_ms": 400
+          },
+          "region": null,
+          "appears_s": 7.0,
+          "duration_s": 6.17
+        }
+      ]
+    },
+    {
+      "id": "b_57_r",
+      "type": "playback",
+      "name": "57 \u00b7 Tumbling Blocks (R)",
+      "media": "m1",
+      "range_s": [
+        1166.567,
+        1174.467
+      ],
+      "pos": [
+        11060,
+        530
+      ],
+      "windows": []
+    },
+    {
+      "id": "b_59",
+      "type": "playback",
+      "name": "59 \u00b7 Tumbling Blocks",
+      "media": "m1",
+      "range_s": [
+        1198.1,
+        1217.667
+      ],
+      "pos": [
+        11310,
+        530
+      ],
+      "windows": [
+        {
+          "id": "w_59_oi",
+          "label": "cup_ear_listen",
+          "detector": "directional_head_or_hand",
+          "params": {
+            "direction": "ear",
+            "hold_ms": 400
+          },
+          "region": null,
+          "appears_s": 3.2,
+          "duration_s": 5.97
+        }
+      ]
+    },
+    {
+      "id": "b_60",
+      "type": "playback",
+      "name": "60 \u00b7 Tumbling Blocks",
+      "media": "m1",
+      "range_s": [
+        1217.633,
+        1238.067
+      ],
+      "pos": [
+        11560,
+        340
+      ],
+      "windows": [
+        {
+          "id": "w_60_oi",
+          "label": "fast_gather",
+          "detector": "speed_bilateral",
+          "params": {
+            "min_bursts": 3,
+            "burst_window_ms": 3000,
+            "velocity_multiplier": 2.0,
+            "use_pose": true
+          },
+          "region": null,
+          "appears_s": 5.4,
+          "duration_s": 5.57
+        }
+      ]
+    },
+    {
+      "id": "b_61",
+      "type": "playback",
+      "name": "61 \u00b7 Tumbling Blocks",
+      "media": "m1",
+      "range_s": [
+        1238.033,
+        1268.0
+      ],
+      "pos": [
+        11810,
+        340
+      ],
+      "windows": [
+        {
+          "id": "w_61_oi",
+          "label": "run_arms",
+          "detector": "run_arms",
+          "params": {
+            "min_cycles": 3,
+            "window_ms": 2000
+          },
+          "region": null,
+          "appears_s": 4.53,
+          "duration_s": 6.5
+        }
+      ]
+    },
+    {
+      "id": "b_66",
+      "type": "playback",
+      "name": "66 \u00b7 Conestogo",
+      "media": "m1",
+      "range_s": [
+        1267.967,
+        1435.133
+      ],
+      "pos": [
+        12060,
+        340
+      ],
+      "windows": [
+        {
+          "id": "w_66_oi0",
+          "label": "unravel",
+          "detector": "unravel",
+          "params": {
+            "min_cycles": 2
+          },
+          "region": null,
+          "appears_s": 74.8,
+          "duration_s": 4.23
+        },
+        {
+          "id": "w_66_oi1",
+          "label": "throw_rope",
+          "detector": "throw",
+          "params": {
+            "min_growth_pct": 40,
+            "max_stroke_ms": 600
+          },
+          "region": null,
+          "appears_s": 87.27,
+          "duration_s": 6.7
+        },
+        {
+          "id": "w_66_oi2",
+          "label": "launch_push",
+          "detector": "push_out",
+          "params": {
+            "min_growth_pct": 35,
+            "window_ms": 400
+          },
+          "region": null,
+          "appears_s": 104.47,
+          "duration_s": 7.1
+        },
+        {
+          "id": "w_66_oi3",
+          "label": "paddle",
+          "detector": "paddle",
+          "params": {
+            "min_strokes": 2
+          },
+          "region": null,
+          "appears_s": 120.8,
+          "duration_s": 6.83
+        },
+        {
+          "id": "w_66_oi4",
+          "label": "spread_arms",
+          "detector": "spread_arms",
+          "params": {
+            "hold_ms": 400
+          },
+          "region": null,
+          "appears_s": 149.07,
+          "duration_s": 6.7
+        }
+      ]
+    },
+    {
+      "id": "b_79",
+      "type": "playback",
+      "name": "79 \u00b7 Epilogue",
+      "media": "m1",
+      "range_s": [
+        1435.1,
+        1521.033
+      ],
+      "pos": [
+        12310,
+        340
+      ],
+      "windows": []
+    }
+  ],
+  "edges": [
+    {
+      "from": "b_01",
+      "to": "b_02"
+    },
+    {
+      "from": "b_02",
+      "to": "b_03"
+    },
+    {
+      "from": "b_03",
+      "to": "b_04"
+    },
+    {
+      "from": "b_04",
+      "to": "b_05"
+    },
+    {
+      "from": "b_05",
+      "to": "b_06"
+    },
+    {
+      "from": "b_06",
+      "to": "b_07"
+    },
+    {
+      "from": "b_07",
+      "to": "b_08"
+    },
+    {
+      "from": "b_08",
+      "to": "b_09"
+    },
+    {
+      "from": "b_09_left",
+      "to": "b_10"
+    },
+    {
+      "from": "b_09_right",
+      "to": "b_10"
+    },
+    {
+      "from": "b_10",
+      "to": "b_11"
+    },
+    {
+      "from": "b_11",
+      "to": "b_12"
+    },
+    {
+      "from": "b_12",
+      "to": "b_13"
+    },
+    {
+      "from": "b_13",
+      "to": "b_14"
+    },
+    {
+      "from": "b_14",
+      "to": "b_15"
+    },
+    {
+      "from": "b_15",
+      "to": "b_16"
+    },
+    {
+      "from": "b_16",
+      "to": "b_17"
+    },
+    {
+      "from": "b_17",
+      "to": "b_18"
+    },
+    {
+      "from": "b_18",
+      "to": "b_19"
+    },
+    {
+      "from": "b_19",
+      "to": "b_20"
+    },
+    {
+      "from": "b_20",
+      "to": "b_21"
+    },
+    {
+      "from": "b_21",
+      "to": "b_22"
+    },
+    {
+      "from": "b_22",
+      "to": "b_23"
+    },
+    {
+      "from": "b_23",
+      "to": "b_24"
+    },
+    {
+      "from": "b_24",
+      "to": "b_25"
+    },
+    {
+      "from": "b_25",
+      "to": "b_28"
+    },
+    {
+      "from": "b_28",
+      "to": "b_29"
+    },
+    {
+      "from": "b_29",
+      "to": "b_30"
+    },
+    {
+      "from": "b_30",
+      "to": "b_31"
+    },
+    {
+      "from": "b_31",
+      "to": "b_32"
+    },
+    {
+      "from": "b_32",
+      "to": "b_33"
+    },
+    {
+      "from": "b_33",
+      "to": "b_34"
+    },
+    {
+      "from": "b_34",
+      "to": "b_35"
+    },
+    {
+      "from": "b_35",
+      "to": "b_36"
+    },
+    {
+      "from": "b_36",
+      "to": "b_37"
+    },
+    {
+      "from": "b_37_left",
+      "to": "b_38"
+    },
+    {
+      "from": "b_37_right",
+      "to": "b_38"
+    },
+    {
+      "from": "b_38",
+      "to": "b_43"
+    },
+    {
+      "from": "b_43",
+      "to": "b_44"
+    },
+    {
+      "from": "b_44",
+      "to": "b_45"
+    },
+    {
+      "from": "b_45",
+      "to": "b_49"
+    },
+    {
+      "from": "b_49",
+      "to": "b_50"
+    },
+    {
+      "from": "b_50_left",
+      "to": "b_57_l"
+    },
+    {
+      "from": "b_57_l",
+      "to": "b_58"
+    },
+    {
+      "from": "b_50_right",
+      "to": "b_57_r"
+    },
+    {
+      "from": "b_57_r",
+      "to": "b_59"
+    },
+    {
+      "from": "b_58",
+      "to": "b_60"
+    },
+    {
+      "from": "b_59",
+      "to": "b_60"
+    },
+    {
+      "from": "b_60",
+      "to": "b_61"
+    },
+    {
+      "from": "b_61",
+      "to": "b_66"
+    },
+    {
+      "from": "b_66",
+      "to": "b_79"
+    }
+  ]
+}

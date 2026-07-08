@@ -279,10 +279,54 @@ pip install -r requirements.txt
 ### 4. Run the project
 
 ```bash
-python main.py
+py -3.12 main.py
 ```
 
-Press `Esc` to exit.
+Press `Esc` to exit. `Space` pause/play · `S` skip prologue/tutorial · `F` fullscreen · `D` debug overlay · `K` skeleton panel.
+
+---
+
+## Project layout
+
+```
+main.py                  boot, key handling, main loop
+config.json              every tunable value (see Configuration)
+engines/
+  shot_sequence_player   the runtime spine: shot FSMs, holds, branching
+  sequence_loader        scenes/sequence.json + per-shot metadata -> Shot objects
+  render_engine          frame playback, hand-icon cursors, pause menu, tutorial cards
+  gesture_engine         camera + MediaPipe thread, detector dispatch, depth fusion
+  voice_engine           Vosk keyword spotting + hum/whisper DSP
+  narration_adapter      plays a shot's AL-XX-YYY audio lines
+  tutorial_engine        code-rendered calibration/tutorial at start
+  event_bus, frame_cache plumbing
+  depth/                 Orbbec Gemini 335 adapter + depth fusion (fusion.py)
+  detectors/rules/       one file per gesture detector (+ shared hand_pose.py)
+scripts/                 dev tools: gesture_tuner, voice_tuner, build_exe,
+                         copy_frames, prepare_hand_icons, rasterize_storyboard,
+                         export_experience (Experience Builder -> scenes tree)
+tools/
+  experience_builder/    browser-based flow editor: open an MP4, carve it into
+                         blocks, wire choices/merges, drop interaction windows,
+                         preview, export (see its README)
+tests/                   regression suite (see below)
+scenes/                  sequence.json + act_NN_<name>/shot_NN/{frames,metadata.json}
+assets/                  hand icons, storyboard, misc media
+```
+
+## Running the tests
+
+Run the regression suite after **any** engine or detector change — it encodes
+the playtest behaviour contract for every interaction, the depth-fusion rules,
+the tutorial flow, render timing, and the shot-sequence wiring invariants:
+
+```bash
+py -3.12 -m unittest discover -s tests
+```
+
+~70 tests, ~5 seconds, no camera or display needed. If a test goes red, a
+scene interaction regressed — fix the code, not the test (tests only change
+when the intended behaviour changes).
 
 ---
 

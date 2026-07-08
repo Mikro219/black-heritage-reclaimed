@@ -17,20 +17,10 @@ Detectors are armed on entering HOLD (via "cg_window_open" / "oi_window_open"
 bus events) and are effectively disarmed on exiting HOLD because the player
 stops responding to "cg_detected" events outside the HOLD state.
 
-COUPLING FLAGS (to be resolved in Phase 3):
-  1. VI windows: VoiceEngine subscribes to "dialogue_cue" to open VI windows.
-     That event no longer exists in the shot-driven model. The player emits
-     "vi_chain_step" when a voice chain step is armed; Phase 3 will adapt
-     VoiceEngine to subscribe to this event and open a window.
-  2. Narration audio: NarrationEngine.load_scene() expects a dialogue_sequence
-     dict.  Phase 3 will add a thin NarrationAdapter that translates a shot's
-     audio_lines list into individual play calls without using the old sequence.
-  3. Render engine: the player emits "shot_load" and "shot_state_change".
-     RenderEngine currently only responds to "scene_load"/"dev_frames_load".
-     Phase 3 will add a "segment_playback_done" callback from the render engine
-     so the player knows when non-looping segments finish.  Until then, the
-     player advances play segments immediately when assets_pending=True, or
-     after an estimated duration when frames are present.
+Companions: NarrationAdapter translates a shot's audio_lines into play calls
+(and emits "dialogue_cue" for the voice engine's VI windows); RenderEngine
+consumes "shot_load"/"play_segment" and reports back "segment_playback_done"
+when a non-looping segment finishes.
 """
 
 from __future__ import annotations

@@ -27,6 +27,7 @@ from engines.render_engine import RenderEngine
 from engines.sequence_loader import load_sequence
 from engines.shot_sequence_player import ShotSequencePlayer, PLAYER_RUNNING
 from engines.narration_adapter import NarrationAdapter
+from engines.tutorial_engine import TutorialEngine
 
 
 # Frozen (PyInstaller) builds: __file__ points inside the bundled _internal dir,
@@ -69,8 +70,24 @@ def load_profile(name: str) -> dict:
         return json.load(f)
 
 
-def open_camera(profile: dict) -> cv2.VideoCapture:
-    """Open camera using DirectShow backend and device-name matching per host profile."""
+def open_camera(profile: dict, config: dict | None = None):
+    """Open the capture device.
+
+    When config["use_orbbec_camera"] is true, the Orbbec Gemini 335 is opened
+    first (color + aligned depth via engines.depth); if the SDK or camera is
+    unavailable it falls back to the webcam path below, so the same build runs
+    on the dev laptop without the depth camera attached.
+    """
+    if config and config.get("use_orbbec_camera"):
+        from engines.depth.orbbec_camera import try_open_orbbec
+        cam_cfg = profile.get("camera", {})
+        w, h = cam_cfg.get("resolution", [1280, 720])
+        cap = try_open_orbbec(resolution=(w, h), fps=cam_cfg.get("fps", 30))
+        if cap is not None:
+            print("[main] Using Orbbec Gemini 335 (color + depth)", file=sys.stderr)
+            return cap
+        print("[main] Orbbec unavailable — falling back to webcam", file=sys.stderr)
+
     cam_cfg = profile.get("camera", {})
     backend = cv2.CAP_DSHOW if cam_cfg.get("backend", "dshow") == "dshow" else cv2.CAP_ANY
     w, h = cam_cfg.get("resolution", [1280, 720])
@@ -168,11 +185,9 @@ def detector_test(detector_name: str, params: dict):
     profile_name = resolve_profile_name(None)
     profile = load_profile(profile_name)
     cam_cfg = profile.get("camera", {})
-    backend = _cv2.CAP_DSHOW if cam_cfg.get("backend", "dshow") == "dshow" else _cv2.CAP_ANY
     w, h = cam_cfg.get("resolution", [1280, 720])
-    cap = _cv2.VideoCapture(cam_cfg.get("fallback_index", 0), backend)
-    cap.set(_cv2.CAP_PROP_FRAME_WIDTH, w)
-    cap.set(_cv2.CAP_PROP_FRAME_HEIGHT, h)
+    # Same camera selection as the main runtime (Orbbec first when enabled).
+    cap = open_camera(profile, load_config())
 
     mp_hands = mp.solutions.hands
     mp_pose  = mp.solutions.pose
@@ -378,6 +393,7 @@ def main():
     shots             = load_sequence(SCENES_ROOT, config)
     player            = ShotSequencePlayer(shots, config, bus)
     narration_adapter = NarrationAdapter(config, bus, shots)
+    tutorial          = TutorialEngine(config, bus, gesture)
 
     # Start the continuous look-ahead frame cache: preloads every shot with art in
     # the background (forward from the current shot) so future shots are fully ready.
@@ -397,7 +413,7 @@ def main():
 
     voice.start()
 
-    cap = open_camera(profile)
+    cap = open_camera(profile, config)
     # Camera capture + MediaPipe inference run on their own thread; the render loop
     # below only consumes the latest landmarks and never blocks on detection.
     gesture.start_capture(cap)
@@ -407,6 +423,7 @@ def main():
     # Boot into the paused state — the experience waits on a PAUSED screen until
     # an attendant presses Space/P to begin.
     paused = True
+    tutorial_was_active = False
     player.pause()
     render.pause()
     pygame.mixer.pause()
@@ -423,13 +440,22 @@ def main():
             if event.type == pygame.KEYDOWN and event.key in (pygame.K_SPACE, pygame.K_p):
                 # Toggle pause/play. Freezes frames, audio, the shot clock and
                 # detection together; resume shifts every timer so nothing fires late.
-                paused = not paused
-                if paused:
+                if tutorial.active:
+                    # Space during the tutorial ends it; the transition check
+                    # below resumes the experience.
+                    tutorial.skip()
+                elif not paused:
+                    paused = True
                     player.pause()
                     render.pause()
                     pygame.mixer.pause()
                     print("[main] PAUSED")
+                elif tutorial.begin():
+                    # First start with tutorial enabled: the experience stays
+                    # paused while the tutorial teaches the gesture vocabulary.
+                    print("[main] tutorial running — experience stays paused")
                 else:
+                    paused = False
                     player.resume()
                     render.resume()
                     pygame.mixer.unpause()
@@ -438,9 +464,14 @@ def main():
                 render.toggle_fullscreen()
             if event.type == pygame.KEYDOWN and event.key == pygame.K_d:
                 render.toggle_debug()
+            if event.type == pygame.KEYDOWN and event.key == pygame.K_k:
+                # Skeleton-in-corner display option (independent of debug overlay).
+                render.toggle_skeleton()
             if event.type == pygame.KEYDOWN and event.key == pygame.K_s:
+                if tutorial.active:
+                    tutorial.skip()
                 # Skip the prologue (act 0) — cut any playing narration and jump.
-                if player.skip_prologue():
+                elif player.skip_prologue():
                     pygame.mixer.stop()
             if event.type == pygame.KEYDOWN and event.key == pygame.K_RIGHT and not paused:
                 player._advance()
@@ -456,7 +487,21 @@ def main():
                 if event.type == pygame.MOUSEMOTION and event.buttons[0]:
                     render.handle_volume_click(event.pos)
 
-        if not paused:
+        # Tutorial finished (completed or skipped) while the experience was held
+        # paused for it — release everything in one place.
+        if paused and tutorial_was_active and not tutorial.active:
+            paused = False
+            player.resume()
+            render.resume()
+            pygame.mixer.unpause()
+            print("[main] tutorial done — RESUMED")
+        tutorial_was_active = tutorial.active
+
+        if tutorial.active:
+            # Detection runs, the shot player stays frozen.
+            gesture.update()
+            tutorial.update()
+        elif not paused:
             gesture.update()
             player.update()
             narration_adapter.update()
@@ -466,9 +511,9 @@ def main():
             handedness_data=gesture._last_handedness,
             pose_data=gesture.fresh_pose_lm(),
             gesture_debug=gesture.debug_info(),
-            scene_debug=None,
             voice_debug=voice.debug_info(),
             narration_debug=player.debug_info(),
+            tutorial_card=tutorial.card_info() if tutorial.active else None,
         )
 
         clock.tick(render_fps)

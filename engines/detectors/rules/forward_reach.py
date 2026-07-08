@@ -2,12 +2,17 @@
 forward_reach — hand moves toward the screen (Z-approach), used for AL-01-002 reach_flask.
 
 Unlike directional_point, no specific finger pose is required — open palm, loose fist,
-or pointing hand all count. The signal is "hand moving closer to camera," detected via
-bounding-box area growth, optionally constrained to a target screen region.
+or pointing hand all count. The signal is "hand moving closer to camera": with the
+Gemini 335 depth sampler present (context["_depth_mm_at"]) the wrist's REAL depth
+must drop by min_depth_delta_mm within the window (authoritative while flowing);
+on a plain webcam, bounding-box area growth is the monocular fallback. Optionally
+constrained to a target screen region.
 
 Params:
   area_growth_threshold (float): fraction of area growth required over the window. Default 0.30.
   window_frames (int): sliding window depth (frames) for area comparison. Default 12 (~400ms @30fps).
+  min_depth_delta_mm (float): required real wrist-depth decrease within the
+                  window when the depth sampler is present. Default 180.
   target_region (str | None): screen region the wrist must occupy. One of:
       "upper_center"   — upper 40% of frame, middle 40% of width (the flask region in Scene 1)
       "upper_left"     — upper 40%, left 50%
@@ -15,17 +20,10 @@ Params:
       "center"         — middle third in both axes
       None             — no spatial constraint; anywhere in frame counts.
 
-Detection approach:
-  Each frame, compute the axis-aligned bounding box of all 21 landmarks.
-  The box's normalised area (w * h) is pushed onto a circular buffer.
-  When current_area / oldest_area >= (1 + area_growth_threshold) the visitor's hand
-  is growing on screen, i.e., approaching the camera. If a target_region is configured,
-  the wrist landmark must also fall within that region.
-
-Context keys: bbox_area_history, forward_reach_fired
+Context keys: bbox_area_history, reach_depth_history, forward_reach_fired
 """
 
-import time
+from . import hand_pose
 
 _REGIONS = {
     "upper_center": {"x_min": 0.30, "x_max": 0.70, "y_max": 0.40},
@@ -33,14 +31,6 @@ _REGIONS = {
     "upper_right":  {"x_min": 0.50, "y_max": 0.40},
     "center":       {"x_min": 0.33, "x_max": 0.67, "y_min": 0.33, "y_max": 0.67},
 }
-
-
-def _hand_bbox_area(hand) -> float:
-    """Return the normalised bounding-box area (w * h) for a single hand."""
-    lm = hand.landmark
-    xs = [l.x for l in lm]
-    ys = [l.y for l in lm]
-    return (max(xs) - min(xs)) * (max(ys) - min(ys))
 
 
 def _wrist_in_region(hand, region_key: str) -> bool:
@@ -66,6 +56,7 @@ def _wrist_in_region(hand, region_key: str) -> bool:
 def detect(landmarks, params: dict, context: dict) -> bool:
     if not landmarks:
         context.pop("bbox_area_history", None)
+        context.pop("reach_depth_history", None)
         context["forward_reach_fired"] = False
         return False
 
@@ -76,12 +67,34 @@ def detect(landmarks, params: dict, context: dict) -> bool:
     threshold = params.get("area_growth_threshold", 0.30)
     window_frames = params.get("window_frames", 12)
     region_key = params.get("target_region")
-
-    history: list = context.setdefault("bbox_area_history", [])
+    min_depth_delta = params.get("min_depth_delta_mm", 180)
 
     # Use the largest hand (most likely the dominant/extended one)
-    best_hand = max(landmarks, key=_hand_bbox_area)
-    current_area = _hand_bbox_area(best_hand)
+    best_hand = max(landmarks, key=hand_pose.bbox_area)
+
+    # ── Preferred: real wrist depth (Gemini 335) — fire when the wrist has
+    #    approached the camera by min_depth_delta_mm within the window. ───────
+    depth_at = context.get("_depth_mm_at")
+    if callable(depth_at):
+        hw = best_hand.landmark[0]
+        d = depth_at(hw.x, hw.y)
+        if d is not None:
+            dh: list = context.setdefault("reach_depth_history", [])
+            dh.append(d)
+            if len(dh) > window_frames:
+                dh.pop(0)
+            if len(dh) >= 2 and (max(dh) - d) >= min_depth_delta:
+                if region_key and not _wrist_in_region(best_hand, region_key):
+                    return False
+                context["forward_reach_fired"] = True
+                return True
+            if len(dh) >= 2:
+                # Depth is flowing and says "no approach yet" — it's
+                # authoritative; skip the bbox proxy this frame.
+                return False
+
+    history: list = context.setdefault("bbox_area_history", [])
+    current_area = hand_pose.bbox_area(best_hand)
     history.append(current_area)
     if len(history) > window_frames:
         history.pop(0)

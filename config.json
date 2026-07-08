@@ -4,6 +4,13 @@
     1080
   ],
   "camera_index": 0,
+  "use_orbbec_camera": true,
+  "tutorial_enabled": true,
+  "depth": {
+    "player_min_mm": 500,
+    "player_max_mm": 3200,
+    "phantom_behind_mm": 400
+  },
   "projector_audio_offset_ms": 40,
   "debug_overlay": false,
   "start_scene": "scene_01",

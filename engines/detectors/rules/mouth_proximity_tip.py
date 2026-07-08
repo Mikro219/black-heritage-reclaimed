@@ -13,8 +13,8 @@ Params:
 
 Approach:
   We check the index fingertip (lm 8) and thumb tip (lm 4) on any hand.
-  Tipping validation: wrist (lm 0) must be above the fingertip (y-wise), indicating
-  an upward tilt consistent with bringing a cup to the mouth.
+  Tipping validation: wrist (lm 0) must be at or below the fingertip (y-wise) —
+  the natural orientation when a hand wraps a flask and tips it to the mouth.
 
 Context keys: tip_near_since
 """
@@ -69,11 +69,15 @@ def detect(landmarks, params: dict, context: dict) -> bool:
             if dist < best_dist:
                 best_dist = dist
                 if dist <= threshold:
-                    if wrist.y < tip.y:
+                    # Tipping validation: drinking wraps the fingers around the
+                    # flask at mouth level with the wrist AT OR BELOW them (y grows
+                    # downward). The pre-playtest check demanded the opposite
+                    # orientation and rejected every natural drink.
+                    if wrist.y >= tip.y - 0.03:
                         near = True
                         best_fail = "ok"
                     else:
-                        best_fail = f"wrist not above tip (wrist.y={wrist.y:.2f} tip.y={tip.y:.2f})"
+                        best_fail = f"wrist above tips (wrist.y={wrist.y:.2f} tip.y={tip.y:.2f})"
                 else:
                     best_fail = f"too far (dist={dist:.3f} > threshold={threshold})"
         if near:

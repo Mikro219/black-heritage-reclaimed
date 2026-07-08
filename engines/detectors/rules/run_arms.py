@@ -26,6 +26,9 @@ Detection logic:
 Params:
   min_cycles (int): complete alternating cycles required. Default 3.
   window_ms (float): all cycles must finish within this window. Default 2000.
+  reference (str): "waist" (default, shoulder/hip midpoint) or "hips" (legacy
+                   hip line) for the alternating reference line.
+  waist_y_offset (float): shifts the reference line; tuned via W/S in the tuner.
 
 Fallback (no Pose): return False.
 
@@ -45,9 +48,19 @@ def detect(landmarks, params: dict, context: dict) -> bool:
     required_transitions = min_cycles * 2
 
     hip_l, hip_r = pose_lm[23], pose_lm[24]
+    sh_l, sh_r   = pose_lm[11], pose_lm[12]
     lw, rw       = pose_lm[15], pose_lm[16]
 
-    waist_y      = (hip_l.y + hip_r.y) / 2 + params.get("waist_y_offset", 0.0)
+    # Reference line for the alternating pump. The original used the HIP line,
+    # which a natural running arm-pump (elbows bent, hands at waist/chest) almost
+    # never crosses — that's why the gesture read as "unclear what it's looking
+    # for". Default is now the waist: midway between shoulders and hips.
+    hip_y      = (hip_l.y + hip_r.y) / 2
+    shoulder_y = (sh_l.y + sh_r.y) / 2
+    if params.get("reference", "waist") == "hips":
+        waist_y = hip_y + params.get("waist_y_offset", 0.0)
+    else:
+        waist_y = (shoulder_y + hip_y) / 2 + params.get("waist_y_offset", 0.0)
     left_above   = lw.y < waist_y
     right_above  = rw.y < waist_y
 

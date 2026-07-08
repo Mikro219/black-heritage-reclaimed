@@ -15,6 +15,7 @@ import threading
 import time
 
 from engines.detectors import REGISTRY
+from engines.depth.fusion import PoseDepth
 
 
 # Detectors that read MediaPipe Pose landmarks. Pose inference is the most
@@ -28,7 +29,8 @@ from engines.detectors import REGISTRY
 _POSE_DETECTORS = {"arms_crossed", "run_arms", "unravel", "paddle",
                    "mouth_proximity_tip", "touch_head",
                    "survey", "directional_head_or_hand", "presence_bilateral",
-                   "point_region", "throw", "spread_arms"}
+                   "point_region", "throw", "spread_arms", "forward_point",
+                   "directional_draw", "point_target_held", "speed_bilateral"}
 
 # Pose-only detectors that can fire WITHOUT hand landmarks present (they read body
 # landmarks, not hands). Used to decide whether to dispatch when no hands are seen.
@@ -37,7 +39,8 @@ _POSE_DETECTORS = {"arms_crossed", "run_arms", "unravel", "paddle",
 # touch_head (use_pose) reads pose wrists too, so both hands raised to the crown
 # (AL-08-005 hands_to_head) still register when Hands drops them to head occlusion.
 _NO_HANDS_DETECTORS = {"arms_crossed", "run_arms", "unravel", "paddle", "point_region",
-                       "touch_head", "throw", "spread_arms", "survey"}
+                       "touch_head", "throw", "spread_arms", "survey", "forward_point",
+                       "directional_draw", "point_target_held", "speed_bilateral"}
 
 
 def _inject_pose_params(gtype: str, params: dict, pose_lm) -> dict:
@@ -155,6 +158,14 @@ class GestureEngine:
         self._last_fired: Optional[str] = None
         self._last_fired_time: float = 0.0
         self._warned_missing: set = set()   # suppress repeated "not in registry" noise
+
+        # Depth fusion (Gemini 335): player interaction band + phantom veto
+        # thresholds. All optional — absent depth degrades to pre-depth behaviour.
+        depth_cfg = config.get("depth", {})
+        self._player_min_mm = depth_cfg.get("player_min_mm", 500)
+        self._player_max_mm = depth_cfg.get("player_max_mm", 3200)
+        self._phantom_behind_mm = depth_cfg.get("phantom_behind_mm", 400)
+        self._player_gated = False   # debug: pose currently rejected by the band
 
         self.event_bus.subscribe("cg_window_open", self._on_cg_window_open)
         self.event_bus.subscribe("oi_window_open", self._on_oi_window_open)
@@ -362,9 +373,15 @@ class GestureEngine:
             "active_cg": f"{cg['id']} ({cg['type']})" if cg else None,
             "active_oi": f"{oi['id']} ({oi['type']})" if oi else None,
             "active_oi_params": oi.get("params", {}) if oi else None,
+            # Raw type/params of the live window (CG wins) — the render engine's
+            # hand-icon cursors and interaction indicators key off these.
+            "active_type": (cg or oi or {}).get("type"),
+            "active_params": (cg or oi or {}).get("params", {}) if (cg or oi) else {},
+            "input_locked": self._input_locked,
             "last_fired": last,
             "recording_pts": len(recording) if recording else 0,
             "pose_status": pose_status,
+            "player_gated": self._player_gated,
             "point_dir": self._active_cg_context.get("dominant_direction"),
         }
 
@@ -388,7 +405,30 @@ class GestureEngine:
         # Body-relative detectors read context["_pose_lm"]; existing detectors ignore it.
         pose_age = time.monotonic() - self._last_pose_time
         pose_lm = self._last_pose_lm if pose_age < self._pose_stale_s else None
+        # Real depth sampler (mm) when the capture device provides one (Orbbec
+        # Gemini 335 shim). None on plain webcams — detectors treat it as absent.
+        depth_sampler = getattr(self._cap, "depth_mm_at", None)
+        context["_depth_mm_at"] = depth_sampler
+
+        # Depth fusion: lift/veto/meter over this pose + the latest depth frame.
+        # Player band gate: when real depth says the tracked torso is outside the
+        # interaction zone, the pose belongs to a passer-by (or the projection
+        # wall) — drop it for this dispatch so background people can't steer
+        # detections. Sampling is lazy, so this costs ~4 depth patch reads only
+        # while a pose-reading window is armed.
+        fusion = PoseDepth(depth_sampler, pose_lm,
+                           phantom_behind_mm=self._phantom_behind_mm)
+        self._player_gated = False
+        if fusion.available:
+            torso = fusion.torso_depth_mm()
+            if torso is not None and not (self._player_min_mm <= torso
+                                          <= self._player_max_mm):
+                self._player_gated = True
+                pose_lm = None
+                fusion = PoseDepth(depth_sampler, None,
+                                   phantom_behind_mm=self._phantom_behind_mm)
         context["_pose_lm"] = pose_lm
+        context["_pose_depth"] = fusion
         # Compute live pose-derived thresholds (brow line, shoulder height, mouth/ear
         # positions) so detection matches the tuner instead of using fixed values.
         params = _inject_pose_params(detector_type, params, pose_lm)

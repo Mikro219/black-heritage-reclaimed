@@ -28,11 +28,31 @@ Detection approach:
   2. The fingertip's player-space position must fall within the declared target_region.
   3. Both conditions must hold continuously for hold_ms.
 
-Context keys: forward_point_since
+POSE+DEPTH FALLBACK (July 2026): a hand pointing STRAIGHT AT the camera is heavily
+foreshortened — MediaPipe Hands usually fails to detect it at all, and even when it
+does, the 2D extension check fails. When the Hands path doesn't produce a hit, the
+detector falls back to Pose: a visible Pose wrist counts as a forward point when the
+arm is reaching toward the camera AND the wrist sits inside the target region.
+"Reaching" is judged by real depth when the Orbbec sampler is available
+(shoulder_depth - wrist_depth >= min_reach_depth_mm), else by the Pose z delta.
+Both paths share one hold timer, so Hands flickering in/out mid-hold doesn't reset it.
+
+Params:
+  target_region / hold_ms — as above.
+  min_reach_depth_mm (float): required depth reach (mm) for the fallback when the
+                  depth sampler is present. Default 300.
+  min_pose_z_delta (float): required shoulder-to-wrist Pose z delta for the fallback
+                  without depth (Pose z is hip-normalised). Default 0.25.
+  min_visibility (float): Pose wrist visibility gate. Default 0.5.
+
+Context keys: forward_point_since  (reads: _pose_lm, _depth_mm_at)
 """
 
 import math
 import time
+
+# (pose wrist index, same-side pose shoulder index)
+_ARMS = [(15, 11), (16, 12)]
 
 _REGIONS: dict[str, dict] = {
     "top_left_quadrant":  {"px_max": 0.5, "y_max": 0.5},
@@ -42,16 +62,11 @@ _REGIONS: dict[str, dict] = {
 }
 
 
-def _tip_in_region(lm, region_key: str) -> bool:
+def _point_in_region(px: float, py: float, region_key: str) -> bool:
+    """Region test on a player-mirrored screen-space point."""
     region = _REGIONS.get(region_key)
     if region is None:
         return True
-
-    tip = lm[8]  # index fingertip
-    # Mirror x to player-perspective space (same convention as render engine)
-    px = 1.0 - tip.x
-    py = tip.y
-
     if "px_min" in region and px < region["px_min"]:
         return False
     if "px_max" in region and px > region["px_max"]:
@@ -63,16 +78,53 @@ def _tip_in_region(lm, region_key: str) -> bool:
     return True
 
 
-def detect(landmarks, params: dict, context: dict) -> bool:
-    if not landmarks:
-        context["forward_point_since"] = None
-        return False
+def _tip_in_region(lm, region_key: str) -> bool:
+    tip = lm[8]  # index fingertip
+    # Mirror x to player-perspective space (same convention as render engine)
+    return _point_in_region(1.0 - tip.x, tip.y, region_key)
 
+
+def _pose_forward_fallback(pose_lm, params: dict, context: dict,
+                           region_key: str) -> bool:
+    """Foreshortened-hand fallback: a visible Pose wrist reaching toward the
+    camera, positioned inside the target region. Depth preferred; Pose z else."""
+    if pose_lm is None:
+        return False
+    min_visibility = params.get("min_visibility", 0.5)
+    min_reach_mm = params.get("min_reach_depth_mm", 300)
+    min_z_delta = params.get("min_pose_z_delta", 0.25)
+    depth_at = context.get("_depth_mm_at")
+
+    for wrist_i, shoulder_i in _ARMS:
+        try:
+            wrist, shoulder = pose_lm[wrist_i], pose_lm[shoulder_i]
+        except (IndexError, TypeError):
+            continue
+        if getattr(wrist, "visibility", 1.0) < min_visibility:
+            continue
+
+        # Reach check: real depth when both samples are valid, else Pose z.
+        wrist_mm = shoulder_mm = None
+        if callable(depth_at):
+            wrist_mm = depth_at(wrist.x, wrist.y)
+            shoulder_mm = depth_at(shoulder.x, shoulder.y)
+        if wrist_mm is not None and shoulder_mm is not None:
+            reaching = (shoulder_mm - wrist_mm) >= min_reach_mm
+        else:
+            z_delta = getattr(shoulder, "z", 0.0) - getattr(wrist, "z", 0.0)
+            reaching = z_delta >= min_z_delta
+
+        if reaching and _point_in_region(1.0 - wrist.x, wrist.y, region_key):
+            return True
+    return False
+
+
+def detect(landmarks, params: dict, context: dict) -> bool:
     region_key: str = params.get("target_region", "")
     hold_ms: int = params.get("hold_ms", 500)
 
     on_target = False
-    for hand in landmarks:
+    for hand in landmarks or []:
         lm = hand.landmark
         wrist = lm[0]
         tip = lm[8]    # index fingertip
@@ -88,6 +140,12 @@ def detect(landmarks, params: dict, context: dict) -> bool:
         if _tip_in_region(lm, region_key):
             on_target = True
             break
+
+    # Hands couldn't resolve a pointing hand — a hand aimed straight at the
+    # camera usually can't be detected at all. Fall back to pose+depth.
+    if not on_target:
+        on_target = _pose_forward_fallback(context.get("_pose_lm"), params,
+                                           context, region_key)
 
     now = time.monotonic()
     if on_target:

@@ -1,31 +1,24 @@
-"""
+﻿"""
 RenderEngine — Pygame-based frame sequencer and display layer.
 
-Loads frame sequences from the current scene's frames/ directory,
-advances frames at the scene's fps, and responds to render_events
-emitted by the NarrationEngine (e.g. quilt_illuminate, door_widens).
-
-Freeze-frame mechanic:
-  When the narration engine enters a wait_for_interaction cue that has a
-  freeze_frame_page, it emits a `freeze_frame` event with {"page": N} where
-  N is the PDF-header page number (e.g. 58). The render engine looks up that
-  page in its page-to-index map (built from the storyboard filename convention
-  page_NNN.jpg = PDF page NNN-1), jumps to that frame, and holds it.
-  `freeze_release` unfreezes. `page_jump` is a one-shot jump without freezing
-  (used for branch transitions and stroke-lock-in pages).
-
-Debug overlay draws hand landmarks when config.debug_overlay is true.
+Serves the shot-driven runtime: loads each shot's frame pack through the
+look-ahead FrameCacheManager, advances frames on the shot clock (whole-shot
+time-based playback or FSM segment ranges via play_segment), runs the
+frame-gated OI windows, and draws the player-facing layer (hand-icon cursors,
+interaction indicators, green success flash, pause menu, tutorial cards) plus
+the debug overlay (D) and skeleton mini-panel (K).
 """
 
+import math
 import os
 import time
 import pygame
 from collections import OrderedDict
-from PIL import Image
 from pathlib import Path
 from typing import Optional
 
 from .frame_cache import FrameCacheManager
+from .detectors.rules import hand_pose
 
 # Max converted Surfaces kept in RAM per shot (LRU). 240 frames at 1080p ≈ 1.9 GB.
 SURFACE_LRU_CAP = 240
@@ -95,12 +88,9 @@ class RenderEngine:
         # Debug overlay starts OFF regardless of profile/config; toggle it at
         # runtime with the D key (render.toggle_debug()).
         self._debug = False
-        self._pending_events: list = []
         self._landmark_data = None
         self._font: Optional[pygame.font.Font] = None
         self._small_font: Optional[pygame.font.Font] = None
-        self._pending_load_paths: list = []
-        self._pending_load_fps: float = 0.5
         self._playback_start_time: float = 0.0
         self._pending_audio: Optional[str] = None
         self._current_frames_dir: Optional[Path] = None
@@ -122,16 +112,6 @@ class RenderEngine:
         self._oi_frame_end:   Optional[int] = None
         self._oi_window_open: bool = False
 
-        # Freeze-frame state
-        self._page_to_frame_index: dict = {}   # PDF page number → frame list index
-        self._freeze_frame_index: Optional[int] = None
-        self._freeze_active: bool = False
-        self._current_freeze_page: Optional[int] = None  # for debug display
-
-        # Play-through freeze: frames advance naturally until reaching this index
-        self._freeze_on_page_index: Optional[int] = None
-        self._freeze_on_page_target: Optional[int] = None  # PDF page for debug
-
         # FSM segment-constrained playback (set by play_segment event)
         self._seg_start:  Optional[int] = None  # inclusive start frame index
         self._seg_end:    Optional[int] = None  # inclusive end frame index
@@ -150,19 +130,33 @@ class RenderEngine:
         self._volume: float = float(config.get("audio", {}).get("master_volume", 1.0))
         self._volume_slider_rect: Optional[pygame.Rect] = None  # set when drawn
 
+        # Skeleton-in-corner display option (pause menu, K key) — shows the
+        # bottom-right skeleton mini-panel WITHOUT the rest of the debug overlay.
+        self._show_skeleton: bool = False
+
+        # Hand-icon cursors (July 2026): illustrated hands from assets/hand_icons/
+        # replace the old crosshair+label cursors. Keyed "open"/"fist"/"point"/
+        # "knock" + "_l"/"_r". Per-side last-seen state persists through Hands
+        # dropouts so the icon doesn't flicker.
+        self._hand_icons: dict = {}
+        self._hand_cursor_state: dict = {
+            "L": {"pos": None, "shape": "open", "t": 0.0},
+            "R": {"pos": None, "shape": "open", "t": 0.0},
+        }
+
+        # Play-through segment overshoot carry: when a non-loop FSM segment ends,
+        # playback has typically run a fraction of a frame past the boundary by the
+        # time the tick notices. The next play_segment subtracts this so chained
+        # segments stay in lockstep with the shot's continuous audio track instead
+        # of drifting later with every transition (Scene 5/8/11 lag).
+        self._seg_overshoot: float = 0.0
+
         self.event_bus.subscribe("shot_load",     self._on_shot_load)
         self.event_bus.subscribe("prefetch_shot", self._on_prefetch_shot)
         self.event_bus.subscribe("oi_flash",          self._on_oi_flash)
         self.event_bus.subscribe("play_sfx",          self._on_play_sfx)
         self.event_bus.subscribe("set_frame_window",  self._on_set_frame_window)
         self.event_bus.subscribe("play_segment",      self._on_play_segment)
-        self.event_bus.subscribe("scene_load",    self._on_scene_load)
-        self.event_bus.subscribe("dev_frames_load", self._on_dev_frames_load)
-        self.event_bus.subscribe("render_event",  self._on_render_event)
-        self.event_bus.subscribe("freeze_frame",  self._on_freeze_frame)
-        self.event_bus.subscribe("freeze_on_page", self._on_freeze_on_page)
-        self.event_bus.subscribe("freeze_release", self._on_freeze_release)
-        self.event_bus.subscribe("page_jump",     self._on_page_jump)
 
     def init_display(self):
         pygame.display.init()
@@ -177,10 +171,33 @@ class RenderEngine:
         self._font = pygame.font.SysFont("monospace", 20, bold=True)
         self._small_font = pygame.font.SysFont("monospace", 14, bold=True)
         # Cached fonts for the scene panel (avoids constructing SysFont per frame).
-        self._scene_font = pygame.font.SysFont("monospace", 16)
-        self._scene_title_font = pygame.font.SysFont("monospace", 22, bold=True)
         # Pre-allocate the full-screen OI flash overlay once (reused each flash frame).
         self._flash_overlay = pygame.Surface((w, h), pygame.SRCALPHA)
+        self._load_hand_icons()
+
+    def _load_hand_icons(self) -> None:
+        """Load the illustrated hand cursors produced by scripts/prepare_hand_icons.py.
+        Missing files degrade gracefully to the dot cursors."""
+        icons_dir = Path(__file__).resolve().parent.parent / "assets" / "hand_icons"
+        target_h = max(60, int(self._display_size[1] * 0.09))
+        for shape in ("open", "fist", "point", "knock"):
+            for side in ("l", "r"):
+                p = icons_dir / f"{shape}_{side}.png"
+                if not p.exists():
+                    continue
+                try:
+                    img = pygame.image.load(str(p)).convert_alpha()
+                except pygame.error:
+                    continue
+                scale = target_h / max(1, img.get_height())
+                img = pygame.transform.smoothscale(
+                    img, (max(1, int(img.get_width() * scale)), target_h))
+                self._hand_icons[f"{shape}_{side}"] = img
+        if self._hand_icons:
+            print(f"[RenderEngine] hand icons loaded: {len(self._hand_icons)}")
+        else:
+            print("[RenderEngine] no hand icons found — falling back to dot cursors "
+                  "(run: py -3.12 scripts/prepare_hand_icons.py)")
 
     def toggle_fullscreen(self) -> None:
         """Switch between fullscreen and windowed at the same resolution.
@@ -201,6 +218,12 @@ class RenderEngine:
         scene panel). Does not affect playback."""
         self._debug = not self._debug
         print(f"[RenderEngine] debug_overlay={'on' if self._debug else 'off'}")
+
+    def toggle_skeleton(self) -> None:
+        """Show/hide the bottom-right skeleton mini-panel on its own (pause-menu
+        display option, K key) — independent of the full debug overlay."""
+        self._show_skeleton = not self._show_skeleton
+        print(f"[RenderEngine] skeleton_panel={'on' if self._show_skeleton else 'off'}")
 
     # ------------------------------------------------------------------
     # Master volume
@@ -254,11 +277,16 @@ class RenderEngine:
         duration so the current frame, segment loop and flash continue seamlessly."""
         if not self._paused:
             return
-        delta = time.monotonic() - self._pause_started
+        now = time.monotonic()
+        delta = now - self._pause_started
         self._playback_start_time += delta
         self._seg_anchor          += delta
-        self._flash_start         += delta
-        self._flash_until         += delta
+        # Flashes fired and consumed while paused (tutorial success flashes render
+        # in real time on the paused branch) must not be shifted into the future,
+        # or they'd replay after resume. Only shift a flash that is still live.
+        if self._flash_until > now:
+            self._flash_start += delta
+            self._flash_until += delta
         self._last_frame_time     += delta
         self._paused = False
 
@@ -278,7 +306,9 @@ class RenderEngine:
             title = self._font.render("|| PAUSED", True, (255, 255, 255))
             self._screen.blit(title, ((sw - title.get_width()) // 2, sh // 2 - 70))
         if self._small_font:
-            hint = self._small_font.render("Space: resume    S: skip prologue", True, (200, 200, 200))
+            hint = self._small_font.render(
+                "Space: resume    S: skip prologue    K: skeleton panel    "
+                "D: debug    F: fullscreen", True, (200, 200, 200))
             self._screen.blit(hint, ((sw - hint.get_width()) // 2, sh // 2 - 34))
 
         self._draw_volume_slider(sw, sh)
@@ -311,9 +341,29 @@ class RenderEngine:
     def update(self, landmark_data=None, handedness_data=None,
                pose_data=None,
                gesture_debug: dict | None = None,
-               scene_debug: dict | None = None, voice_debug: dict | None = None,
-               narration_debug: dict | None = None):
+               voice_debug: dict | None = None,
+               narration_debug: dict | None = None,
+               tutorial_card: dict | None = None):
         if not self._screen:
+            return
+
+        # Tutorial runs while the shot player (and its time anchors) stay paused:
+        # draw the code-rendered card, the live hand cursors and the success flash
+        # in real time, and nothing else advances.
+        if self._paused and tutorial_card is not None:
+            self._draw_tutorial_card(tutorial_card)
+            now = time.monotonic()
+            if now < self._flash_until and self._flash_overlay is not None:
+                duration = self._flash_until - self._flash_start
+                progress = (now - self._flash_start) / duration if duration > 0 else 1.0
+                alpha = int(self._flash_alpha * math.sin(progress * math.pi))
+                self._flash_overlay.fill((*self._flash_color, max(0, min(255, alpha))))
+                self._screen.blit(self._flash_overlay, (0, 0))
+            self._draw_hand_cursors(landmark_data, handedness_data, pose_data, gesture_debug)
+            if self._debug or self._show_skeleton:
+                if landmark_data or pose_data:
+                    self._draw_hand_mini_panel(landmark_data, handedness_data, pose_data)
+            pygame.display.flip()
             return
 
         # While paused, hold the current frame and overlay a PAUSED banner.
@@ -336,12 +386,7 @@ class RenderEngine:
         playing = bool(self._frames) and self._loading_dir is None
 
         if playing:
-            if self._freeze_active and self._freeze_frame_index is not None:
-                # Hold the freeze frame — only jump if that index is already loaded
-                if self._freeze_frame_index < len(self._frames):
-                    self._frame_index = self._freeze_frame_index
-
-            elif self._seg_start is not None:
+            if self._seg_start is not None:
                 # FSM segment-constrained playback: lock to a named frame range.
                 # Frames are guaranteed fully loaded here (a shot only begins playing
                 # after its whole frame set is cached), so no partial-load handling.
@@ -355,8 +400,13 @@ class RenderEngine:
                     local = min(raw_local, seg_len - 1)
                     if not self._seg_done and raw_local >= seg_len:
                         self._seg_done = True
+                        # How far past the boundary this tick landed. The next
+                        # play_segment consumes it so chained play-through
+                        # segments don't accumulate lag against the shot audio.
+                        self._seg_overshoot = min(max(0.0, elapsed - seg_len / self._fps), 0.5)
                         print(f"[RenderEngine] segment_playback_done "
-                              f"[{self._seg_start}–{self._seg_end}]")
+                              f"[{self._seg_start}–{self._seg_end}] "
+                              f"overshoot={self._seg_overshoot*1000:.0f}ms")
                         self.event_bus.emit("segment_playback_done", {})
                 # The emit above can synchronously start a NEW segment (FSM advance)
                 # or clear playback (shot advance). In that case `local` (and seg
@@ -392,18 +442,6 @@ class RenderEngine:
                         print(f"[RenderEngine] frame_window_exit at frame {self._frame_index}")
                         self.event_bus.emit("frame_window_exit", {})
 
-                # Play-through freeze: activate when time-based playback reaches target
-                if (self._freeze_on_page_index is not None and
-                        self._freeze_on_page_index < len(self._frames) and
-                        self._frame_index >= self._freeze_on_page_index):
-                    self._frame_index = self._freeze_on_page_index
-                    self._freeze_frame_index = self._freeze_on_page_index
-                    self._freeze_active = True
-                    self._current_freeze_page = self._freeze_on_page_target
-                    self._freeze_on_page_index = None
-                    self._freeze_on_page_target = None
-                    self.event_bus.emit("freeze_activated", {})
-
             if self._frames and 0 <= self._frame_index < len(self._frames):
                 self._screen.blit(self._frames[self._frame_index], (0, 0))
             else:
@@ -436,74 +474,23 @@ class RenderEngine:
             self._flash_overlay.fill((*self._flash_color, alpha))
             self._screen.blit(self._flash_overlay, (0, 0))
 
-        if landmark_data:
-            self._draw_index_cursors(landmark_data, handedness_data)
+        # Player-facing interaction indicator (target ring / draw arrow) and the
+        # illustrated hand cursors — always on, not debug-gated.
+        self._draw_interaction_indicator(gesture_debug)
+        self._draw_hand_cursors(landmark_data, handedness_data, pose_data, gesture_debug)
 
         if self._debug:
             self._draw_oi_target_flag(gesture_debug)
             self._draw_debug_panel(landmark_data, gesture_debug, voice_debug, narration_debug)
-            if scene_debug:
-                self._draw_scene_panel(scene_debug)
-            # Skeleton preview is a dev overlay — gate it on debug so it respects
-            # the D toggle and stays off during the live experience.
+        if self._debug or self._show_skeleton:
+            # Skeleton preview: debug overlay OR the standalone pause-menu option.
             if landmark_data or pose_data:
                 self._draw_hand_mini_panel(landmark_data, handedness_data, pose_data)
 
         pygame.display.flip()
 
     # ------------------------------------------------------------------
-    # Freeze / page-jump event handlers
-    # ------------------------------------------------------------------
-
-    def _on_freeze_frame(self, data: dict):
-        page = data.get("page")
-        self._current_freeze_page = page
-        if page is not None:
-            idx = self._page_to_frame_index.get(page)
-            if idx is not None:
-                self._freeze_frame_index = idx
-                if idx < len(self._frames):
-                    self._frame_index = idx
-            else:
-                # Page not yet in map (still loading) — freeze at current position
-                self._freeze_frame_index = self._frame_index
-        else:
-            self._freeze_frame_index = self._frame_index
-        self._freeze_active = True
-
-    def _on_freeze_on_page(self, data: dict):
-        """Schedule a play-through freeze: frames advance naturally until reaching this page."""
-        page = data.get("page")
-        self._freeze_on_page_target = page
-        if page is not None:
-            idx = self._page_to_frame_index.get(page)
-            if idx is not None:
-                self._freeze_on_page_index = idx
-            else:
-                # Page not in map — freeze immediately at current position as fallback
-                self._freeze_frame_index = self._frame_index
-                self._freeze_active = True
-                self._current_freeze_page = page
-                self.event_bus.emit("freeze_activated", {})
-
-    def _on_freeze_release(self, data: dict):
-        self._freeze_active = False
-        self._freeze_frame_index = None
-        self._current_freeze_page = None
-        self._freeze_on_page_index = None
-        self._freeze_on_page_target = None
-
-    def _on_page_jump(self, data: dict):
-        page = data.get("page")
-        if page is not None:
-            idx = self._page_to_frame_index.get(page)
-            if idx is not None and idx < len(self._frames):
-                self._frame_index = idx
-                self._last_frame_time = time.monotonic()
-        # One-shot: does not activate freeze
-
-    # ------------------------------------------------------------------
-    # Scene / frame loading
+    # Shot / frame loading
     # ------------------------------------------------------------------
 
     def attach_cache(self, shots) -> None:
@@ -572,13 +559,6 @@ class RenderEngine:
             return
         self._fps = getattr(shot, "fps", 24)
         self._loading_kind = getattr(shot, "kind", "playback")
-        self._pending_load_paths = []
-        self._freeze_active = False
-        self._freeze_frame_index = None
-        self._current_freeze_page = None
-        self._freeze_on_page_index = None
-        self._freeze_on_page_target = None
-        self._page_to_frame_index = {}
         self._last_frame_time = time.monotonic()
         audio_file = getattr(shot, "audio_file", None)
         self._pending_audio = str(audio_file) if audio_file else None
@@ -593,6 +573,7 @@ class RenderEngine:
         self._seg_start         = None
         self._seg_end           = None
         self._seg_done          = False
+        self._seg_overshoot     = 0.0
 
         frames_dir = getattr(shot, "frames_dir", None)
         if frames_dir is None or getattr(shot, "assets_pending", True):
@@ -619,91 +600,6 @@ class RenderEngine:
         display_cfg = self.config.get("_profile", {}).get("display", {})
         w, h = display_cfg.get("resolution") or self.config.get("resolution", [1920, 1080])
         return (w, h)
-
-    def _on_scene_load(self, data: dict):
-        metadata = data.get("metadata", {})
-        scene_id = data.get("scene_id", "")
-        frames_dir = os.path.join(
-            os.path.dirname(self._find_metadata_dir(scene_id)), "frames"
-        )
-        self._fps = metadata.get("fps", 24)
-        self._frame_index = 0
-        self._frames = self._load_frames(frames_dir)
-        self._loading_dir = None   # legacy synchronous load path; not cache-driven
-        self._last_frame_time = time.monotonic()
-        self._freeze_active = False
-        self._freeze_frame_index = None
-        self._current_freeze_page = None
-        self._freeze_on_page_index = None
-        self._freeze_on_page_target = None
-        self._page_to_frame_index = {}
-
-    def _find_metadata_dir(self, scene_id: str) -> str:
-        scenes_root = os.path.join(os.path.dirname(__file__), "..", "scenes")
-        for artist_dir in os.listdir(scenes_root):
-            candidate = os.path.join(scenes_root, artist_dir, scene_id)
-            if os.path.isdir(candidate):
-                return candidate
-        return ""
-
-    def _load_frames(self, frames_dir: str) -> list:
-        if not os.path.isdir(frames_dir):
-            return []
-        w, h = self.config.get("resolution", [1920, 1080])
-        frames = []
-        for fname in sorted(os.listdir(frames_dir)):
-            if not fname.lower().endswith((".png", ".jpg", ".jpeg")):
-                continue
-            path = os.path.join(frames_dir, fname)
-            img = Image.open(path).convert("RGB").resize((w, h))
-            surface = pygame.image.fromstring(img.tobytes(), img.size, "RGB").convert()
-            frames.append(surface)
-        return frames
-
-    def _on_dev_frames_load(self, data: dict):
-        paths = data.get("frames_paths", [])
-        self._fps = data.get("fps", 0.5)
-        self._frame_index = 0
-        self._frames = []
-        self._loading_dir = None   # legacy synchronous load path; not cache-driven
-        self._pending_load_paths = list(paths)
-        self._pending_load_fps = self._fps
-        self._freeze_active = False
-        self._freeze_frame_index = None
-        self._current_freeze_page = None
-        self._freeze_on_page_index = None
-        self._freeze_on_page_target = None
-        self._last_frame_time = time.monotonic()
-
-        # Pre-build PDF-page → frame-index map from sorted filenames.
-        # Storyboard convention: file page_NNN.jpg = PDF header page NNN-1.
-        self._page_to_frame_index = {}
-        for idx, path in enumerate(paths):
-            basename = os.path.basename(path)
-            if basename.startswith("page_") and basename.split(".")[-1].lower() in ("jpg", "png", "jpeg"):
-                try:
-                    file_num = int(basename[5:].split(".")[0])
-                    pdf_page = file_num - 1
-                    self._page_to_frame_index[pdf_page] = idx
-                except ValueError:
-                    pass
-
-        print(f"[RenderEngine] Dev frames queued: {len(paths)} panels at {self._fps} fps (lazy loading)")
-
-    def _load_frames_from_paths(self, paths: list) -> list:
-        display_cfg = self.config.get("_profile", {}).get("display", {})
-        w, h = display_cfg.get("resolution") or self.config.get("resolution", [1920, 1080])
-        frames = []
-        for path in paths:
-            if not os.path.isfile(path):
-                continue
-            try:
-                img = Image.open(path).convert("RGB").resize((w, h))
-                surface = pygame.image.fromstring(img.tobytes(), img.size, "RGB").convert()
-                frames.append(surface)
-            except Exception as exc:
-                print(f"[RenderEngine] Failed to load frame {path}: {exc}")
-        return frames
 
     def _on_oi_flash(self, data: dict):
         self._flash_color = data.get("color", (0, 255, 80))
@@ -735,13 +631,16 @@ class RenderEngine:
         self._seg_start  = data.get("start")
         self._seg_end    = data.get("end")
         self._seg_loop   = data.get("loop", True)
-        self._seg_anchor = time.monotonic()
+        # Consume the previous segment's boundary overshoot so back-to-back
+        # play-through segments track the continuous audio instead of drifting
+        # one tick later per transition. Loop segments hold indefinitely, so
+        # exact phase doesn't matter there — start them clean.
+        carry = 0.0 if self._seg_loop else self._seg_overshoot
+        self._seg_overshoot = 0.0
+        self._seg_anchor = time.monotonic() - carry
         self._seg_done   = False
         print(f"[RenderEngine] play_segment [{self._seg_start}-{self._seg_end}]  "
-              f"loop={self._seg_loop}")
-
-    def _on_render_event(self, data: dict):
-        self._pending_events.append(data.get("name"))
+              f"loop={self._seg_loop}" + (f"  carry={carry*1000:.0f}ms" if carry else ""))
 
     # ------------------------------------------------------------------
     # Drawing helpers
@@ -831,24 +730,259 @@ class RenderEngine:
                 lbl = self._small_font.render(label, True, COLOR)
                 self._screen.blit(lbl, (ax - lbl.get_width() // 2, ay + arrow_len + 6))
 
-    def _draw_index_cursors(self, landmark_data, handedness_data=None):
-        """Draw a crosshair at each hand's index fingertip with L/R label."""
+    # ------------------------------------------------------------------
+    # Hand cursors + player-facing interaction indicators (July 2026)
+    # ------------------------------------------------------------------
+
+    # Interaction type -> cursor treatment
+    _POINT_TYPES = {"directional_point", "point_target_held", "forward_point",
+                    "point_region"}
+    _KNOCK_TYPES = {"rhythm_bilateral"}
+    # Draw strokes show the big direction arrow instead of any tracked cursor —
+    # the tracking visuals were confusing players mid-trace (Scene 4/5 punch list).
+    _NO_CURSOR_TYPES = {"directional_draw"}
+
+    _DOT_COLORS = {"L": (60, 220, 90), "R": (70, 160, 255)}   # green / blue
+
+    def _hand_screen_pos(self, hand, mode: str, w: int, h: int) -> tuple:
+        """Screen position for a Hands detection: index fingertip in point mode,
+        palm centroid otherwise (steadier for open/fist/knock icons)."""
+        lm = hand.landmark
+        if mode in ("point", "dots"):
+            p = lm[8]
+            return int((1 - p.x) * w), int(p.y * h)
+        xs = [lm[i].x for i in (0, 5, 9, 13, 17)]
+        ys = [lm[i].y for i in (0, 5, 9, 13, 17)]
+        return (int((1 - sum(xs) / len(xs)) * w), int(sum(ys) / len(ys) * h))
+
+    def _draw_hand_cursors(self, landmark_data, handedness_data=None,
+                           pose_data=None, gesture_debug: dict | None = None):
+        """Illustrated hand cursors (assets/hand_icons/). Replaces the crosshair+
+        label cursors: no text labels, icon picked by the active interaction —
+        knock fists during knock windows, pointing hand during point windows,
+        open/fist tracking the player's live hand state during grab windows, and
+        plain green (L) / blue (R) dots when no interaction window is open.
+        Last-seen position and shape persist through Hands dropouts."""
+        if not self._screen:
+            return
+        gd = gesture_debug or {}
+        active_type = gd.get("active_type")
+        if active_type in self._NO_CURSOR_TYPES:
+            return
+
+        mode = "dots"
+        if active_type and not gd.get("input_locked"):
+            if active_type in self._POINT_TYPES:
+                mode = "point"
+            elif active_type in self._KNOCK_TYPES:
+                mode = "knock"
+            else:
+                mode = "grab"
+
         w, h = self._screen.get_size()
-        for i, hand_landmarks in enumerate(landmark_data):
-            lm = hand_landmarks.landmark[8]  # index fingertip
-            x, y = int((1 - lm.x) * w), int(lm.y * h)
-            r = 14
-            pygame.draw.circle(self._screen, (255, 255, 255), (x, y), r, 2)
-            pygame.draw.circle(self._screen, (255, 80, 0), (x, y), 6)
-            pygame.draw.line(self._screen, (255, 255, 255), (x - r - 4, y), (x + r + 4, y), 1)
-            pygame.draw.line(self._screen, (255, 255, 255), (x, y - r - 4), (x, y + r + 4), 1)
-            if self._small_font:
-                label = "?"
-                if handedness_data and i < len(handedness_data):
-                    label = handedness_data[i].classification[0].label[0]
-                surf = self._small_font.render(label, True, (255, 255, 255))
-                self._screen.blit(self._small_font.render(label, True, (0, 0, 0)), (x + r + 4, y - r - 2))
-                self._screen.blit(surf, (x + r + 3, y - r - 3))
+        now = time.monotonic()
+        seen = set()
+
+        for i, hand in enumerate(landmark_data or []):
+            side = "?"
+            if handedness_data and i < len(handedness_data):
+                side = handedness_data[i].classification[0].label[0]
+            if side not in self._hand_cursor_state:
+                side = "L" if "L" not in seen else "R"
+            state = self._hand_cursor_state[side]
+            state["pos"] = self._hand_screen_pos(hand, mode, w, h)
+            state["t"] = now
+            # Live open/fist classification; anything ambiguous keeps the last shape
+            # ("if no hands / unclear, display what was last seen").
+            if hand_pose.is_fist(hand):
+                state["shape"] = "fist"
+            elif hand_pose.is_open_palm(hand):
+                state["shape"] = "open"
+            seen.add(side)
+
+        # A side the Hands model lost can still follow its Pose wrist.
+        if pose_data:
+            for side, idx in (("L", 15), ("R", 16)):
+                if side in seen or idx >= len(pose_data):
+                    continue
+                lm = pose_data[idx]
+                if getattr(lm, "visibility", 1.0) < 0.5:
+                    continue
+                state = self._hand_cursor_state[side]
+                state["pos"] = (int((1 - lm.x) * w), int(lm.y * h))
+                state["t"] = now
+                seen.add(side)
+
+        for side, state in self._hand_cursor_state.items():
+            if state["pos"] is None:
+                continue
+            age = now - state["t"]
+            if age > 4.0:
+                continue   # long gone — drop the ghost cursor
+            x, y = state["pos"]
+
+            if mode == "dots":
+                color = self._DOT_COLORS.get(side, (220, 220, 220))
+                pygame.draw.circle(self._screen, (0, 0, 0), (x, y), 12, 0)
+                pygame.draw.circle(self._screen, color, (x, y), 9, 0)
+                pygame.draw.circle(self._screen, (255, 255, 255), (x, y), 12, 2)
+                continue
+
+            if mode == "knock":
+                icon_shape = "knock"
+            elif mode == "point":
+                icon_shape = "point"
+            else:
+                icon_shape = state["shape"]   # "open" | "fist"
+            icon = self._hand_icons.get(f"{icon_shape}_{side.lower()}")
+            if icon is None:
+                color = self._DOT_COLORS.get(side, (220, 220, 220))
+                pygame.draw.circle(self._screen, color, (x, y), 10)
+                continue
+            if age > 0.5:
+                icon = icon.copy()
+                icon.set_alpha(120)   # stale — hand not currently tracked
+            self._screen.blit(icon, (x - icon.get_width() // 2,
+                                     y - icon.get_height() // 2))
+
+    # forward_point's named regions, in PLAYER/screen space (already mirrored).
+    _NAMED_REGIONS = {
+        "top_left_quadrant":  {"x": 0.0,  "y": 0.0,  "w": 0.5, "h": 0.5},
+        "top_right_quadrant": {"x": 0.5,  "y": 0.0,  "w": 0.5, "h": 0.5},
+        "lower_third":        {"x": 0.0,  "y": 0.67, "w": 1.0, "h": 0.33},
+        "center":             {"x": 0.25, "y": 0.25, "w": 0.5, "h": 0.5},
+    }
+
+    def _draw_interaction_indicator(self, gesture_debug: dict | None) -> None:
+        """Player-facing hint for the active window (always on, unlike the debug
+        target flag): a pulsing ring around point targets, a big pulsing arrow
+        for draw strokes. Replaces the confusing tracked-hand visuals as the
+        'simple on-screen indication' from the playtest punch list."""
+        if not self._screen:
+            return
+        gd = gesture_debug or {}
+        active_type = gd.get("active_type")
+        if not active_type or gd.get("input_locked"):
+            return
+        params = gd.get("active_params") or {}
+        sw, sh = self._screen.get_size()
+        now = time.monotonic()
+        pulse = 0.5 + 0.5 * math.sin(now * 4.0)   # 0..1
+
+        if active_type == "directional_draw":
+            direction = params.get("direction", "right")
+            _DIR_VEC = {
+                "up": (0, -1), "down": (0, 1), "left": (-1, 0), "right": (1, 0),
+                "up_left": (-1, -1), "up_right": (1, -1),
+                "down_left": (-1, 1), "down_right": (1, 1),
+            }
+            vec = _DIR_VEC.get(direction, (1, 0))
+            mag = math.hypot(*vec)
+            ind = params.get("indicator_xy") or (0.5, 0.42)
+            cx, cy = int(ind[0] * sw), int(ind[1] * sh)
+            length = int(sh * (0.10 + 0.02 * pulse))
+            dx, dy = vec[0] / mag, vec[1] / mag
+            sx, sy = int(cx - dx * length), int(cy - dy * length)
+            ex, ey = int(cx + dx * length), int(cy + dy * length)
+            color = (255, 210, 90)
+            # Start dot ("begin your stroke here") + shaft + arrowhead
+            pygame.draw.circle(self._screen, (0, 0, 0), (sx, sy), 14)
+            pygame.draw.circle(self._screen, color, (sx, sy), 10 + int(3 * pulse))
+            pygame.draw.line(self._screen, (0, 0, 0), (sx, sy), (ex, ey), 12)
+            pygame.draw.line(self._screen, color, (sx, sy), (ex, ey), 8)
+            head = 26
+            ang = math.atan2(ey - sy, ex - sx)
+            for side_a in (0.65, -0.65):
+                hx = int(ex - head * math.cos(ang + side_a * math.pi))
+                hy = int(ey - head * math.sin(ang + side_a * math.pi))
+                pygame.draw.line(self._screen, (0, 0, 0), (ex, ey), (hx, hy), 12)
+                pygame.draw.line(self._screen, color, (ex, ey), (hx, hy), 8)
+            return
+
+        if active_type in ("point_target_held", "forward_point"):
+            # Resolve the target rect. point_target_held rects are RAW camera
+            # space (mirror to screen); forward_point named regions are already
+            # player/screen space.
+            rect = None
+            if active_type == "point_target_held":
+                raw = params.get("region_rect")
+                if raw:
+                    rect = {"x": 1.0 - raw["x"] - raw["w"], "y": raw["y"],
+                            "w": raw["w"], "h": raw["h"]}
+            else:
+                rect = self._NAMED_REGIONS.get(params.get("target_region", ""))
+            if not rect:
+                return
+            cx = int((rect["x"] + rect["w"] / 2) * sw)
+            cy = int((rect["y"] + rect["h"] / 2) * sh)
+            rx = max(30, int(rect["w"] * sw / 2))
+            ry = max(30, int(rect["h"] * sh / 2))
+            # Soft pulsing ellipse ring around the target area
+            ring = pygame.Surface((rx * 2 + 20, ry * 2 + 20), pygame.SRCALPHA)
+            alpha = int(90 + 100 * pulse)
+            pygame.draw.ellipse(ring, (255, 210, 90, alpha),
+                                pygame.Rect(4, 4, rx * 2 + 12, ry * 2 + 12),
+                                width=5 + int(3 * pulse))
+            self._screen.blit(ring, (cx - rx - 10, cy - ry - 10))
+
+    def _draw_tutorial_card(self, card: dict) -> None:
+        """Full-screen code-rendered tutorial/calibration card. The card dict
+        comes from TutorialEngine.card_info()."""
+        sw, sh = self._screen.get_size()
+        self._screen.fill((12, 14, 24))
+
+        title_font = getattr(self, "_tut_title_font", None)
+        if title_font is None:
+            self._tut_title_font  = pygame.font.SysFont("arial", 52, bold=True)
+            self._tut_prompt_font = pygame.font.SysFont("arial", 30)
+            title_font = self._tut_title_font
+
+        title = card.get("title", "")
+        if title:
+            surf = title_font.render(title, True, (255, 235, 200))
+            self._screen.blit(surf, ((sw - surf.get_width()) // 2, int(sh * 0.14)))
+
+        prompt = card.get("prompt", "")
+        if prompt:
+            for li, line in enumerate(self._wrap_text(prompt, self._tut_prompt_font,
+                                                      int(sw * 0.7))):
+                surf = self._tut_prompt_font.render(line, True, (230, 230, 230))
+                self._screen.blit(surf, ((sw - surf.get_width()) // 2,
+                                         int(sh * 0.26) + li * 40))
+
+        # Optional on-card target box (player-space rect) for the pointing steps.
+        rect = card.get("target_rect")
+        if rect:
+            pulse = 0.5 + 0.5 * math.sin(time.monotonic() * 4.0)
+            rx0 = int(rect["x"] * sw)
+            ry0 = int(rect["y"] * sh)
+            rw  = int(rect["w"] * sw)
+            rh  = int(rect["h"] * sh)
+            fill = pygame.Surface((rw, rh), pygame.SRCALPHA)
+            fill.fill((255, 210, 90, 30 + int(30 * pulse)))
+            self._screen.blit(fill, (rx0, ry0))
+            pygame.draw.rect(self._screen, (255, 210, 90),
+                             (rx0, ry0, rw, rh), 4 + int(2 * pulse))
+
+        # Optional big demo icon (e.g. the open-hand illustration).
+        icon_key = card.get("icon")
+        if icon_key:
+            icon = self._hand_icons.get(icon_key)
+            if icon:
+                big = pygame.transform.smoothscale(
+                    icon, (icon.get_width() * 2, icon.get_height() * 2))
+                self._screen.blit(big, ((sw - big.get_width()) // 2,
+                                        int(sh * 0.44)))
+
+        if self._small_font:
+            step = card.get("step")
+            total = card.get("total")
+            if step is not None:
+                surf = self._small_font.render(f"Step {step} of {total}", True,
+                                               (170, 170, 170))
+                self._screen.blit(surf, ((sw - surf.get_width()) // 2, int(sh * 0.86)))
+            hint = self._small_font.render("S: skip tutorial", True, (120, 120, 120))
+            self._screen.blit(hint, ((sw - hint.get_width()) // 2, int(sh * 0.90)))
 
     _HAND_CONNECTIONS = [
         (0,1),(1,2),(2,3),(3,4),
@@ -1010,8 +1144,6 @@ class RenderEngine:
             if waiting_id:
                 lines.append((f"WAIT: {waiting_id}", (255, 80, 255)))
                 lines.append((f"CUE: {cue}", (200, 160, 255)))
-                if self._freeze_active and self._current_freeze_page is not None:
-                    lines.append((f"FREEZE p{self._current_freeze_page}", (255, 220, 80)))
                 if stroke_info:
                     lines.append((f"STROKE: {stroke_info}", (255, 180, 0)))
             else:
@@ -1043,56 +1175,6 @@ class RenderEngine:
         for i, (text, color) in enumerate(lines):
             surf = self._font.render(text, True, color)
             self._screen.blit(surf, (10 + pad, 10 + pad + i * line_h))
-
-    def _draw_scene_panel(self, scene_debug: dict):
-        if not self._font:
-            return
-        sw, sh = self._screen.get_size()
-        pad = 10
-        panel_w = 440
-        line_h = 22
-        small_font = self._scene_font          # cached in init_display (no per-frame SysFont)
-        title_font = self._scene_title_font
-
-        idx = scene_debug["scene_idx"]
-        total = scene_debug["scene_total"]
-        title = scene_debug["title"]
-        desc = scene_debug["description"]
-        gestures = scene_debug["gestures"]
-
-        content: list[tuple[str, tuple, object]] = []
-        content.append((f"SCENE {idx + 1:02d} / {total:02d}", (200, 160, 255), title_font))
-        content.append((title, (255, 240, 200), title_font))
-        content.append(("", (0, 0, 0), small_font))
-
-        for line in self._wrap_text(desc, small_font, panel_w - pad * 2):
-            content.append((line, (200, 200, 200), small_font))
-        content.append(("", (0, 0, 0), small_font))
-
-        content.append(("GESTURES:", (160, 220, 255), small_font))
-        for g in gestures:
-            color = (255, 220, 80) if g.startswith("CG") else \
-                    (100, 200, 255) if g.startswith("OI") else \
-                    (180, 255, 140)
-            for line in self._wrap_text(g, small_font, panel_w - pad * 2 - 8):
-                content.append(("  " + line, color, small_font))
-        content.append(("", (0, 0, 0), small_font))
-        content.append(("  Raise hands to advance", (160, 160, 160), small_font))
-
-        panel_h = len(content) * line_h + pad * 2
-        panel_x = sw - panel_w - 10
-        panel_y = 10
-
-        panel_surf = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
-        panel_surf.fill((0, 0, 0, 170))
-        self._screen.blit(panel_surf, (panel_x, panel_y))
-
-        y = panel_y + pad
-        for text, color, font in content:
-            if text:
-                surf = font.render(text, True, color)
-                self._screen.blit(surf, (panel_x + pad, y))
-            y += line_h
 
     @staticmethod
     def _wrap_text(text: str, font: pygame.font.Font, max_width: int) -> list[str]:
