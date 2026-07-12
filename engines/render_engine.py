@@ -18,7 +18,6 @@ from pathlib import Path
 from typing import Optional
 
 from .frame_cache import FrameCacheManager
-from .detectors.rules import hand_pose
 
 # Max converted Surfaces kept in RAM per shot (LRU). 240 frames at 1080p ≈ 1.9 GB.
 SURFACE_LRU_CAP = 240
@@ -233,13 +232,30 @@ class RenderEngine:
     def volume(self) -> float:
         return self._volume
 
+    @property
+    def playback_frame(self):
+        """Current frame index while a shot is actively playing, else None (loading
+        freeze / no frames / paused). ShotAudioMixer's frame clock for
+        frame-anchored audio_events."""
+        if self._paused or not self._frames or self._loading_dir is not None:
+            return None
+        return self._frame_index
+
+    # Channels the render engine owns volume-wise: 0 VO/narration, 1 stroke sfx,
+    # 2 detect sfx. Channels 3+ belong to ShotAudioMixer, which mixes per-event
+    # gain × master volume itself — stamping them here would clobber those gains.
+    _OWNED_CHANNELS = (0, 1, 2)
+
     def _apply_volume(self) -> None:
-        """Push the master volume onto every mixer channel (channel volume persists
-        across plays, so this covers current and future narration/sfx playback)."""
-        if not pygame.mixer.get_init():
-            return
-        for i in range(pygame.mixer.get_num_channels()):
-            pygame.mixer.Channel(i).set_volume(self._volume)
+        """Push the master volume onto the channels this engine owns (channel volume
+        persists across plays, so this covers current and future narration/sfx
+        playback) and broadcast it so the stem mixer can rescale its channels."""
+        if pygame.mixer.get_init():
+            n = pygame.mixer.get_num_channels()
+            for i in self._OWNED_CHANNELS:
+                if i < n:
+                    pygame.mixer.Channel(i).set_volume(self._volume)
+        self.event_bus.emit("master_volume", {"volume": self._volume})
 
     def set_volume(self, v: float) -> None:
         self._volume = max(0.0, min(1.0, v))
@@ -744,25 +760,19 @@ class RenderEngine:
 
     _DOT_COLORS = {"L": (60, 220, 90), "R": (70, 160, 255)}   # green / blue
 
-    def _hand_screen_pos(self, hand, mode: str, w: int, h: int) -> tuple:
-        """Screen position for a Hands detection: index fingertip in point mode,
-        palm centroid otherwise (steadier for open/fist/knock icons)."""
-        lm = hand.landmark
-        if mode in ("point", "dots"):
-            p = lm[8]
-            return int((1 - p.x) * w), int(p.y * h)
-        xs = [lm[i].x for i in (0, 5, 9, 13, 17)]
-        ys = [lm[i].y for i in (0, 5, 9, 13, 17)]
-        return (int((1 - sum(xs) / len(xs)) * w), int(sum(ys) / len(ys) * h))
+    # Pose landmark indices per side: wrist + the pose "hand point" (index).
+    _POSE_SIDE_POINTS = {"L": (15, 19), "R": (16, 20)}
 
     def _draw_hand_cursors(self, landmark_data, handedness_data=None,
                            pose_data=None, gesture_debug: dict | None = None):
-        """Illustrated hand cursors (assets/hand_icons/). Replaces the crosshair+
-        label cursors: no text labels, icon picked by the active interaction —
-        knock fists during knock windows, pointing hand during point windows,
-        open/fist tracking the player's live hand state during grab windows, and
-        plain green (L) / blue (R) dots when no interaction window is open.
-        Last-seen position and shape persist through Hands dropouts."""
+        """Illustrated hand cursors (assets/hand_icons/), POSE-DRIVEN since the
+        July 2026 pose-only rework: position comes from the Pose index landmark
+        (19/20) when visible, else the wrist (15/16); side labels are inherent
+        to the skeleton. Icon picked by the active interaction — knock fists
+        during knock windows, pointing hand during point windows, open hand
+        during grab windows, plain green (L) / blue (R) dots when no window is
+        open. Last-seen position persists through pose dropouts. (landmark_data
+        / handedness_data are the legacy Hands slots — always None now.)"""
         if not self._screen:
             return
         gd = gesture_debug or {}
@@ -781,37 +791,22 @@ class RenderEngine:
 
         w, h = self._screen.get_size()
         now = time.monotonic()
-        seen = set()
 
-        for i, hand in enumerate(landmark_data or []):
-            side = "?"
-            if handedness_data and i < len(handedness_data):
-                side = handedness_data[i].classification[0].label[0]
-            if side not in self._hand_cursor_state:
-                side = "L" if "L" not in seen else "R"
-            state = self._hand_cursor_state[side]
-            state["pos"] = self._hand_screen_pos(hand, mode, w, h)
-            state["t"] = now
-            # Live open/fist classification; anything ambiguous keeps the last shape
-            # ("if no hands / unclear, display what was last seen").
-            if hand_pose.is_fist(hand):
-                state["shape"] = "fist"
-            elif hand_pose.is_open_palm(hand):
-                state["shape"] = "open"
-            seen.add(side)
-
-        # A side the Hands model lost can still follow its Pose wrist.
         if pose_data:
-            for side, idx in (("L", 15), ("R", 16)):
-                if side in seen or idx >= len(pose_data):
-                    continue
-                lm = pose_data[idx]
-                if getattr(lm, "visibility", 1.0) < 0.5:
+            for side, (wrist_i, index_i) in self._POSE_SIDE_POINTS.items():
+                lm = None
+                # Prefer the pose index (hand point); fall back to the wrist.
+                for idx in (index_i, wrist_i):
+                    if idx < len(pose_data):
+                        cand = pose_data[idx]
+                        if getattr(cand, "visibility", 1.0) >= 0.5:
+                            lm = cand
+                            break
+                if lm is None:
                     continue
                 state = self._hand_cursor_state[side]
                 state["pos"] = (int((1 - lm.x) * w), int(lm.y * h))
                 state["t"] = now
-                seen.add(side)
 
         for side, state in self._hand_cursor_state.items():
             if state["pos"] is None:
@@ -984,15 +979,6 @@ class RenderEngine:
             hint = self._small_font.render("S: skip tutorial", True, (120, 120, 120))
             self._screen.blit(hint, ((sw - hint.get_width()) // 2, int(sh * 0.90)))
 
-    _HAND_CONNECTIONS = [
-        (0,1),(1,2),(2,3),(3,4),
-        (0,5),(5,6),(6,7),(7,8),
-        (5,9),(9,10),(10,11),(11,12),
-        (9,13),(13,14),(14,15),(15,16),
-        (13,17),(17,18),(18,19),(19,20),
-        (0,17),
-    ]
-
     # MediaPipe Pose: upper-body skeleton for the debug panel.
     _POSE_CONNECTIONS = [
         (11, 12),                    # shoulders
@@ -1004,7 +990,9 @@ class RenderEngine:
     _POSE_KEY_POINTS = [0, 7, 8, 11, 12, 13, 14, 15, 16, 23, 24]  # nose, ears, etc.
 
     def _draw_hand_mini_panel(self, landmark_data, handedness_data=None, pose_data=None):
-        """Skeleton preview in bottom-right corner — keeps the main screen clean."""
+        """Pose-skeleton preview in bottom-right corner — keeps the main screen
+        clean. (landmark_data / handedness_data are the legacy Hands slots —
+        always None since the pose-only rework.)"""
         if not self._screen:
             return
         sw, sh = self._screen.get_size()
@@ -1020,7 +1008,6 @@ class RenderEngine:
         inner_w = panel_w - pad * 2
         inner_h = panel_h - pad * 2
 
-        # Pose skeleton first (behind hands), in amber so it's distinct.
         if pose_data:
             ppts = [
                 (px + pad + int((1 - lm.x) * inner_w),
@@ -1035,31 +1022,16 @@ class RenderEngine:
             for idx in self._POSE_KEY_POINTS:
                 if _vis(idx):
                     pygame.draw.circle(self._screen, (255, 210, 90), ppts[idx], 3)
+            # Pose hand points (pinky/index/thumb), green L / blue R — the
+            # closest thing to a hand readout the pose-only runtime has.
+            for color, idxs in (((0, 255, 80), (17, 19, 21)),
+                                ((60, 200, 255), (18, 20, 22))):
+                for idx in idxs:
+                    if _vis(idx) and getattr(pose_data[idx], "visibility", 1.0) >= 0.5:
+                        pygame.draw.circle(self._screen, color, ppts[idx], 3)
             if self._small_font:
                 tag = self._small_font.render("POSE", True, (255, 190, 70))
                 self._screen.blit(tag, (px + 4, py + 2))
-
-        for i, hand_lm in enumerate(landmark_data or []):
-            label = "?"
-            if handedness_data and i < len(handedness_data):
-                label = handedness_data[i].classification[0].label[0]
-            color_bone = (0, 200, 60) if label != "R" else (0, 160, 220)
-            color_dot = (0, 255, 80) if label != "R" else (60, 200, 255)
-
-            pts = [
-                (px + pad + int((1 - lm.x) * inner_w),
-                 py + pad + int(lm.y * inner_h))
-                for lm in hand_lm.landmark
-            ]
-            for a, b in self._HAND_CONNECTIONS:
-                pygame.draw.line(self._screen, color_bone, pts[a], pts[b], 1)
-            for pt in pts:
-                pygame.draw.circle(self._screen, color_dot, pt, 2)
-
-            if self._small_font:
-                wx, wy = pts[0]
-                surf = self._small_font.render(label, True, color_dot)
-                self._screen.blit(surf, (wx + 4, wy - 4))
 
     def _draw_loading_indicator(self) -> None:
         """Small corner readout while the incoming shot's frame pack is building."""
@@ -1101,14 +1073,8 @@ class RenderEngine:
         if not self._font:
             return
         w, h = self._screen.get_size()
-        hand_count = len(landmark_data) if landmark_data else 0
 
         lines = []
-        if hand_count:
-            lines.append((f"HANDS: {hand_count} detected", (0, 255, 80)))
-        else:
-            lines.append(("HANDS: none", (255, 60, 60)))
-
         if gesture_debug:
             pose_status = gesture_debug.get("pose_status", "NONE")
             pose_color = ((255, 170, 40) if pose_status == "OK"

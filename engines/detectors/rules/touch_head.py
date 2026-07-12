@@ -85,13 +85,9 @@ def detect(landmarks, params: dict, context: dict) -> bool:
     crown_x, crown_y, radius = _target_and_radius(pose_lm, target)
     radius *= radius_scale
 
-    # Wrist source. With use_pose we read the Pose wrists (15 left, 16 right) —
-    # robust when a hand raised to the head isn't picked up by MediaPipe Hands
-    # (occlusion / orientation). Otherwise use the Hands wrist landmark.
-    if use_pose:
-        wrists = [pose_lm[15], pose_lm[16]] if pose_lm is not None else []
-    else:
-        wrists = [hand.landmark[0] for hand in landmarks] if landmarks else []
+    # POSE-ONLY (July 2026): wrists always come from the Pose skeleton
+    # (15 left, 16 right); use_pose is accepted and ignored.
+    wrists = [pose_lm[15], pose_lm[16]] if pose_lm is not None else []
 
     in_region = 0
     for wrist in wrists:

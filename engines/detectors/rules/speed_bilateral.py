@@ -49,8 +49,8 @@ def _reset(context: dict) -> None:
 
 
 def detect(landmarks, params: dict, context: dict) -> bool:
-    use_pose = params.get("use_pose", False)
-
+    # POSE-ONLY (July 2026): always tracks the Pose wrists; the old Hands-wrist
+    # mode is gone (use_pose is accepted and ignored).
     # Collect currently-trusted wrist positions keyed by identity, so velocity
     # is always computed against the same physical wrist. With the Gemini depth
     # sampler present, positions carry real depth so speeds become mm/s.
@@ -58,34 +58,26 @@ def detect(landmarks, params: dict, context: dict) -> bool:
     if not isinstance(fusion, PoseDepth):
         fusion = None
     current: dict = {}
-    if use_pose:
-        pose_lm = context.get("_pose_lm")
-        if pose_lm is None:
-            _reset(context)
-            return False
-        min_visibility = params.get("min_visibility", 0.5)
-        for key, idx in (("L", 15), ("R", 16)):
-            try:
-                w = pose_lm[idx]
-            except (IndexError, TypeError):
-                continue
-            # Phantom low-visibility estimates jitter frame-to-frame and read
-            # as motion — skip them (visibility gate + Gemini depth veto), but
-            # keep the other wrist if it's trusted.
-            if not trusted_landmark(context, idx, w, min_visibility):
-                continue
-            depth = fusion.landmark_mm(idx) if fusion is not None else None
-            current[key] = (w.x, w.y, depth)
-        if not current:
-            _reset(context)
-            return False
-    else:
-        if not landmarks:
-            _reset(context)
-            return False
-        for i, hand in enumerate(landmarks[:2]):
-            hw = hand.landmark[0]
-            current[i] = (hw.x, hw.y, None)
+    pose_lm = context.get("_pose_lm")
+    if pose_lm is None:
+        _reset(context)
+        return False
+    min_visibility = params.get("min_visibility", 0.5)
+    for key, idx in (("L", 15), ("R", 16)):
+        try:
+            w = pose_lm[idx]
+        except (IndexError, TypeError):
+            continue
+        # Phantom low-visibility estimates jitter frame-to-frame and read
+        # as motion — skip them (visibility gate + Gemini depth veto), but
+        # keep the other wrist if it's trusted.
+        if not trusted_landmark(context, idx, w, min_visibility):
+            continue
+        depth = fusion.landmark_mm(idx) if fusion is not None else None
+        current[key] = (w.x, w.y, depth)
+    if not current:
+        _reset(context)
+        return False
 
     if "speed_burst_times" not in context:
         _reset(context)

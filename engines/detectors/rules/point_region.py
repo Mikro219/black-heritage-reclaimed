@@ -37,11 +37,9 @@ Params:
                           hip-line behaviour; 0.25 (default) puts the gate at the
                           lower chest, so hands resting at the waist — which hover
                           right at the hip line and jitter across it — can't select.
-  reject_open_palm (bool): when the Hands model resolves the selecting hand and
-                          sees an open palm (not a pointing finger), the wrist
-                          doesn't select — the choice must read as a POINT.
-                          Pose-only selection (no resolvable hand) is unaffected.
-                          Default True. (July 2026 playtest.)
+  reject_open_palm (bool): ACCEPTED AND IGNORED since the pose-only rework —
+                          finger shape is invisible to the Pose model. The raise
+                          gate + dead zone are the deliberateness filters.
   allow_low_reach (bool) / low_reach_frac (float): accept a wrist below the raise
                           gate when it reaches at least low_reach_frac shoulder
                           widths from the midline — natural pointing at LOW
@@ -61,7 +59,6 @@ Context keys: point_direction, point_direction_since, dominant_direction
 
 import time
 
-from . import hand_pose
 from ...depth.fusion import trusted_landmark
 
 _ALL = ["left", "right"]
@@ -127,17 +124,10 @@ def detect(landmarks, params: dict, context: dict) -> bool:
             direction = "left" if offset < 0 else "right"
             if direction not in accepted:
                 continue
-            # Finger-vs-palm check (July 2026 playtest: selection must read as a
-            # POINT, not any raised open hand). When the Hands model resolves
-            # this hand and sees an unambiguous open palm, it doesn't select.
-            # No resolvable hand (common at arm's reach to the side) still
-            # selects on pose alone — rejecting there would kill the gesture at
-            # exhibition distance.
-            if params.get("reject_open_palm", True):
-                hand = hand_pose.nearest_hand(landmarks, wrist.x, wrist.y)
-                if hand is not None and hand_pose.is_open_palm(hand) \
-                        and not hand_pose.is_pointing(hand):
-                    continue
+            # (POSE-ONLY, July 2026: the old reject_open_palm finger check
+            # needed the Hands model and is gone — the raise gate + dead zone
+            # are the deliberateness filters now. The param is accepted and
+            # ignored so existing metadata stays valid.)
             if abs(offset) > abs(best_offset):
                 best_offset = offset
                 best_direction = direction

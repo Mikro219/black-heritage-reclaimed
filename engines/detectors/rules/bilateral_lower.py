@@ -1,54 +1,53 @@
 """
-bilateral_lower — both hands moving downward together, then held low.
+bilateral_lower — both pose wrists moving downward together, then held low.
 Used for Scene 7 `duck_down` CG (AL-07-011).
 
+POSE-ONLY (July 2026): reads Pose wrists (15/16), keyed by side so the peaks
+track the same physical wrist across frames.
+
 Params:
-  min_delta (float): minimum downward Y movement per hand to count as "lowering". Default 0.06.
-  hold_ms (int): ms both wrists must stay below mid-screen after the downward motion. Default 400.
+  min_delta (float): minimum downward Y movement per wrist from its peak.
+                     Default 0.06.
+  hold_ms (int): ms both wrists must stay low after the drop. Default 400.
+  min_visibility (float): Pose wrist visibility gate. Default 0.5.
 
-Approach:
-  Record wrist Y positions each frame. When both hands' Y increases (moves down) by
-  min_delta from their peak and are both below 0.55 (mid-to-lower screen), start hold timer.
-
-Context keys: prev_wrist_y, peak_y, low_since
+Context keys: peak_y, low_since  (reads: _pose_lm)
 """
 
 import time
 
+from . import pose_helpers
+
 
 def detect(landmarks, params: dict, context: dict) -> bool:
-    if not landmarks or len(landmarks) < 2:
-        context["prev_wrist_y"] = []
-        context["peak_y"] = []
+    pose_lm = context.get("_pose_lm")
+    wrists = pose_helpers.trusted_wrists(pose_lm, context,
+                                         params.get("min_visibility", 0.5))
+    if len(wrists) < 2:
+        context["peak_y"] = None
         context["low_since"] = None
         return False
 
     min_delta = params.get("min_delta", 0.06)
     hold_ms = params.get("hold_ms", 400)
 
-    current_y = [hand.landmark[0].y for hand in landmarks]
+    current = {s: w.y for s, w in wrists.items()}
+    peaks = context.get("peak_y")
+    if not isinstance(peaks, dict) or set(peaks) != set(current):
+        peaks = dict(current)
 
-    prev_y = context.get("prev_wrist_y", current_y[:])
-    peak_y = context.get("peak_y", current_y[:])
+    # Track the highest position each wrist reached (lowest y value)
+    peaks = {s: min(peaks[s], current[s]) for s in current}
+    context["peak_y"] = peaks
 
-    # Update peaks (track highest position = lowest y value)
-    new_peaks = [min(p, c) for p, c in zip(peak_y, current_y)]
-
-    # Both hands moved down from peak by min_delta and are in lower half
-    both_low = all(
-        cy > py + min_delta and cy > 0.45
-        for cy, py in zip(current_y, new_peaks)
-    )
+    both_low = all(current[s] > peaks[s] + min_delta and current[s] > 0.45
+                   for s in current)
 
     now = time.monotonic()
     if both_low:
         if context.get("low_since") is None:
             context["low_since"] = now
-        fired = (now - context["low_since"]) * 1000 >= hold_ms
-    else:
-        context["low_since"] = None
-        fired = False
+        return (now - context["low_since"]) * 1000 >= hold_ms
 
-    context["prev_wrist_y"] = current_y
-    context["peak_y"] = new_peaks
-    return fired
+    context["low_since"] = None
+    return False

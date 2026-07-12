@@ -65,15 +65,8 @@ def detect(landmarks, params: dict, context: dict) -> bool:
     hip_y          = (hip_l.y + hip_r.y) / 2
     sh_hip_dist    = max(hip_y - shoulder_y, 0.10)
 
-    # Hand wrist landmarks (point 0) are more accurate than Pose wrists for
-    # fine oscillation tracking. Fall back to pose when < 2 hands visible.
-    # (landmarks can be None on the no-hands dispatch path.)
-    if landmarks and len(landmarks) >= 2:
-        sorted_hands = sorted(landmarks, key=lambda h: h.landmark[0].x)
-        lw = sorted_hands[0].landmark[0]
-        rw = sorted_hands[1].landmark[0]
-    else:
-        lw, rw = pose_lm[15], pose_lm[16]
+    # POSE-ONLY (July 2026): wrists come from the Pose skeleton (15/16).
+    lw, rw = pose_lm[15], pose_lm[16]
 
     import math as _math
     # Proximity check: wrists close to each other

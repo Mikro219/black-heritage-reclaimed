@@ -85,6 +85,12 @@ class Shot:
     audio_dir: Optional[Path]   # audio/ dir for AL-XX-YYY wav files
     audio_file: Optional[Path]  # single audio file (shot_NN/audio.mp3 convention)
 
+    # Layered stem audio (CapCut import / Experience Builder). Each entry is a
+    # normalised dict: file, role, at_s, duration_s, source_offset_s, gain,
+    # fade_in_ms, fade_out_ms, sustain, continues, path (resolved Path or None).
+    # When non-empty, audio_file is suppressed — the stems replace the baked mix.
+    audio_events: list
+
     # Status flags
     assets_pending: bool        # True if frames_dir is None or contains no image files
 
@@ -201,6 +207,14 @@ def load_sequence(scenes_root: Path, config: dict) -> list[Shot]:
         audio_file = _resolve_audio_file(act_dir, shot_id,
                                          raw.get("audio") or shot_meta.get("audio"))
 
+        # Layered stem audio: metadata.json ← sequence.json entry. When present,
+        # the stems replace the baked whole-file audio.mp3 (decision July 2026).
+        audio_events = _parse_audio_events(
+            raw.get("audio_events") or shot_meta.get("audio_events"),
+            act_dir, shot_id, scenes_root)
+        if audio_events:
+            audio_file = None
+
         # assets_pending: frames dir absent or empty
         if frames_dir is None:
             assets_pending = True
@@ -228,6 +242,7 @@ def load_sequence(scenes_root: Path, config: dict) -> list[Shot]:
             frames_dir=frames_dir,
             audio_dir=audio_dir,
             audio_file=audio_file,
+            audio_events=audio_events,
             assets_pending=assets_pending,
             segments_todo=segments_todo,
             interaction_todo=interaction_todo,
@@ -381,3 +396,51 @@ def _resolve_audio_file(act_dir: Optional[Path], shot_id: str,
         return None
     p = act_dir / f"shot_{shot_id}" / filename
     return p if p.exists() else None
+
+
+_AUDIO_ROLES = {"music", "ambience", "sfx"}
+
+
+def _parse_audio_events(raw_events, act_dir: Optional[Path], shot_id: str,
+                        scenes_root: Path) -> list:
+    """Normalise a shot's audio_events list and resolve each file.
+
+    Resolution order: shot_NN/audio/<file> → <scenes_root>/_audio/<file>
+    (the shared pool — beds repeat across dozens of shots). Unresolvable files
+    keep path=None; the mixer skips them with a log line rather than crashing.
+    """
+    if not isinstance(raw_events, list):
+        return []
+    pool = scenes_root / "_audio"
+    events = []
+    for e in raw_events:
+        if not isinstance(e, dict) or not e.get("file"):
+            continue
+        fname = str(e["file"])
+        path = None
+        if act_dir is not None:
+            candidate = act_dir / f"shot_{shot_id}" / "audio" / fname
+            if candidate.exists():
+                path = candidate
+        if path is None:
+            candidate = pool / fname
+            if candidate.exists():
+                path = candidate
+        role = e.get("role", "sfx")
+        if role not in _AUDIO_ROLES:
+            role = "sfx"
+        events.append({
+            "file":            fname,
+            "role":            role,
+            "at_s":            float(e.get("at_s", 0.0)),
+            "duration_s":      (None if e.get("duration_s") is None
+                                else float(e["duration_s"])),
+            "source_offset_s": float(e.get("source_offset_s", 0.0)),
+            "gain":            float(e.get("gain", 1.0)),
+            "fade_in_ms":      int(e.get("fade_in_ms", 0)),
+            "fade_out_ms":     int(e.get("fade_out_ms", 0)),
+            "sustain":         bool(e.get("sustain", role != "sfx")),
+            "continues":       bool(e.get("continues", False)),
+            "path":            path,
+        })
+    return events

@@ -1,29 +1,29 @@
 """
-forward_reach — hand moves toward the screen (Z-approach), used for AL-01-002 reach_flask.
+forward_reach — hand moves toward the screen (Z-approach), used for AL-01-002
+reach_flask.
 
-Unlike directional_point, no specific finger pose is required — open palm, loose fist,
-or pointing hand all count. The signal is "hand moving closer to camera": with the
-Gemini 335 depth sampler present (context["_depth_mm_at"]) the wrist's REAL depth
-must drop by min_depth_delta_mm within the window (authoritative while flowing);
-on a plain webcam, bounding-box area growth is the monocular fallback. Optionally
-constrained to a target screen region.
+POSE-ONLY (July 2026): the signal is a Pose wrist approaching the camera —
+its REAL depth drops by min_depth_delta_mm within the window when the Gemini
+335 sampler is present (authoritative), else its Pose z drops by
+min_pose_z_delta (hip-normalised, more negative = closer). The old hand
+bounding-box growth proxy needed the Hands model and is gone. Optionally
+constrained to a target screen region (wrist position, player-mirrored).
 
 Params:
-  area_growth_threshold (float): fraction of area growth required over the window. Default 0.30.
-  window_frames (int): sliding window depth (frames) for area comparison. Default 12 (~400ms @30fps).
   min_depth_delta_mm (float): required real wrist-depth decrease within the
                   window when the depth sampler is present. Default 180.
-  target_region (str | None): screen region the wrist must occupy. One of:
-      "upper_center"   — upper 40% of frame, middle 40% of width (the flask region in Scene 1)
-      "upper_left"     — upper 40%, left 50%
-      "upper_right"    — upper 40%, right 50%
-      "center"         — middle third in both axes
-      None             — no spatial constraint; anywhere in frame counts.
+  min_pose_z_delta (float): required Pose-z decrease without depth. Default 0.18.
+  window_ms (int): sliding window for the approach. Default 900.
+  target_region (str | None): screen region the wrist must occupy:
+      "upper_center" | "upper_left" | "upper_right" | "center" | None.
+  min_visibility (float): Pose wrist visibility gate. Default 0.5.
 
-Context keys: bbox_area_history, reach_depth_history, forward_reach_fired
+Context keys: reach_depth_history, forward_reach_fired  (reads: _pose_lm, _depth_mm_at)
 """
 
-from . import hand_pose
+import time
+
+from . import pose_helpers
 
 _REGIONS = {
     "upper_center": {"x_min": 0.30, "x_max": 0.70, "y_max": 0.40},
@@ -33,15 +33,11 @@ _REGIONS = {
 }
 
 
-def _wrist_in_region(hand, region_key: str) -> bool:
-    """Return True if the wrist falls within the named region (in player-mirrored space)."""
+def _wrist_in_region(wrist, region_key: str) -> bool:
     region = _REGIONS.get(region_key)
     if region is None:
         return True
-    wrist = hand.landmark[0]
-    # Mirror x to player's perspective (same convention as the rest of the engine)
-    px = 1.0 - wrist.x
-    py = wrist.y
+    px, py = 1.0 - wrist.x, wrist.y   # player-mirrored space
     if region.get("x_min") is not None and px < region["x_min"]:
         return False
     if region.get("x_max") is not None and px > region["x_max"]:
@@ -54,65 +50,40 @@ def _wrist_in_region(hand, region_key: str) -> bool:
 
 
 def detect(landmarks, params: dict, context: dict) -> bool:
-    if not landmarks:
-        context.pop("bbox_area_history", None)
+    pose_lm = context.get("_pose_lm")
+    wrists = pose_helpers.trusted_wrists(pose_lm, context,
+                                         params.get("min_visibility", 0.5))
+    if not wrists:
         context.pop("reach_depth_history", None)
         context["forward_reach_fired"] = False
         return False
 
-    # Once fired in this window, don't re-fire until the context is reset
     if context.get("forward_reach_fired"):
         return False
 
-    threshold = params.get("area_growth_threshold", 0.30)
-    window_frames = params.get("window_frames", 12)
+    min_mm = params.get("min_depth_delta_mm", 180)
+    min_z = params.get("min_pose_z_delta", 0.18)
+    window_s = params.get("window_ms", 900) / 1000.0
     region_key = params.get("target_region")
-    min_depth_delta = params.get("min_depth_delta_mm", 180)
 
-    # Use the largest hand (most likely the dominant/extended one)
-    best_hand = max(landmarks, key=hand_pose.bbox_area)
+    now = time.monotonic()
+    hist: dict = context.setdefault("reach_depth_history", {})
 
-    # ── Preferred: real wrist depth (Gemini 335) — fire when the wrist has
-    #    approached the camera by min_depth_delta_mm within the window. ───────
-    depth_at = context.get("_depth_mm_at")
-    if callable(depth_at):
-        hw = best_hand.landmark[0]
-        d = depth_at(hw.x, hw.y)
-        if d is not None:
-            dh: list = context.setdefault("reach_depth_history", [])
-            dh.append(d)
-            if len(dh) > window_frames:
-                dh.pop(0)
-            if len(dh) >= 2 and (max(dh) - d) >= min_depth_delta:
-                if region_key and not _wrist_in_region(best_hand, region_key):
-                    return False
-                context["forward_reach_fired"] = True
-                return True
-            if len(dh) >= 2:
-                # Depth is flowing and says "no approach yet" — it's
-                # authoritative; skip the bbox proxy this frame.
-                return False
+    for side, wrist in wrists.items():
+        kind, val = pose_helpers.wrist_depth_or_z(context, pose_lm, side)
+        if kind is None:
+            continue
+        h = hist.setdefault(side, [])
+        h.append((now, kind, val))
+        h[:] = [(t, k, v) for t, k, v in h if now - t <= window_s]
+        same = [v for t, k, v in h if k == kind]
+        if len(same) < 2:
+            continue
+        drop = max(same) - val
+        if (kind == "mm" and drop >= min_mm) or (kind == "z" and drop >= min_z):
+            if region_key and not _wrist_in_region(wrist, region_key):
+                continue
+            context["forward_reach_fired"] = True
+            return True
 
-    history: list = context.setdefault("bbox_area_history", [])
-    current_area = hand_pose.bbox_area(best_hand)
-    history.append(current_area)
-    if len(history) > window_frames:
-        history.pop(0)
-
-    if len(history) < window_frames:
-        return False  # not enough history yet
-
-    oldest_area = history[0]
-    if oldest_area < 1e-6:
-        return False  # degenerate bbox
-
-    growth = current_area / oldest_area
-    if growth < 1.0 + threshold:
-        return False
-
-    # Spatial constraint: wrist must be in the target region
-    if region_key and not _wrist_in_region(best_hand, region_key):
-        return False
-
-    context["forward_reach_fired"] = True
-    return True
+    return False

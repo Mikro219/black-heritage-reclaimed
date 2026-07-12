@@ -27,6 +27,7 @@ from engines.render_engine import RenderEngine
 from engines.sequence_loader import load_sequence
 from engines.shot_sequence_player import ShotSequencePlayer, PLAYER_RUNNING
 from engines.narration_adapter import NarrationAdapter
+from engines.audio_mixer import ShotAudioMixer
 from engines.tutorial_engine import TutorialEngine
 
 
@@ -160,18 +161,15 @@ def init_display(profile: dict) -> pygame.Surface:
 
 def detector_test(detector_name: str, params: dict):
     """
-    Live detector test mode.  Opens the camera, runs MediaPipe Hands + Pose,
+    Live detector test mode.  Opens the camera, runs MediaPipe Pose,
     shows a skeleton overlay, and prints FIRE / waiting state for the named detector.
     Press Q or Escape to quit.
 
     Usage:
         python main.py --detector-test touch_head
         python main.py --detector-test arms_crossed
-        python main.py --detector-test push_out --detector-params '{"min_growth_pct": 50}'
+        python main.py --detector-test push_out --detector-params '{"window_ms": 400}'
     """
-    import json
-    import math
-
     import mediapipe as mp
     import cv2 as _cv2
 
@@ -189,16 +187,9 @@ def detector_test(detector_name: str, params: dict):
     # Same camera selection as the main runtime (Orbbec first when enabled).
     cap = open_camera(profile, load_config())
 
-    mp_hands = mp.solutions.hands
-    mp_pose  = mp.solutions.pose
-    mp_draw  = mp.solutions.drawing_utils
-
-    hands = mp_hands.Hands(max_num_hands=2,
-                            min_detection_confidence=0.6,
-                            min_tracking_confidence=0.5)
-    # model_complexity=1 matches CLAUDE.md and production host profile (was 0 — fixed)
-    pose  = mp_pose.Pose(model_complexity=1, enable_segmentation=False,
-                         min_detection_confidence=0.5, min_tracking_confidence=0.5)
+    mp_pose = mp.solutions.pose
+    pose = mp_pose.Pose(model_complexity=1, enable_segmentation=False,
+                        min_detection_confidence=0.5, min_tracking_confidence=0.5)
 
     context: dict = {}
     last_pose_lm   = None
@@ -215,7 +206,6 @@ def detector_test(detector_name: str, params: dict):
             continue
 
         rgb = _cv2.cvtColor(frame, _cv2.COLOR_BGR2RGB)
-        hand_results = hands.process(rgb)
         pose_results = pose.process(rgb)
 
         now = time.monotonic()
@@ -225,11 +215,11 @@ def detector_test(detector_name: str, params: dict):
 
         pose_age = now - last_pose_time
         context["_pose_lm"] = last_pose_lm if pose_age < pose_stale_s else None
+        context["_depth_mm_at"] = getattr(cap, "depth_mm_at", None)
         pose_status = ("OK" if context["_pose_lm"] else
                        f"STALE({pose_age:.1f}s)" if last_pose_lm else "NONE")
 
-        hand_lm_list = hand_results.multi_hand_landmarks or []
-        fired = det_fn(hand_lm_list, params, context)
+        fired = det_fn([], params, context)
         if fired:
             fire_count += 1
             fire_flash_until = now + 0.8
@@ -237,14 +227,9 @@ def detector_test(detector_name: str, params: dict):
             for key in ("forward_reach_fired", "push_fired", "unravel_fired"):
                 context.pop(key, None)
 
-        # Draw hand skeleton
-        if hand_lm_list:
-            for hl in hand_lm_list:
-                mp_draw.draw_landmarks(frame, hl, mp_hands.HAND_CONNECTIONS)
-
-        # Draw pose skeleton (key landmarks only)
+        # Draw pose skeleton (key landmarks incl. the pose hand points 17-22)
         if last_pose_lm:
-            POSE_DRAW = [11, 12, 15, 16, 23, 24, 7, 8]
+            POSE_DRAW = [11, 12, 15, 16, 23, 24, 7, 8, 17, 18, 19, 20, 21, 22]
             for idx in POSE_DRAW:
                 lm = last_pose_lm[idx]
                 cx, cy = int((1 - lm.x) * w), int(lm.y * h)  # mirrored
@@ -276,7 +261,6 @@ def detector_test(detector_name: str, params: dict):
         if key in (ord("q"), ord("Q"), 27):
             break
 
-    hands.close()
     pose.close()
     cap.release()
     _cv2.destroyAllWindows()
@@ -309,8 +293,10 @@ def _run_dry_run(config: dict, scenes_root=None) -> None:
 
     bus.subscribe("shot_state_change",
                   lambda d: holds_entered.append(d["shot_id"]) if d["state"] == "HOLD" else None)
+    # interaction=None is the FSM's "disarm" signal — not a window opening.
     bus.subscribe("cg_window_open",
-                  lambda d: cg_windows.append(d["interaction"].get("id", "?")))
+                  lambda d: cg_windows.append(d["interaction"].get("id", "?"))
+                  if d.get("interaction") else None)
     bus.subscribe("vi_chain_step",
                   lambda d: vi_steps.append(d["step"].get("keyword", "?")))
 
@@ -406,6 +392,8 @@ def main():
     shots             = load_sequence(scenes_root, config)
     player            = ShotSequencePlayer(shots, config, bus)
     narration_adapter = NarrationAdapter(config, bus, shots)
+    audio_mixer       = ShotAudioMixer(config, bus,
+                                       frame_provider=lambda: render.playback_frame)
     tutorial          = TutorialEngine(config, bus, gesture)
 
     # Start the continuous look-ahead frame cache: preloads every shot with art in
@@ -518,10 +506,9 @@ def main():
             gesture.update()
             player.update()
             narration_adapter.update()
+            audio_mixer.update()
 
         render.update(
-            landmark_data=gesture._last_landmarks,
-            handedness_data=gesture._last_handedness,
             pose_data=gesture.fresh_pose_lm(),
             gesture_debug=gesture.debug_info(),
             voice_debug=voice.debug_info(),

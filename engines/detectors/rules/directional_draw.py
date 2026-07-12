@@ -63,26 +63,21 @@ _POSE_WRISTS = (15, 16)
 
 def _tracked_points(landmarks, params: dict, context: dict) -> dict:
     """{track_key: (x, y)} of every point whose motion we accumulate this tick.
-    Pose mode tracks BOTH visible wrists independently — either hand can draw
-    the stroke, and a static second hand must not mask the moving one."""
+    Tracks BOTH trusted pose wrists independently — either hand can draw the
+    stroke, and a static second hand must not mask the moving one. (POSE-ONLY
+    July 2026: the old fingertip fallback needed the Hands model and is gone;
+    use_pose is accepted and ignored.)"""
     points: dict = {}
-    if params.get("use_pose", True):
-        pose_lm = context.get("_pose_lm")
-        if pose_lm is not None:
-            min_visibility = params.get("min_visibility", 0.5)
-            for idx in _POSE_WRISTS:
-                try:
-                    w = pose_lm[idx]
-                except (IndexError, TypeError):
-                    continue
-                if trusted_landmark(context, idx, w, min_visibility):
-                    points[f"wrist_{idx}"] = (w.x, w.y)
-            if points:
-                return points
-    for hand in landmarks or []:
-        tip = hand.landmark[8]
-        points["fingertip"] = (tip.x, tip.y)
-        break
+    pose_lm = context.get("_pose_lm")
+    if pose_lm is not None:
+        min_visibility = params.get("min_visibility", 0.5)
+        for idx in _POSE_WRISTS:
+            try:
+                w = pose_lm[idx]
+            except (IndexError, TypeError):
+                continue
+            if trusted_landmark(context, idx, w, min_visibility):
+                points[f"wrist_{idx}"] = (w.x, w.y)
     return points
 
 
