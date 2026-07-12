@@ -370,7 +370,9 @@ def _load_shot_metadata(act_dir: Optional[Path], shot_id: str) -> dict:
     if not meta.exists():
         return {}
     try:
-        with open(meta, encoding="utf-8") as f:
+        # utf-8-sig: several hand-authored files carry a BOM, which plain utf-8
+        # rejects — and the except below would silently drop the whole metadata.
+        with open(meta, encoding="utf-8-sig") as f:
             return json.load(f)
     except Exception:
         return {}

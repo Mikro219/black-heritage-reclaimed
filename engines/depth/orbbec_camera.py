@@ -252,22 +252,68 @@ class OrbbecCapture:
 
 
 def try_open_orbbec(resolution: Tuple[int, int] = (1280, 720),
-                    fps: int = 30) -> Optional["OrbbecCapture"]:
+                    fps: int = 30,
+                    verify_timeout_s: float = 3.0) -> Optional["OrbbecCapture"]:
     """Open the Gemini 335 as an OrbbecCapture, or None if unavailable.
 
     Callers fall back to a plain webcam on None, so a missing SDK or unplugged
-    camera degrades gracefully instead of killing the app.
+    camera degrades gracefully instead of killing the app. Three failure modes
+    are covered:
+      1. SDK not installed                       → None immediately.
+      2. No Gemini enumerated / open raises      → None (device probe + except).
+      3. Pipeline opens but never delivers a
+         frame (half-detected device, USB2 port) → None after verify_timeout_s.
     """
     if not ORBBEC_AVAILABLE:
         print("[orbbec] pyorbbecsdk not installed (pip install pyorbbecsdk2) "
               "— falling back to webcam")
         return None
+
+    # Cheap device probe before constructing a pipeline: an SDK with no camera
+    # attached can otherwise stall in native code or "open" a device-less
+    # pipeline that never produces frames.
     try:
-        return OrbbecCapture(resolution=resolution, fps=fps)
+        from pyorbbecsdk import Context  # type: ignore
+        if Context().query_devices().get_count() == 0:
+            print("[orbbec] no Gemini device detected — falling back to webcam")
+            return None
+    except Exception:
+        pass   # older SDK without Context/query — rely on the open + verify below
+
+    try:
+        cap = OrbbecCapture(resolution=resolution, fps=fps)
     except Exception as exc:
         print(f"[orbbec] Gemini 335 open failed: {exc}")
-        print("[orbbec] (is OrbbecViewer or another app holding the camera?)")
+        print("[orbbec] (is OrbbecViewer or another app holding the camera?) "
+              "— falling back to webcam")
         return None
+
+    # Verify a real color frame arrives before handing the capture to the
+    # engine; otherwise the runtime would sit on a black screen instead of
+    # using the webcam.
+    import time
+    deadline = time.monotonic() + verify_timeout_s
+    while time.monotonic() < deadline:
+        try:
+            ok, frame = cap.read()
+        except Exception as exc:
+            print(f"[orbbec] Gemini 335 read failed during verification: {exc} "
+                  "— falling back to webcam")
+            _safe_release(cap)
+            return None
+        if ok and frame is not None:
+            return cap
+    print(f"[orbbec] Gemini 335 delivered no frames within {verify_timeout_s:.0f}s "
+          "— falling back to webcam")
+    _safe_release(cap)
+    return None
+
+
+def _safe_release(cap: "OrbbecCapture") -> None:
+    try:
+        cap.release()
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------------------

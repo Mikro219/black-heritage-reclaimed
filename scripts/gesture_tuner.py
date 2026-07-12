@@ -559,11 +559,11 @@ def draw_mouth_marker(frame, w, h, accent, context, mouth_x=None, mouth_y=None,
 
 def draw_knock_progress(frame, context, params, w, h, accent):
     """Approach-knock panel: one circle per required push-toward-camera knock,
-    plus a live hand-growth bar (current bbox area vs pulled-back baseline)."""
+    plus a live approach bar (wrist depth / pose-z delta vs the pulled-back
+    baseline — pose-only runtime)."""
     now = time.monotonic()
     knock_count_req = params.get("knock_count", 2)
     knock_window_ms = params.get("knock_window_ms", 2500)
-    min_growth      = params.get("min_growth_pct", 30)
     knock_times = [t for t in context.get("knock_times", [])
                    if (now - t) * 1000 <= knock_window_ms]
 
@@ -587,20 +587,33 @@ def draw_knock_progress(frame, context, params, w, h, accent):
     bar_w = 220
     bar_x = w // 2 - bar_w // 2
 
-    # Live growth bar: current bbox area vs the rolling pulled-back baseline.
-    hist = context.get("knock_area_hist") or []
-    if hist:
-        baseline = min(a for _, a in hist)
-        area = hist[-1][1]
-        growth_pct = (area / baseline - 1.0) * 100 if baseline > 0 else 0.0
-        pct = max(0.0, min(1.5, growth_pct / max(1e-6, min_growth)))
+    # Live approach bar: wrist depth (Gemini) or pose-z delta vs the rolling
+    # pulled-back baseline, whichever side is furthest along.
+    hist = context.get("knock_depth_hist") or {}
+    best_pct, best_label = None, ""
+    for side, samples in hist.items():
+        if len(samples) < 2:
+            continue
+        kind = samples[-1][1]
+        same = [v for _, k, v in samples if k == kind]
+        baseline, cur = max(same), samples[-1][2]
+        need = (params.get("min_depth_delta_mm", 120) if kind == "mm"
+                else params.get("min_pose_z_delta", 0.12))
+        pct = max(0.0, min(1.5, (baseline - cur) / max(1e-6, need)))
+        if best_pct is None or pct > best_pct:
+            best_pct = pct
+            unit = "mm" if kind == "mm" else "z"
+            best_label = (f"{side} approach {(baseline - cur):+.0f}{unit}  "
+                          f"need {need:.0f}{unit}" if kind == "mm" else
+                          f"{side} approach {(baseline - cur):+.2f}{unit}  need {need:.2f}{unit}")
+    if best_pct is not None:
         cv2.rectangle(frame, (bar_x, bar_y), (bar_x + bar_w, bar_y + 12), (50, 50, 50), -1)
-        filled_w = int(min(1.0, pct) * bar_w)
-        color = accent if growth_pct >= min_growth else (90, 160, 90)
+        filled_w = int(min(1.0, best_pct) * bar_w)
+        color = accent if best_pct >= 1.0 else (90, 160, 90)
         if filled_w > 0:
             cv2.rectangle(frame, (bar_x, bar_y), (bar_x + filled_w, bar_y + 12), color, -1)
         cv2.rectangle(frame, (bar_x, bar_y), (bar_x + bar_w, bar_y + 12), (120, 120, 120), 1)
-        cv2.putText(frame, f"growth {growth_pct:+.0f}%  need {min_growth:.0f}%",
+        cv2.putText(frame, best_label,
                     (bar_x, bar_y + 28), cv2.FONT_HERSHEY_SIMPLEX, 0.45,
                     color, 1, cv2.LINE_AA)
     else:
@@ -693,14 +706,24 @@ def draw_forward_reach_info(frame, context, params, lm_list, w, h, accent):
                     cv2.FONT_HERSHEY_SIMPLEX, 0.50, accent, 1, cv2.LINE_AA)
     cv2.addWeighted(overlay, 0.10, frame, 0.90, 0, frame)
 
-    # Bbox area growth bar
-    history = context.get("bbox_area_history", [])
-    threshold = params.get("area_growth_threshold", 0.30)
-    if len(history) >= 2:
-        oldest = history[0]
-        current = history[-1]
-        growth = (current / oldest - 1.0) if oldest > 1e-6 else 0.0
-        pct = min(max(growth / threshold, 0.0), 1.0)
+    # Approach bar: wrist depth (Gemini) / pose-z drop vs the rolling max.
+    hist = context.get("reach_depth_history") or {}
+    best = None   # (pct, label)
+    for side, samples in hist.items():
+        if len(samples) < 2:
+            continue
+        kind = samples[-1][1]
+        same = [v for _, k, v in samples if k == kind]
+        drop = max(same) - samples[-1][2]
+        need = (params.get("min_depth_delta_mm", 180) if kind == "mm"
+                else params.get("min_pose_z_delta", 0.18))
+        pct = min(max(drop / max(1e-6, need), 0.0), 1.0)
+        label = (f"{side} reach {drop:+.0f}mm / {need:.0f}mm" if kind == "mm"
+                 else f"{side} reach {drop:+.2f}z / {need:.2f}z")
+        if best is None or pct > best[0]:
+            best = (pct, label)
+    if best is not None:
+        pct, label = best
         bar_x, bar_y = 10, h // 2
         bar_w = 220
         cv2.rectangle(frame, (bar_x, bar_y), (bar_x + bar_w, bar_y + 14), (50, 50, 50), -1)
@@ -709,18 +732,8 @@ def draw_forward_reach_info(frame, context, params, lm_list, w, h, accent):
         if filled > 0:
             cv2.rectangle(frame, (bar_x, bar_y), (bar_x + filled, bar_y + 14), color, -1)
         cv2.rectangle(frame, (bar_x, bar_y), (bar_x + bar_w, bar_y + 14), (120, 120, 120), 1)
-        cv2.putText(frame, f"area growth {growth:+.2f} / {threshold:.2f}",
-                    (bar_x + bar_w + 8, bar_y + 11),
+        cv2.putText(frame, label, (bar_x + bar_w + 8, bar_y + 11),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.45, color if pct >= 1.0 else (200, 200, 200), 1, cv2.LINE_AA)
-
-    # Show wrist position dot
-    if lm_list:
-        wrist = lm_list[0].landmark[0]
-        wx = int((1 - wrist.x) * w)
-        wy = int(wrist.y * h)
-        cv2.circle(frame, (wx, wy), 10, accent, 2, cv2.LINE_AA)
-        cv2.putText(frame, "wrist", (wx + 12, wy + 4),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, accent, 1, cv2.LINE_AA)
 
 
 def draw_forward_point_info(frame, params, lm_list, w, h, accent):
@@ -991,23 +1004,24 @@ def draw_arms_crossed_info(frame, context, pose_lm, w, h, accent):
 
 
 def draw_push_out_info(frame, context, params, lm_list, w, h, accent):
-    """Show per-hand area growth progress bars."""
-    histories = context.get("push_area_history", [[], []])
-    min_growth = params.get("min_growth_pct", 50) / 100.0
-    for i, history in enumerate(histories[:2]):
-        if len(history) < 2:
-            ratio = 0.0
-        else:
-            oldest = history[0][1]
-            current = history[-1][1]
-            ratio = (current / oldest - 1.0) if oldest > 1e-6 else 0.0
-        pct = min(max(ratio / min_growth, 0.0), 1.0)
+    """Per-wrist approach bars: depth (Gemini) / pose-z drop vs threshold."""
+    hist = context.get("push_depth_history") or {}
+    for i, side in enumerate(("L", "R")):
+        samples = hist.get(side) or []
+        drop, need, label_val = 0.0, 1.0, "--"
+        if len(samples) >= 2:
+            kind = samples[-1][1]
+            same = [v for _, k, v in samples if k == kind]
+            drop = max(same) - samples[-1][2]
+            need = (params.get("min_depth_delta_mm", 200) if kind == "mm"
+                    else params.get("min_pose_z_delta", 0.15))
+            label_val = (f"{drop:+.0f}mm" if kind == "mm" else f"{drop:+.2f}z")
+        pct = min(max(drop / max(1e-6, need), 0.0), 1.0)
         bar_x = 12 + i * 180
         bar_y = h - 60
         cv2.rectangle(frame, (bar_x, bar_y), (bar_x + 150, bar_y + 18), (60, 60, 60), -1)
         cv2.rectangle(frame, (bar_x, bar_y), (bar_x + int(150 * pct), bar_y + 18), accent, -1)
-        label = f"H{i}: {ratio:+.0%}"
-        cv2.putText(frame, label, (bar_x, bar_y - 5),
+        cv2.putText(frame, f"{side}: {label_val}", (bar_x, bar_y - 5),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.42, accent, 1, cv2.LINE_AA)
 
 
@@ -1312,13 +1326,8 @@ def main():
         print("[tuner] Failed to open camera.", file=sys.stderr)
         sys.exit(1)
 
-    mp_hands = mp.solutions.hands
-    hands = mp_hands.Hands(
-        max_num_hands=2,
-        min_detection_confidence=0.6,
-        min_tracking_confidence=0.5,
-    )
-
+    # POSE-ONLY (July 2026): the Hands model is gone from the runtime; the
+    # tuner mirrors that — one Pose graph, detectors get landmarks=[].
     mp_pose = mp.solutions.pose
     pose = mp_pose.Pose(
         model_complexity=1,
@@ -1347,8 +1356,7 @@ def main():
         # Process on UN-mirrored frame so coords match detector expectations
         raw = cv2.flip(frame, 1)
         raw_rgb = cv2.cvtColor(raw, cv2.COLOR_BGR2RGB)
-        results = hands.process(raw_rgb)
-        lm_list = results.multi_hand_landmarks or []
+        lm_list = []   # legacy Hands slot — always empty (pose-only runtime)
 
         pose_results = pose.process(raw_rgb)
         pose_lm = (pose_results.pose_landmarks.landmark
@@ -1461,20 +1469,6 @@ def main():
 
         elif gtype == "rhythm_bilateral":
             draw_knock_progress(frame, context, live_params, w, h, accent)
-            if lm_list:
-                lm = lm_list[0].landmark
-                wrist_y_raw = lm[0].y
-                hand_top_y = min(lm[i].y for i in range(21))
-                hand_height = max(wrist_y_raw - hand_top_y, 0.05)
-                tf = live_params.get("threshold_fraction", 0.30)
-                wo = live_params.get("wrist_y_offset", 0.0)
-                thresh_y = wrist_y_raw - tf * hand_height + wo
-                ty_px = int(thresh_y * h)
-                cv2.line(frame, (0, ty_px), (w, ty_px), accent, 1, cv2.LINE_AA)
-                offset_str = f"  offset={wo:+.3f}  [W/S]" if wo != 0.0 else "  [W/S to adjust]"
-                cv2.putText(frame, f"knock threshold{offset_str}",
-                            (8, ty_px - 6), cv2.FONT_HERSHEY_SIMPLEX,
-                            0.45, accent, 1, cv2.LINE_AA)
 
         elif gtype == "touch_head":
             draw_touch_head_info(frame, context, live_params, lm_list, pose_lm, w, h, accent)
@@ -1527,41 +1521,36 @@ def main():
         hold_ms = live_params.get("hold_ms") or live_params.get("window_ms")
 
         if gtype == "forward_reach":
-            history = context.get("bbox_area_history", [])
-            threshold = live_params.get("area_growth_threshold", 0.30)
-            if len(history) >= 2:
-                oldest, current = history[0], history[-1]
-                growth = (current / oldest - 1.0) if oldest > 1e-6 else 0.0
-                pct = min(max(growth / threshold, 0.0), 1.0)
-                ok = growth >= threshold
-                state_lines.append((f"area growth: {growth:+.3f}  threshold: {threshold:.2f}  {'FIRE' if ok else '...'}",
-                                     accent if ok else (200, 200, 200)))
-            else:
-                pct = 0.0
-                state_lines.append((f"history: {len(history)}/{live_params.get('window_frames', 12)} frames",
-                                     (120, 120, 120)))
+            hist = context.get("reach_depth_history") or {}
+            pct = 0.0
+            for side, samples in hist.items():
+                if len(samples) < 2:
+                    continue
+                kind = samples[-1][1]
+                same = [v for _, k, v in samples if k == kind]
+                drop = max(same) - samples[-1][2]
+                need = (live_params.get("min_depth_delta_mm", 180) if kind == "mm"
+                        else live_params.get("min_pose_z_delta", 0.18))
+                spct = min(max(drop / max(1e-6, need), 0.0), 1.0)
+                pct = max(pct, spct)
+                unit = "mm" if kind == "mm" else "z"
+                fmt = f"{drop:+.0f}{unit} / {need:.0f}{unit}" if kind == "mm" \
+                    else f"{drop:+.2f}{unit} / {need:.2f}{unit}"
+                state_lines.append((f"{side} approach: {fmt}  {'FIRE' if spct >= 1.0 else '...'}",
+                                     accent if spct >= 1.0 else (200, 200, 200)))
+            if not state_lines:
+                state_lines.append(("waiting for wrist depth/z samples...", (120, 120, 120)))
             fired_flag = context.get("forward_reach_fired", False)
             state_lines.append((f"fired_flag: {'FIRED — reset (R) to retry' if fired_flag else 'waiting'}",
                                  accent if fired_flag else (120, 120, 120)))
-            state_lines.append(("growth progress:", (200, 200, 200)))
+            state_lines.append(("reach progress:", (200, 200, 200)))
 
         elif gtype == "forward_point":
             pct = hold_progress(context, "forward_point_since", hold_ms or 500)
             since = context.get("forward_point_since")
             region_key = live_params.get("target_region", "")
             state_lines.append((f"region: {region_key}", (200, 200, 200)))
-            if lm_list:
-                lm = lm_list[0].landmark
-                wrist, tip, mcp = lm[0], lm[8], lm[5]
-                wrist_tip_sq = (tip.x - wrist.x) ** 2 + (tip.y - wrist.y) ** 2
-                wrist_mcp_sq = (mcp.x - wrist.x) ** 2 + (mcp.y - wrist.y) ** 2
-                extended = wrist_tip_sq > wrist_mcp_sq
-                px, py = 1.0 - tip.x, tip.y
-                state_lines.append((f"index extended: {'YES' if extended else 'NO'}  tip: px={px:.2f} py={py:.2f}",
-                                     accent if extended else (200, 80, 80)))
-            else:
-                state_lines.append(("hands: none — pose+depth fallback active", (255, 200, 80)))
-            # Pose+depth fallback readout (hand aimed at the camera).
+            # Pose+depth readout (arm reaching toward the camera).
             _sampler = context.get("_depth_mm_at")
             if pose_lm is not None:
                 need_mm = live_params.get("min_reach_depth_mm", 300)
@@ -1660,12 +1649,15 @@ def main():
             state_lines.append(("hold progress:", (200, 200, 200)))
 
         elif gtype == "presence_bilateral":
-            hand_count = len(lm_list)
-            state_lines.append((f"hands: {hand_count}", (0,255,80) if hand_count >= 2 else (200,80,80)))
-            if lm_list:
-                for i, hl in enumerate(lm_list[:2]):
-                    wy = hl.landmark[0].y
-                    state_lines.append((f"  wrist[{i}].y = {wy:.3f}", accent))
+            if pose_lm is not None:
+                vis = [pose_lm[i] for i in (15, 16)
+                       if getattr(pose_lm[i], "visibility", 1.0) >= 0.5]
+                state_lines.append((f"pose wrists: {len(vis)}",
+                                    (0, 255, 80) if len(vis) >= 2 else (200, 80, 80)))
+                for i, wl in enumerate(vis[:2]):
+                    state_lines.append((f"  wrist[{i}].y = {wl.y:.3f}", accent))
+            else:
+                state_lines.append(("POSE NONE — cannot fire", (200, 80, 80)))
             pct = hold_progress(context, "bilateral_present_since", hold_ms or 500)
             state_lines.append(("hold progress:", (200, 200, 200)))
 
@@ -1917,11 +1909,9 @@ def main():
         elif gtype == "throw":
             armed = context.get("throw_armed", {})
             require_growth = live_params.get("require_growth", False)
-            min_growth = live_params.get("min_growth_pct", 40) / 100.0
             max_stroke_s = live_params.get("max_stroke_ms", 600) / 1000.0
             pct = 0.0
             if pose_lm:
-                from engines.detectors.rules.throw import _nearest_hand_area
                 now_t = time.monotonic()
                 for side, wrist_i in (("L", 15), ("R", 16)):
                     wr = pose_lm[wrist_i]
@@ -1938,19 +1928,22 @@ def main():
                                              f"(window {elapsed:.2f}s/{max_stroke_s:.2f}s after leaving)",
                                              accent))
                         continue
-                    area = _nearest_hand_area(lm_list, wr.x, wr.y)
-                    if st["area"] and area:
-                        ratio = area / st["area"] - 1.0
-                        pct = max(pct, min(max(ratio, 0.0) / min_growth, 1.0))
+                    # Strict mode readout: depth delta preferred, pose-z fallback.
+                    fus = context.get("_pose_depth")
+                    depth_now = fus.landmark_mm(wrist_i) if fus is not None and fus.available else None
+                    if st.get("depth") is not None and depth_now is not None:
+                        dd = st["depth"] - depth_now
+                        need_mm = live_params.get("min_depth_delta_mm", 250)
+                        pct = max(pct, min(max(dd, 0.0) / need_mm, 1.0))
                         state_lines.append((f"{side}: ARMED {elapsed:.2f}s/{max_stroke_s:.2f}s  "
-                                             f"growth={ratio:+.0%}  need={min_growth:.0%}  [hand bbox]",
+                                             f"depth-delta={dd:+.0f}mm  need={need_mm:.0f}mm  [Gemini]",
                                              accent))
                     else:
                         zd = st["z"] - getattr(wr, "z", 0.0)
                         need_z = live_params.get("min_pose_z_delta", 0.2)
                         pct = max(pct, min(max(zd, 0.0) / need_z, 1.0))
                         state_lines.append((f"{side}: ARMED {elapsed:.2f}s/{max_stroke_s:.2f}s  "
-                                             f"z-delta={zd:+.2f}  need={need_z:.2f}  [pose-z fallback]",
+                                             f"z-delta={zd:+.2f}  need={need_z:.2f}  [pose z]",
                                              accent))
             else:
                 state_lines.append(("POSE NONE — cannot fire", (200, 80, 80)))
@@ -1970,11 +1963,11 @@ def main():
         progress_bar(frame, (10, bar_y), 200, pct, accent,
                      label=f"{int(pct*100)}%")
 
-        # ── Hand-count + profile indicator (top-right) ───────────────────
-        hc = len(lm_list)
-        hc_color = (0, 255, 80) if hc > 0 else (80, 80, 80)
-        cv2.putText(frame, f"hands: {hc}", (w - 130, 28),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, hc_color, 2, cv2.LINE_AA)
+        # ── Pose-presence + profile indicator (top-right) ─────────────────
+        pose_color = (0, 255, 80) if pose_lm is not None else (80, 80, 80)
+        cv2.putText(frame, "pose: OK" if pose_lm is not None else "pose: --",
+                    (w - 130, 28),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, pose_color, 2, cv2.LINE_AA)
         profile_color = (80, 200, 255) if profile_name == "mini_pc_prod" else (160, 160, 255)
         cv2.putText(frame, f"profile: {profile_name}", (w - 220, 72),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.42, profile_color, 1, cv2.LINE_AA)
@@ -2039,7 +2032,6 @@ def main():
             _save_tune_params(GESTURES, profile_path)
 
     cap.release()
-    hands.close()
     pose.close()
     cv2.destroyAllWindows()
 

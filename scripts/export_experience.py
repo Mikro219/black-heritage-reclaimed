@@ -51,6 +51,9 @@ ROOT = Path(__file__).resolve().parent.parent
 ACT_ID = "01"
 ACT_DIRNAME = f"act_{ACT_ID}_experience"
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from capcut_audio import trim_name, render_trim, TRIM_OFFSET_S, TRIM_TAIL_S  # noqa: E402
+
 warnings: list[str] = []
 
 
@@ -504,6 +507,121 @@ def resolve_detect_sound(project: dict, project_path: Path,
 
 
 # ---------------------------------------------------------------------------
+# Block audio -> audio_events (layered stem audio, July 2026)
+# ---------------------------------------------------------------------------
+
+def resolve_sound_file(name: str, project_path: Path) -> Path | None:
+    """Find a sound file by name: next to the project, in assets/, or anywhere
+    under assets/Audio Files/ (the delivered stem drop)."""
+    for candidate in (project_path.parent / name, ROOT / "assets" / name):
+        if candidate.exists():
+            return candidate
+    stems_dir = ROOT / "assets" / "Audio Files"
+    if stems_dir.is_dir():
+        hits = sorted(stems_dir.rglob(name))
+        if hits:
+            return hits[0]
+    return None
+
+
+_duration_cache: dict[str, float | None] = {}
+
+
+def probe_duration(path: Path) -> float | None:
+    """Natural duration via ffprobe (ships with ffmpeg). None if unavailable."""
+    key = str(path)
+    if key in _duration_cache:
+        return _duration_cache[key]
+    ffprobe = shutil.which("ffprobe")
+    dur = None
+    if ffprobe is not None:
+        result = subprocess.run(
+            [ffprobe, "-v", "quiet", "-show_entries", "format=duration",
+             "-of", "csv=p=0", str(path)],
+            capture_output=True, text=True)
+        try:
+            dur = float(result.stdout.strip())
+        except ValueError:
+            dur = None
+    _duration_cache[key] = dur
+    return dur
+
+
+def block_audio_events(block: dict, sounds_by_id: dict, project_path: Path,
+                       pool: Path, ffmpeg: str | None,
+                       rendered: dict[str, Path]) -> list[dict]:
+    """Convert a block's builder audio clips into runtime audio_events, copying
+    or pre-rendering the referenced files into the tree's _audio/ pool.
+
+    Builder clips reference the ORIGINAL file + source_offset_s (the browser
+    preview seeks natively); the runtime plays files whole, so offset/cut clips
+    are trimmed here with ffmpeg — split beds keep one shared render so the
+    mixer's continuity handover can match on the file name."""
+    events = []
+    for clip in block.get("audio", []):
+        sound = sounds_by_id.get(clip.get("sound"))
+        if sound is None:
+            warn(f"block {block.get('name')!r}: audio clip references unknown "
+                 f"sound id {clip.get('sound')!r} — skipped")
+            continue
+        src = resolve_sound_file(sound["name"], project_path)
+        if src is None:
+            warn(f"block {block.get('name')!r}: sound file {sound['name']!r} "
+                 f"not found — clip skipped")
+            continue
+
+        offset = float(clip.get("source_offset_s") or 0.0)
+        dur    = clip.get("duration_s")
+        natural = probe_duration(src)
+        cut = (dur is not None and natural is not None
+               and float(dur) < natural - TRIM_TAIL_S)
+        file_name = src.name
+        if ffmpeg and (offset > TRIM_OFFSET_S or cut):
+            render_dur = float(dur) if dur is not None else \
+                (max(0.05, natural - offset) if natural else 1.0)
+            name = trim_name(src, offset, render_dur, 1.0)
+            out = pool / name
+            if name not in rendered:
+                if out.exists() or render_trim(ffmpeg, src, offset, render_dur,
+                                               1.0, out):
+                    rendered[name] = out
+            if name in rendered:
+                file_name = name
+            else:
+                _pool_copy(src, pool)
+        elif offset > TRIM_OFFSET_S:
+            warn(f"block {block.get('name')!r}: {sound['name']!r} has a source "
+                 f"offset but ffmpeg is missing — plays from the file start")
+            _pool_copy(src, pool)
+        else:
+            _pool_copy(src, pool)
+
+        role = clip.get("role", "sfx")
+        events.append({
+            "file":            file_name,
+            "role":            role,
+            "at_s":            round(float(clip.get("at_s") or 0.0), 3),
+            "duration_s":      (None if dur is None else round(float(dur), 3)),
+            "source_offset_s": round(offset, 3),
+            "gain":            round(float(clip.get("gain", 1.0)), 4),
+            "fade_in_ms":      int(clip.get("fade_in_ms") or 0),
+            "fade_out_ms":     int(clip.get("fade_out_ms") or 0),
+            "sustain":         bool(clip.get("sustain", role != "sfx")),
+            "continues":       bool(clip.get("continues", False)),
+        })
+    events.sort(key=lambda e: e["at_s"])
+    return events
+
+
+def _pool_copy(src: Path, pool: Path) -> None:
+    dst = pool / src.name
+    if dst.exists() and dst.stat().st_size == src.stat().st_size:
+        return
+    pool.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(src, dst)
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -534,6 +652,12 @@ def export(project_path: Path, out_root: Path, do_frames: bool,
         warn("ffmpeg not on PATH (winget install ffmpeg) — writing metadata only")
         do_frames = False
 
+    # Layered stem audio: block audio clips -> per-shot audio_events + _audio pool.
+    audio_ffmpeg = find_ffmpeg()
+    sounds_by_id = {s["id"]: s for s in project.get("sounds", [])}
+    audio_pool   = out_root / "_audio"
+    rendered: dict[str, Path] = {}
+
     seq_shots = []
     for entry in ordered:
         block = entry["block"]
@@ -551,6 +675,12 @@ def export(project_path: Path, out_root: Path, do_frames: bool,
             fork_shot = shot_ids.get(tag["fork_block"])
             if fork_shot:
                 meta["play_if"] = {"shot": fork_shot, "branch": tag["branch"]}
+
+        if block.get("audio"):
+            events = block_audio_events(block, sounds_by_id, project_path,
+                                        audio_pool, audio_ffmpeg, rendered)
+            if events:
+                meta["audio_events"] = events
 
         shot_dir = act_dir / f"shot_{shot_id}"
         shot_dir.mkdir(parents=True, exist_ok=True)
