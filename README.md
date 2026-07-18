@@ -282,7 +282,9 @@ pip install -r requirements.txt
 py -3.12 main.py
 ```
 
-Press `Esc` to exit. `Space` pause/play · `S` skip prologue/tutorial · `F` fullscreen · `D` debug overlay · `K` skeleton panel.
+Press `Esc` to exit. `Space` pause/play · `S` skip prologue/tutorial/epilogue · `F` fullscreen · `D` debug overlay · `K` skeleton panel · `Enter` confirm camera setup.
+
+Voice commands: say **"skip"** during the tutorial, prologue or epilogue to skip that part; say **"ready"** on the camera-setup screen to confirm. The camera-setup screen (`config.json "camera_setup"`) shows the live camera view with the tracked skeleton so the camera can be aimed before the experience starts; when the experience ends it pauses and loops back to the beginning (`config.json "end_loop"`).
 
 ---
 
@@ -295,8 +297,10 @@ engines/
   shot_sequence_player   the runtime spine: shot FSMs, holds, branching
   sequence_loader        scenes/sequence.json + per-shot metadata -> Shot objects
   render_engine          frame playback, hand-icon cursors, pause menu, tutorial cards
-  gesture_engine         camera + MediaPipe thread, detector dispatch, depth fusion
+  gesture_engine         camera + MediaPipe Pose thread (pose-only), detector dispatch, depth fusion
   voice_engine           Vosk keyword spotting + hum/whisper DSP
+  audio_mixer            layered stem audio: looping music/ambience beds +
+                         frame-anchored SFX from per-shot audio_events
   narration_adapter      plays a shot's AL-XX-YYY audio lines
   tutorial_engine        code-rendered calibration/tutorial at start
   event_bus, frame_cache plumbing
@@ -304,7 +308,9 @@ engines/
   detectors/rules/       one file per gesture detector (+ shared hand_pose.py)
 scripts/                 dev tools: gesture_tuner, voice_tuner, build_exe,
                          copy_frames, prepare_hand_icons, rasterize_storyboard,
-                         export_experience (Experience Builder -> scenes tree)
+                         export_experience (Experience Builder -> scenes tree),
+                         capcut_audio (CapCut draft audio -> audio_events),
+                         extract_comp_audio (comp scenes -> voice-line MP3s)
 tools/
   experience_builder/    browser-based flow editor: open an MP4, carve it into
                          blocks, wire choices/merges, drop interaction windows,
@@ -374,7 +380,16 @@ Input is locked during scene transitions to prevent accidental double-triggers.
 
 ## A note on audio
 
-Audio (narration, ambience, SFX) is **deferred** — the project currently has visual animators only. The `audio/` directory and `audio_manager.py` exist as placeholders so audio can be reintroduced without restructuring. Animators are not responsible for audio at this stage. See [`CLAUDE.md`](./CLAUDE.md) for the planned schema.
+Music, ambience and SFX are live (July 2026): each shot's `metadata.json` can
+carry an `audio_events` list — beds loop through interaction holds, SFX are
+frame-anchored one-shots — played by `engines/audio_mixer.py` from the shared
+`scenes/_audio/` pool. The timeline was imported from the CapCut master draft
+with `py -3.12 scripts/capcut_audio.py assets/audio/draft_content.json --apply-scenes`.
+Auntie Liza's voice lines exist as per-comp extractions in `assets/audio/voice_lines/`
+(`py -3.12 scripts/extract_comp_audio.py`) but are not wired into shots yet.
+Narration (Auntie Liza's `AL-XX-YYY` voice lines) is still pending recording;
+it plays on its own channel and needs no audio_events changes when it lands.
+Animators are not responsible for audio. See [`CLAUDE.md`](./CLAUDE.md) for the schema.
 
 ---
 

@@ -1,0 +1,89 @@
+{
+  "shot": "06",
+  "audio_events": [
+    {
+      "file": "Faint_paper_crinkle__#2-1781481059817.mp3",
+      "role": "sfx",
+      "at_s": 1.167,
+      "duration_s": 0.867,
+      "source_offset_s": 0.0,
+      "gain": 2.4676,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "Faint_paper_crinkle__#1-1781481062390.mp3",
+      "role": "sfx",
+      "at_s": 2.033,
+      "duration_s": 1.033,
+      "source_offset_s": 0.0,
+      "gain": 2.4676,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "Faint_paper_crinkle__#1-1781481062390.mp3",
+      "role": "sfx",
+      "at_s": 7.233,
+      "duration_s": 1.033,
+      "source_offset_s": 0.0,
+      "gain": 1.5348,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "freesound_community-going-on-a-forest-road-gravel-and-grass-6404__t0_9433_x0p600212.ogg",
+      "role": "ambience",
+      "at_s": 9.467,
+      "duration_s": 0.533,
+      "source_offset_s": 0.0,
+      "gain": 0.246,
+      "fade_in_ms": 433,
+      "fade_out_ms": 0,
+      "sustain": true,
+      "continues": false
+    },
+    {
+      "file": "freesound_community-night-ambience-59071__t0_14800.ogg",
+      "role": "ambience",
+      "at_s": 9.467,
+      "duration_s": 0.533,
+      "source_offset_s": 0.0,
+      "gain": 1.006,
+      "fade_in_ms": 466,
+      "fade_out_ms": 466,
+      "sustain": true,
+      "continues": false
+    },
+    {
+      "file": "bensound-tenderness__t9600_44300.ogg",
+      "role": "music",
+      "at_s": 9.467,
+      "duration_s": 0.533,
+      "source_offset_s": 9.6,
+      "gain": 0.0634,
+      "fade_in_ms": 1300,
+      "fade_out_ms": 1200,
+      "sustain": true,
+      "continues": false
+    },
+    {
+      "file": "bhr_scene_07.mp3",
+      "role": "vo",
+      "at_s": 9.467,
+      "duration_s": 0.533,
+      "source_offset_s": 0.0,
+      "gain": 0.5495,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    }
+  ]
+}

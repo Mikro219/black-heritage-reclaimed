@@ -1,20 +1,138 @@
 {
-    "shot": "32",
-    "kind": "playback",
-    "assigned_to": "TBD",
-    "audio_lines": [],
-    "audio": "audio.mp3",
-    "_note": "Reach out and hold gesture (AL-06-009 clasp_hand). Point_target_held at centre screen during window.",
-    "interaction": {
-        "tier": "OI",
-        "id": "clasp_hand",
-        "type": "point_target_held",
-        "params": {
-            "region_rect": {"x": 0.30, "y": 0.30, "w": 0.40, "h": 0.40},
-            "hold_ms": 500
-        },
-        "sfx": "detect.mp3",
-        "feedback": "green_flash",
-        "oi_frame_window": [184, 364]
+  "shot": "32",
+  "kind": "playback",
+  "assigned_to": "TBD",
+  "audio_lines": [],
+  "audio": "audio.mp3",
+  "_note": "Reach out and hold gesture (AL-06-009 clasp_hand). Point_target_held at centre screen during window.",
+  "interaction": {
+    "tier": "OI",
+    "id": "clasp_hand",
+    "type": "point_target_held",
+    "params": {
+      "region_rect": {
+        "x": 0.3,
+        "y": 0.3,
+        "w": 0.4,
+        "h": 0.4
+      },
+      "hold_ms": 500
+    },
+    "sfx": "detect.mp3",
+    "feedback": "green_flash",
+    "oi_frame_window": [
+      184,
+      364
+    ]
+  },
+  "audio_events": [
+    {
+      "file": "freesound_community-005033_outside-tone-ambience-51399__t1100_10567.ogg",
+      "role": "ambience",
+      "at_s": 0.0,
+      "duration_s": 3.9,
+      "source_offset_s": 7.767,
+      "gain": 0.0737,
+      "fade_in_ms": 733,
+      "fade_out_ms": 800,
+      "sustain": true,
+      "continues": true
+    },
+    {
+      "file": "bensound-prism__t66367_10567.ogg",
+      "role": "music",
+      "at_s": 0.0,
+      "duration_s": 3.9,
+      "source_offset_s": 73.033,
+      "gain": 0.1026,
+      "fade_in_ms": 1833,
+      "fade_out_ms": 1733,
+      "sustain": true,
+      "continues": true
+    },
+    {
+      "file": "benkirb-shine-6-268910.mp3",
+      "role": "sfx",
+      "at_s": 0.0,
+      "duration_s": 2.533,
+      "source_offset_s": 4.233,
+      "gain": 1.0,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": true
+    },
+    {
+      "file": "MUSCPerc-Cinematic_Sound_Effe-Elevenlabs__t0_1767.ogg",
+      "role": "sfx",
+      "at_s": 12.8,
+      "duration_s": 1.767,
+      "source_offset_s": 0.0,
+      "gain": 0.3557,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "freesound_community-005033_outside-tone-ambience-51399__t11667_6533.ogg",
+      "role": "ambience",
+      "at_s": 14.667,
+      "duration_s": 6.533,
+      "source_offset_s": 11.667,
+      "gain": 0.0737,
+      "fade_in_ms": 833,
+      "fade_out_ms": 1066,
+      "sustain": true,
+      "continues": false
+    },
+    {
+      "file": "bensound-prism__t87700_26733.ogg",
+      "role": "music",
+      "at_s": 14.667,
+      "duration_s": 6.633,
+      "source_offset_s": 87.7,
+      "gain": 0.1441,
+      "fade_in_ms": 2000,
+      "fade_out_ms": 3200,
+      "sustain": true,
+      "continues": false
+    },
+    {
+      "file": "hands_clasping_toget_#4-1781545023046__t700_867.ogg",
+      "role": "sfx",
+      "at_s": 14.667,
+      "duration_s": 0.867,
+      "source_offset_s": 0.7,
+      "gain": 1.0,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "DSGNBram-Cinematic_ambient_at-Elevenlabs.mp3",
+      "role": "sfx",
+      "at_s": 20.767,
+      "duration_s": 0.533,
+      "source_offset_s": 0.0,
+      "gain": 2.2085,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "bhr_scene_33.mp3",
+      "role": "vo",
+      "at_s": 21.2,
+      "duration_s": 0.1,
+      "source_offset_s": 0.0,
+      "gain": 0.5495,
+      "fade_in_ms": 0,
+      "fade_out_ms": 633,
+      "sustain": false,
+      "continues": false
     }
+  ]
 }

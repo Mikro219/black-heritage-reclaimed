@@ -1,21 +1,187 @@
 {
-    "shot": "58",
-    "kind": "playback",
-    "assigned_to": "TBD",
-    "audio_lines": ["AL-10-002"],
-    "audio": "audio.mp3",
-    "play_if": { "shot": "50", "branch": "left" },
-    "_note": "Tumbling Blocks (Scene 10) — PATH A continuation (shot 50 fork chose left/hidden-compartment). Plays only if shot 50 recorded the LEFT branch; otherwise the player skips to shot 59 (Path B). Converges at shot 60. AL-10-002 cup_ear_listen OI. Playback with frame-gated cup-ear OI (non-blocking; frames play straight through). OI window: global 35444-35628 -> local [211, 395]. Shot base global frame = 35234.",
-    "interaction": {
-        "tier": "OI",
-        "id": "cup_ear_listen",
-        "type": "directional_head_or_hand",
-        "params": {
-            "direction": "ear",
-            "hold_ms": 400
-        },
-        "sfx": "detect.mp3",
-        "feedback": "green_flash",
-        "oi_frame_window": [211, 395]
+  "shot": "58",
+  "kind": "playback",
+  "assigned_to": "TBD",
+  "audio_lines": [
+    "AL-10-002"
+  ],
+  "audio": "audio.mp3",
+  "play_if": {
+    "shot": "50",
+    "branch": "left"
+  },
+  "_note": "Tumbling Blocks (Scene 10) \u2014 PATH A continuation (shot 50 fork chose left/hidden-compartment). Plays only if shot 50 recorded the LEFT branch; otherwise the player skips to shot 59 (Path B). Converges at shot 60. AL-10-002 cup_ear_listen OI. Playback with frame-gated cup-ear OI (non-blocking; frames play straight through). OI window: global 35444-35628 -> local [211, 395]. Shot base global frame = 35234.",
+  "interaction": {
+    "tier": "OI",
+    "id": "cup_ear_listen",
+    "type": "directional_head_or_hand",
+    "params": {
+      "direction": "ear",
+      "hold_ms": 400
+    },
+    "sfx": "detect.mp3",
+    "feedback": "green_flash",
+    "oi_frame_window": [
+      211,
+      395
+    ]
+  },
+  "audio_events": [
+    {
+      "file": "bensound-vanishinghope__t0_3967.ogg",
+      "role": "music",
+      "at_s": 0.867,
+      "duration_s": 3.967,
+      "source_offset_s": 0.0,
+      "gain": 0.327,
+      "fade_in_ms": 1366,
+      "fade_out_ms": 0,
+      "sustain": true,
+      "continues": false
+    },
+    {
+      "file": "bhr_scene_58.mp3",
+      "role": "vo",
+      "at_s": 0.867,
+      "duration_s": 2.833,
+      "source_offset_s": 0.0,
+      "gain": 0.2553,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "Creaking_wooden_wago_#4-1781575311654__t0_1933.ogg",
+      "role": "sfx",
+      "at_s": 0.867,
+      "duration_s": 1.933,
+      "source_offset_s": 0.0,
+      "gain": 1.006,
+      "fade_in_ms": 1133,
+      "fade_out_ms": 400,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "GOREMisc-Create_an_intense_ci-Elevenlabs__t12967_2533.ogg",
+      "role": "sfx",
+      "at_s": 2.3,
+      "duration_s": 2.533,
+      "source_offset_s": 12.967,
+      "gain": 0.1026,
+      "fade_in_ms": 2533,
+      "fade_out_ms": 266,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "bhr_scene_59__t0_1133.ogg",
+      "role": "vo",
+      "at_s": 3.7,
+      "duration_s": 1.133,
+      "source_offset_s": 0.0,
+      "gain": 0.5495,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "MUSCPerc-Cinematic_Sound_Effe-Elevenlabs__t0_1833.ogg",
+      "role": "sfx",
+      "at_s": 13.6,
+      "duration_s": 1.833,
+      "source_offset_s": 0.0,
+      "gain": 0.3557,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "bensound-vanishinghope__t14667_9167.ogg",
+      "role": "music",
+      "at_s": 15.533,
+      "duration_s": 8.167,
+      "source_offset_s": 14.667,
+      "gain": 0.327,
+      "fade_in_ms": 1366,
+      "fade_out_ms": 1100,
+      "sustain": true,
+      "continues": false
+    },
+    {
+      "file": "bhr_scene_59__t1133_7912.ogg",
+      "role": "vo",
+      "at_s": 15.533,
+      "duration_s": 7.933,
+      "source_offset_s": 1.133,
+      "gain": 0.5495,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "freesound_community-whistle-from-lips-77154__t1767_2733.ogg",
+      "role": "sfx",
+      "at_s": 15.533,
+      "duration_s": 2.733,
+      "source_offset_s": 1.767,
+      "gain": 0.3263,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "GOREMisc-Create_an_intense_ci-Elevenlabs__t18500_7933.ogg",
+      "role": "sfx",
+      "at_s": 15.533,
+      "duration_s": 7.933,
+      "source_offset_s": 18.5,
+      "gain": 0.1026,
+      "fade_in_ms": 566,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "bhr_scene_60__t0_1233.ogg",
+      "role": "vo",
+      "at_s": 23.467,
+      "duration_s": 0.233,
+      "source_offset_s": 0.0,
+      "gain": 0.5495,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "freesound_community-005033_outside-tone-ambience-51399__t1100_1233.ogg",
+      "role": "sfx",
+      "at_s": 23.467,
+      "duration_s": 0.233,
+      "source_offset_s": 1.1,
+      "gain": 0.0737,
+      "fade_in_ms": 166,
+      "fade_out_ms": 166,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "GOREMisc-Create_an_intense_ci-Elevenlabs__t12967_1233.ogg",
+      "role": "sfx",
+      "at_s": 23.467,
+      "duration_s": 0.233,
+      "source_offset_s": 12.967,
+      "gain": 0.1026,
+      "fade_in_ms": 566,
+      "fade_out_ms": 233,
+      "sustain": false,
+      "continues": false
     }
+  ]
 }

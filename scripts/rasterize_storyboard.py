@@ -1,5 +1,5 @@
 """
-rasterize_storyboard.py — Convert BHR_STORYBOARDS_V4.pdf to per-page JPGs.
+rasterize_storyboard.py — Convert the storyboard PDF to per-page JPGs.
 
 Run once (or re-run with --force to redo):
     python scripts/rasterize_storyboard.py
@@ -33,7 +33,7 @@ except ImportError:
     sys.exit(1)
 
 REPO_ROOT = Path(__file__).parent.parent
-PDF_PATH = REPO_ROOT / "scenes" / "BHR_STORYBOARDS_V4.pdf"
+PDF_PATH = REPO_ROOT / "assets" / "docs" / "BHR_STORYBOARDS_V5.pdf"
 OUT_DIR = REPO_ROOT / "assets" / "storyboard"
 INDEX_PATH = OUT_DIR / "index.json"
 
@@ -121,7 +121,7 @@ def main() -> None:
 
     if not pdf_path.exists():
         print(f"PDF not found: {pdf_path}", file=sys.stderr)
-        print("Expected at scenes/BHR_STORYBOARDS_V4.pdf. Check the path.", file=sys.stderr)
+        print("Expected at assets/docs/BHR_STORYBOARDS_V5.pdf. Check the path.", file=sys.stderr)
         sys.exit(1)
 
     out_dir.mkdir(parents=True, exist_ok=True)

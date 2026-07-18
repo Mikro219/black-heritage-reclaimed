@@ -1,23 +1,119 @@
 {
-    "shot": "06",
-    "kind": "playback",
-    "assigned_to": "elayna",
-    "audio_lines": ["AL-01-007"],
-    "audio": "audio.mp3",
-    "interaction": {
-        "tier": "OI",
-        "id": "raise_hands",
-        "type": "presence_bilateral",
-        "params": { "y_threshold": "shoulder", "hold_ms": 500 },
-        "voice_alternative": {
-            "id": "freedom",
-            "keywords": ["freedom"],
-            "mode": "keyword",
-            "tier": "cg_alternative",
-            "window_ms": 10000
-        },
-        "sfx": "detect.mp3",
-        "feedback": "green_flash",
-        "oi_frame_window": [318, 570]
+  "shot": "06",
+  "kind": "playback",
+  "assigned_to": "elayna",
+  "audio_lines": [
+    "AL-01-007"
+  ],
+  "audio": "audio.mp3",
+  "interaction": {
+    "tier": "OI",
+    "id": "raise_hands",
+    "type": "presence_bilateral",
+    "params": {
+      "y_threshold": "shoulder",
+      "hold_ms": 500
+    },
+    "voice_alternative": {
+      "id": "freedom",
+      "keywords": [
+        "freedom"
+      ],
+      "mode": "keyword",
+      "tier": "cg_alternative",
+      "window_ms": 10000
+    },
+    "sfx": "detect.mp3",
+    "feedback": "green_flash",
+    "oi_frame_window": [
+      318,
+      570
+    ]
+  },
+  "audio_events": [
+    {
+      "file": "brolefilmer-western-theme-by-brolefilmer-123625 (1)__t22000_29533.ogg",
+      "role": "ambience",
+      "at_s": 0.0,
+      "duration_s": 8.633,
+      "source_offset_s": 42.9,
+      "gain": 0.0901,
+      "fade_in_ms": 1266,
+      "fade_out_ms": 1300,
+      "sustain": true,
+      "continues": true
+    },
+    {
+      "file": "bhr_scene_04__t0_8667.ogg",
+      "role": "vo",
+      "at_s": 0.0,
+      "duration_s": 8.633,
+      "source_offset_s": 0.033,
+      "gain": 0.5495,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": true
+    },
+    {
+      "file": "MUSCPerc-afrobeat,_percussive-Elevenlabs (1).mp3",
+      "role": "sfx",
+      "at_s": 9.6,
+      "duration_s": 4.033,
+      "source_offset_s": 0.0,
+      "gain": 1.0,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "MUSCPerc-afrobeat,_percussive-Elevenlabs (1).mp3",
+      "role": "sfx",
+      "at_s": 13.633,
+      "duration_s": 4.033,
+      "source_offset_s": 0.0,
+      "gain": 1.0,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "MUSCPerc-afrobeat,_percussive-Elevenlabs (1)__t0_1967.ogg",
+      "role": "sfx",
+      "at_s": 17.667,
+      "duration_s": 1.967,
+      "source_offset_s": 0.0,
+      "gain": 1.0,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "MUSCPerc-Cinematic_Sound_Effe-Elevenlabs__t0_2467.ogg",
+      "role": "sfx",
+      "at_s": 19.633,
+      "duration_s": 2.0,
+      "source_offset_s": 0.0,
+      "gain": 0.3557,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "brolefilmer-western-theme-by-brolefilmer-123625 (1)__t64333_8800.ogg",
+      "role": "ambience",
+      "at_s": 21.433,
+      "duration_s": 0.2,
+      "source_offset_s": 64.333,
+      "gain": 0.0901,
+      "fade_in_ms": 1233,
+      "fade_out_ms": 1000,
+      "sustain": true,
+      "continues": false
     }
+  ]
 }

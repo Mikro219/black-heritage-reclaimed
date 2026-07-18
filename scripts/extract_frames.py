@@ -3,7 +3,7 @@ extract_frames.py — Extract every frame from the BHR master video.
 
 Usage:
     py -3.12 scripts/extract_frames.py
-    py -3.12 scripts/extract_frames.py --video "assets/BHR Draft 1.mp4"
+    py -3.12 scripts/extract_frames.py --video "assets/video/BHR Draft 1.mp4"
     py -3.12 scripts/extract_frames.py --format jpg --quality 2
     py -3.12 scripts/extract_frames.py --format png
 
@@ -28,7 +28,7 @@ import sys
 from pathlib import Path
 
 ROOT      = Path(__file__).parent.parent
-VIDEO_DEFAULT = ROOT / "assets" / "BHR Draft 1.mp4"
+VIDEO_DEFAULT = ROOT / "assets" / "video" / "BHR Draft 1.mp4"
 OUTPUT_DIR    = ROOT / "final_frames"
 
 

@@ -1,41 +1,489 @@
 {
-    "shot": "24",
-    "kind": "interactive",
-    "assigned_to": "TBD",
-    "audio_lines": [],
-    "audio": "audio.mp3",
-    "_note": "Playback with two non-blocking OI windows (no draws). intro plays, then oi_1/mid/oi_2/outro play straight through; oi_1/oi_2 arm point-at-region OI windows that play detect.mp3 on detection (shot 5 pattern). Both region_rects are placeholders (centred) — tune with debug_overlay on, and confirm the actual OI gesture for each.",
-    "segments": {
-        "intro": [1,   335],
-        "oi_1":  [336, 526],
-        "mid":   [527, 705],
-        "oi_2":  [706, 890],
-        "outro": [891, 1708]
-    },
-    "interaction": {
-        "tier": "OI",
-        "interaction_fsm": {
-            "initial": "oi_1",
-            "states": {
-                "oi_1":  { "segment": "oi_1",  "loop": false,
-                           "oi": { "id": "oi_1", "type": "point_target_held",
-                                   "params": { "hold_ms": 600, "region_rect": { "x": 0.40, "y": 0.36, "w": 0.20, "h": 0.28 } },
-                                   "sfx": "detect.mp3", "feedback": "green_flash" } },
-                "mid":   { "segment": "mid",   "loop": false },
-                "oi_2":  { "segment": "oi_2",  "loop": false,
-                           "oi": { "id": "oi_2", "type": "point_target_held",
-                                   "params": { "hold_ms": 600, "region_rect": { "x": 0.40, "y": 0.36, "w": 0.20, "h": 0.28 } },
-                                   "sfx": "detect.mp3", "feedback": "green_flash" } },
-                "outro": { "segment": "outro", "loop": false }
+  "shot": "24",
+  "kind": "interactive",
+  "assigned_to": "TBD",
+  "audio_lines": [],
+  "audio": "audio.mp3",
+  "_note": "Playback with two non-blocking OI windows (no draws). intro plays, then oi_1/mid/oi_2/outro play straight through; oi_1/oi_2 arm point-at-region OI windows that play detect.mp3 on detection (shot 5 pattern). Both region_rects are placeholders (centred) \u2014 tune with debug_overlay on, and confirm the actual OI gesture for each.",
+  "segments": {
+    "intro": [
+      1,
+      335
+    ],
+    "oi_1": [
+      336,
+      526
+    ],
+    "mid": [
+      527,
+      705
+    ],
+    "oi_2": [
+      706,
+      890
+    ],
+    "outro": [
+      891,
+      1708
+    ]
+  },
+  "interaction": {
+    "tier": "OI",
+    "interaction_fsm": {
+      "initial": "oi_1",
+      "states": {
+        "oi_1": {
+          "segment": "oi_1",
+          "loop": false,
+          "oi": {
+            "id": "oi_1",
+            "type": "point_target_held",
+            "params": {
+              "hold_ms": 600,
+              "region_rect": {
+                "x": 0.4,
+                "y": 0.36,
+                "w": 0.2,
+                "h": 0.28
+              }
             },
-            "transitions": [
-                { "from": "oi_1",  "on": "segment_end", "to": "mid"         },
-                { "from": "mid",   "on": "segment_end", "to": "oi_2"        },
-                { "from": "oi_2",  "on": "segment_end", "to": "outro"       },
-                { "from": "outro", "on": "segment_end", "to": "__advance__" }
-            ],
-            "fallback": { "timeout_s": 30, "on_timeout": "auto_advance" }
+            "sfx": "detect.mp3",
+            "feedback": "green_flash"
+          }
+        },
+        "mid": {
+          "segment": "mid",
+          "loop": false
+        },
+        "oi_2": {
+          "segment": "oi_2",
+          "loop": false,
+          "oi": {
+            "id": "oi_2",
+            "type": "point_target_held",
+            "params": {
+              "hold_ms": 600,
+              "region_rect": {
+                "x": 0.4,
+                "y": 0.36,
+                "w": 0.2,
+                "h": 0.28
+              }
+            },
+            "sfx": "detect.mp3",
+            "feedback": "green_flash"
+          }
+        },
+        "outro": {
+          "segment": "outro",
+          "loop": false
         }
+      },
+      "transitions": [
+        {
+          "from": "oi_1",
+          "on": "segment_end",
+          "to": "mid"
+        },
+        {
+          "from": "mid",
+          "on": "segment_end",
+          "to": "oi_2"
+        },
+        {
+          "from": "oi_2",
+          "on": "segment_end",
+          "to": "outro"
+        },
+        {
+          "from": "outro",
+          "on": "segment_end",
+          "to": "__advance__"
+        }
+      ],
+      "fallback": {
+        "timeout_s": 30,
+        "on_timeout": "auto_advance"
+      }
+    }
+  },
+  "fallback": {
+    "timeout_s": 300,
+    "reprompt_s": [],
+    "on_timeout": "auto_advance"
+  },
+  "audio_events": [
+    {
+      "file": "soul_serenity_sounds-water-noises-241049__t0_34267.ogg",
+      "role": "ambience",
+      "at_s": 0.0,
+      "duration_s": 9.233,
+      "source_offset_s": 25.033,
+      "gain": 0.6082,
+      "fade_in_ms": 2000,
+      "fade_out_ms": 0,
+      "sustain": true,
+      "continues": true
     },
-    "fallback": { "timeout_s": 300, "reprompt_s": [], "on_timeout": "auto_advance" }
+    {
+      "file": "freesound_community-night-ambience-59071__t0_34267.ogg",
+      "role": "ambience",
+      "at_s": 0.0,
+      "duration_s": 9.233,
+      "source_offset_s": 25.033,
+      "gain": 0.5021,
+      "fade_in_ms": 1533,
+      "fade_out_ms": 0,
+      "sustain": true,
+      "continues": true
+    },
+    {
+      "file": "sonican-spiritual-nature-364866 (1)__t0_33900.ogg",
+      "role": "music",
+      "at_s": 0.0,
+      "duration_s": 8.867,
+      "source_offset_s": 25.033,
+      "gain": 0.0815,
+      "fade_in_ms": 1366,
+      "fade_out_ms": 1533,
+      "sustain": true,
+      "continues": true
+    },
+    {
+      "file": "bhr_scene_23.mp3",
+      "role": "vo",
+      "at_s": 0.0,
+      "duration_s": 0.367,
+      "source_offset_s": 25.033,
+      "gain": 0.5495,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": true
+    },
+    {
+      "file": "bhr_scene_24__t0_8867.ogg",
+      "role": "vo",
+      "at_s": 0.367,
+      "duration_s": 8.867,
+      "source_offset_s": 0.0,
+      "gain": 0.5495,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "UIClick-Clean_modern_UI_butt-Elevenlabs (1)__t0_200.ogg",
+      "role": "sfx",
+      "at_s": 3.167,
+      "duration_s": 0.2,
+      "source_offset_s": 0.0,
+      "gain": 1.5263,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "Quick_thudding_shove_#3-1781538938716__t867_867.ogg",
+      "role": "sfx",
+      "at_s": 4.1,
+      "duration_s": 0.867,
+      "source_offset_s": 0.867,
+      "gain": 1.0,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "photos-searching-a-bag-415807__t0_867.ogg",
+      "role": "sfx",
+      "at_s": 4.1,
+      "duration_s": 0.867,
+      "source_offset_s": 0.0,
+      "gain": 0.0074,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "UIClick-Clean_modern_UI_butt-Elevenlabs (1)__t0_200.ogg",
+      "role": "sfx",
+      "at_s": 5.6,
+      "duration_s": 0.2,
+      "source_offset_s": 0.0,
+      "gain": 1.5263,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "DSGNImpt-playful_impact_pop_w-Elevenlabs.mp3",
+      "role": "sfx",
+      "at_s": 7.567,
+      "duration_s": 0.633,
+      "source_offset_s": 0.0,
+      "gain": 0.8596,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "MUSCPerc-Cinematic_Sound_Effe-Elevenlabs__t0_2467.ogg",
+      "role": "sfx",
+      "at_s": 17.7,
+      "duration_s": 2.467,
+      "source_offset_s": 0.0,
+      "gain": 0.3557,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "soul_serenity_sounds-water-noises-241049__t6633_1967.ogg",
+      "role": "ambience",
+      "at_s": 19.333,
+      "duration_s": 1.967,
+      "source_offset_s": 6.633,
+      "gain": 0.6082,
+      "fade_in_ms": 200,
+      "fade_out_ms": 200,
+      "sustain": true,
+      "continues": false
+    },
+    {
+      "file": "freesound_community-night-ambience-59071__t32033_1967.ogg",
+      "role": "ambience",
+      "at_s": 19.333,
+      "duration_s": 1.967,
+      "source_offset_s": 32.033,
+      "gain": 0.5021,
+      "fade_in_ms": 200,
+      "fade_out_ms": 200,
+      "sustain": true,
+      "continues": false
+    },
+    {
+      "file": "sonican-spiritual-nature-364866 (1)__t33900_1967.ogg",
+      "role": "music",
+      "at_s": 19.333,
+      "duration_s": 1.967,
+      "source_offset_s": 33.9,
+      "gain": 0.0815,
+      "fade_in_ms": 300,
+      "fade_out_ms": 300,
+      "sustain": true,
+      "continues": false
+    },
+    {
+      "file": "DSGNBram-Cinematic_ambient_at-Elevenlabs__t0_1667_x1p39.ogg",
+      "role": "sfx",
+      "at_s": 19.333,
+      "duration_s": 1.667,
+      "source_offset_s": 0.0,
+      "gain": 2.4805,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "bhr_scene_24__t8867_1933.ogg",
+      "role": "vo",
+      "at_s": 19.467,
+      "duration_s": 1.933,
+      "source_offset_s": 8.867,
+      "gain": 0.5495,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "MUSCPerc-Cinematic_Sound_Effe-Elevenlabs__t0_1800.ogg",
+      "role": "sfx",
+      "at_s": 30.1,
+      "duration_s": 1.8,
+      "source_offset_s": 0.0,
+      "gain": 0.3557,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "sonican-spiritual-nature-364866 (1)__t35867_36867.ogg",
+      "role": "music",
+      "at_s": 31.867,
+      "duration_s": 25.067,
+      "source_offset_s": 35.867,
+      "gain": 0.0815,
+      "fade_in_ms": 1400,
+      "fade_out_ms": 1500,
+      "sustain": true,
+      "continues": false
+    },
+    {
+      "file": "saboteurcomics-superfast-crunch-405118__t1000_1033.ogg",
+      "role": "sfx",
+      "at_s": 31.867,
+      "duration_s": 1.033,
+      "source_offset_s": 1.0,
+      "gain": 0.2379,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "soul_serenity_sounds-water-noises-241049__t10700_32767.ogg",
+      "role": "ambience",
+      "at_s": 32.133,
+      "duration_s": 24.8,
+      "source_offset_s": 10.7,
+      "gain": 0.6082,
+      "fade_in_ms": 600,
+      "fade_out_ms": 566,
+      "sustain": true,
+      "continues": false
+    },
+    {
+      "file": "freesound_community-night-ambience-59071__t36100_36600.ogg",
+      "role": "ambience",
+      "at_s": 32.133,
+      "duration_s": 24.8,
+      "source_offset_s": 36.1,
+      "gain": 0.5021,
+      "fade_in_ms": 966,
+      "fade_out_ms": 866,
+      "sustain": true,
+      "continues": false
+    },
+    {
+      "file": "bhr_scene_24__t10700_24692.ogg",
+      "role": "vo",
+      "at_s": 32.133,
+      "duration_s": 24.7,
+      "source_offset_s": 10.7,
+      "gain": 0.5495,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "Quick_thudding_shove_#3-1781538938716__t867_867.ogg",
+      "role": "sfx",
+      "at_s": 32.9,
+      "duration_s": 0.867,
+      "source_offset_s": 0.867,
+      "gain": 1.0,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "photos-searching-a-bag-415807__t0_867.ogg",
+      "role": "sfx",
+      "at_s": 32.9,
+      "duration_s": 0.867,
+      "source_offset_s": 0.0,
+      "gain": 0.0074,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "Quick_thudding_shove_#3-1781538938716__t867_867.ogg",
+      "role": "sfx",
+      "at_s": 39.967,
+      "duration_s": 0.867,
+      "source_offset_s": 0.867,
+      "gain": 1.0,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "photos-searching-a-bag-415807__t0_867.ogg",
+      "role": "sfx",
+      "at_s": 39.967,
+      "duration_s": 0.867,
+      "source_offset_s": 0.0,
+      "gain": 0.0074,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "UIClick-Clean_modern_UI_butt-Elevenlabs (1)__t0_200.ogg",
+      "role": "sfx",
+      "at_s": 41.1,
+      "duration_s": 0.2,
+      "source_offset_s": 0.0,
+      "gain": 1.5263,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "Quick_thudding_shove_#3-1781538938716__t867_867.ogg",
+      "role": "sfx",
+      "at_s": 47.2,
+      "duration_s": 0.867,
+      "source_offset_s": 0.867,
+      "gain": 1.0,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "photos-searching-a-bag-415807__t0_867.ogg",
+      "role": "sfx",
+      "at_s": 47.2,
+      "duration_s": 0.867,
+      "source_offset_s": 0.0,
+      "gain": 0.0074,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "benkirb-shine-10-268906__t0_1633.ogg",
+      "role": "sfx",
+      "at_s": 55.2,
+      "duration_s": 1.633,
+      "source_offset_s": 0.0,
+      "gain": 0.6082,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "bhr_scene_25__t0_11900.ogg",
+      "role": "vo",
+      "at_s": 56.833,
+      "duration_s": 0.1,
+      "source_offset_s": 0.0,
+      "gain": 0.5495,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    }
+  ]
 }

@@ -1,23 +1,160 @@
 {
-    "shot": "31",
-    "kind": "playback",
-    "assigned_to": "TBD",
-    "audio_lines": [],
-    "audio": "audio.mp3",
-    "_note": "Three-knock gesture short-short-LONG (AL-06-007). rhythm_bilateral detector.",
-    "interaction": {
-        "tier": "OI",
-        "id": "three_knock",
-        "type": "rhythm_bilateral",
-        "params": {
-            "short_window_ms": 500,
-            "long_min_ms": 400,
-            "long_max_ms": 1400,
-            "threshold_fraction": 0.30,
-            "refractory_ms": 220
-        },
-        "sfx": "detect.mp3",
-        "feedback": "green_flash",
-        "oi_frame_window": [136, 304]
+  "shot": "31",
+  "kind": "playback",
+  "assigned_to": "TBD",
+  "audio_lines": [],
+  "audio": "audio.mp3",
+  "_note": "Three-knock gesture short-short-LONG (AL-06-007). rhythm_bilateral detector.",
+  "interaction": {
+    "tier": "OI",
+    "id": "three_knock",
+    "type": "rhythm_bilateral",
+    "params": {
+      "short_window_ms": 500,
+      "long_min_ms": 400,
+      "long_max_ms": 1400,
+      "threshold_fraction": 0.3,
+      "refractory_ms": 220
+    },
+    "sfx": "detect.mp3",
+    "feedback": "green_flash",
+    "oi_frame_window": [
+      136,
+      304
+    ]
+  },
+  "audio_events": [
+    {
+      "file": "freesound_community-005033_outside-tone-ambience-51399__t30600_8267.ogg",
+      "role": "ambience",
+      "at_s": 0.0,
+      "duration_s": 2.133,
+      "source_offset_s": 36.733,
+      "gain": 0.0737,
+      "fade_in_ms": 500,
+      "fade_out_ms": 0,
+      "sustain": true,
+      "continues": true
+    },
+    {
+      "file": "bensound-prism__t47433_8267.ogg",
+      "role": "music",
+      "at_s": 0.0,
+      "duration_s": 2.133,
+      "source_offset_s": 53.567,
+      "gain": 0.1441,
+      "fade_in_ms": 1500,
+      "fade_out_ms": 1533,
+      "sustain": true,
+      "continues": true
+    },
+    {
+      "file": "WHSH-Soft_3-second_minima-Elevenlabs__t0_2067_x0p39.ogg",
+      "role": "sfx",
+      "at_s": 0.0,
+      "duration_s": 1.3,
+      "source_offset_s": 1.04,
+      "gain": 0.8596,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": true
+    },
+    {
+      "file": "MUSCPerc-Cinematic_Sound_Effe-Elevenlabs__t0_1967.ogg",
+      "role": "sfx",
+      "at_s": 10.7,
+      "duration_s": 1.967,
+      "source_offset_s": 0.0,
+      "gain": 0.3557,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "freesound_community-005033_outside-tone-ambience-51399__t1100_10567.ogg",
+      "role": "ambience",
+      "at_s": 12.8,
+      "duration_s": 6.667,
+      "source_offset_s": 1.1,
+      "gain": 0.0737,
+      "fade_in_ms": 733,
+      "fade_out_ms": 800,
+      "sustain": true,
+      "continues": false
+    },
+    {
+      "file": "bensound-prism__t66367_10567.ogg",
+      "role": "music",
+      "at_s": 12.8,
+      "duration_s": 6.667,
+      "source_offset_s": 66.367,
+      "gain": 0.1026,
+      "fade_in_ms": 1833,
+      "fade_out_ms": 1733,
+      "sustain": true,
+      "continues": false
+    },
+    {
+      "file": "IMG_5032__t900_467.ogg",
+      "role": "vo",
+      "at_s": 12.8,
+      "duration_s": 0.467,
+      "source_offset_s": 0.9,
+      "gain": 1.0,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "IMG_5032__t1367_933.ogg",
+      "role": "vo",
+      "at_s": 13.533,
+      "duration_s": 0.933,
+      "source_offset_s": 1.367,
+      "gain": 1.0,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "IMG_5032__t2300_333.ogg",
+      "role": "vo",
+      "at_s": 14.9,
+      "duration_s": 0.333,
+      "source_offset_s": 2.3,
+      "gain": 1.0,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "benkirb-shine-6-268910.mp3",
+      "role": "sfx",
+      "at_s": 15.233,
+      "duration_s": 4.233,
+      "source_offset_s": 0.0,
+      "gain": 1.0,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "hasin2004-lock-sound-effect-247455.mp3",
+      "role": "sfx",
+      "at_s": 15.4,
+      "duration_s": 3.0,
+      "source_offset_s": 0.0,
+      "gain": 0.7116,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
     }
+  ]
 }

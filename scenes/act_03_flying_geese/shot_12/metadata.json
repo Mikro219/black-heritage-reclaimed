@@ -1,0 +1,125 @@
+{
+  "shot": "12",
+  "audio_events": [
+    {
+      "file": "freesound_community-005033_outside-tone-ambience-51399__t633_14833.ogg",
+      "role": "music",
+      "at_s": 0.0,
+      "duration_s": 0.267,
+      "source_offset_s": 15.2,
+      "gain": 0.0947,
+      "fade_in_ms": 333,
+      "fade_out_ms": 600,
+      "sustain": true,
+      "continues": true
+    },
+    {
+      "file": "Green-Hills-and-Gray-Skies_30ALT_WSR2371701__t0_41433.ogg",
+      "role": "music",
+      "at_s": 0.0,
+      "duration_s": 12.767,
+      "source_offset_s": 14.567,
+      "gain": 0.0963,
+      "fade_in_ms": 1433,
+      "fade_out_ms": 1500,
+      "sustain": true,
+      "continues": true
+    },
+    {
+      "file": "bhr_scene_11.mp3",
+      "role": "vo",
+      "at_s": 0.0,
+      "duration_s": 0.267,
+      "source_offset_s": 14.567,
+      "gain": 0.5495,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": true
+    },
+    {
+      "file": "freesound_community-creasing-paper-92362__t2067_933.ogg",
+      "role": "sfx",
+      "at_s": 0.0,
+      "duration_s": 0.733,
+      "source_offset_s": 2.267,
+      "gain": 1.0,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": true
+    },
+    {
+      "file": "bhr_scene_12.mp3",
+      "role": "vo",
+      "at_s": 0.267,
+      "duration_s": 12.033,
+      "source_offset_s": 0.0,
+      "gain": 0.5495,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "freesound_community-creasing-paper-92362__t3000_1100.ogg",
+      "role": "sfx",
+      "at_s": 11.833,
+      "duration_s": 0.933,
+      "source_offset_s": 3.0,
+      "gain": 1.0,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "bhr_scene_13__t0_14567.ogg",
+      "role": "vo",
+      "at_s": 12.3,
+      "duration_s": 0.467,
+      "source_offset_s": 0.0,
+      "gain": 0.5495,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "freesound_community-geese-fly-by-25581__t0_13833_x0p61.ogg",
+      "role": "ambience",
+      "at_s": 12.333,
+      "duration_s": 0.433,
+      "source_offset_s": 0.0,
+      "gain": 0.3677,
+      "fade_in_ms": 300,
+      "fade_out_ms": 466,
+      "sustain": true,
+      "continues": false
+    },
+    {
+      "file": "freesound_community-005033_outside-tone-ambience-51399__t633_14567.ogg",
+      "role": "music",
+      "at_s": 12.333,
+      "duration_s": 0.433,
+      "source_offset_s": 0.633,
+      "gain": 0.0947,
+      "fade_in_ms": 966,
+      "fade_out_ms": 1033,
+      "sustain": true,
+      "continues": false
+    },
+    {
+      "file": "dragon-studio-dragon-wings-flapping-478385__t0_2333_x2.ogg",
+      "role": "sfx",
+      "at_s": 12.333,
+      "duration_s": 0.433,
+      "source_offset_s": 0.0,
+      "gain": 0.2046,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    }
+  ]
+}

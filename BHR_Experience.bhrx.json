@@ -11,43 +11,705 @@
   ],
   "sounds": [
     {
+      "id": "s46",
+      "name": "AMBFant-stars-Elevenlabs.mp3"
+    },
+    {
+      "id": "s61",
+      "name": "benkirb-shine-10-268906.mp3"
+    },
+    {
+      "id": "s101",
+      "name": "benkirb-shine-5-268908.mp3"
+    },
+    {
+      "id": "s18",
+      "name": "benkirb-shine-6-268910.mp3"
+    },
+    {
+      "id": "s86",
+      "name": "bensound-betterdays.mp3"
+    },
+    {
+      "id": "s70",
+      "name": "bensound-paperback.mp3"
+    },
+    {
+      "id": "s37",
+      "name": "bensound-pianomoment.mp3"
+    },
+    {
+      "id": "s63",
+      "name": "bensound-prism.mp3"
+    },
+    {
+      "id": "s24",
+      "name": "bensound-tenderness.mp3"
+    },
+    {
+      "id": "s90",
+      "name": "bensound-vanishinghope.mp3"
+    },
+    {
+      "id": "s113",
+      "name": "bhr_scene_02.mp3"
+    },
+    {
+      "id": "s114",
+      "name": "bhr_scene_03.mp3"
+    },
+    {
+      "id": "s115",
+      "name": "bhr_scene_04.mp3"
+    },
+    {
+      "id": "s116",
+      "name": "bhr_scene_05.mp3"
+    },
+    {
+      "id": "s117",
+      "name": "bhr_scene_07.mp3"
+    },
+    {
+      "id": "s118",
+      "name": "bhr_scene_08.mp3"
+    },
+    {
+      "id": "s119",
+      "name": "bhr_scene_09-A.mp3"
+    },
+    {
+      "id": "s120",
+      "name": "bhr_scene_09-B.mp3"
+    },
+    {
+      "id": "s121",
+      "name": "bhr_scene_11.mp3"
+    },
+    {
+      "id": "s122",
+      "name": "bhr_scene_12.mp3"
+    },
+    {
+      "id": "s123",
+      "name": "bhr_scene_13.mp3"
+    },
+    {
+      "id": "s124",
+      "name": "bhr_scene_15.mp3"
+    },
+    {
+      "id": "s125",
+      "name": "bhr_scene_16.mp3"
+    },
+    {
+      "id": "s126",
+      "name": "bhr_scene_17.mp3"
+    },
+    {
+      "id": "s127",
+      "name": "bhr_scene_18.mp3"
+    },
+    {
+      "id": "s128",
+      "name": "bhr_scene_19.mp3"
+    },
+    {
+      "id": "s129",
+      "name": "bhr_scene_20.mp3"
+    },
+    {
+      "id": "s130",
+      "name": "bhr_scene_21.mp3"
+    },
+    {
+      "id": "s131",
+      "name": "bhr_scene_23.mp3"
+    },
+    {
+      "id": "s132",
+      "name": "bhr_scene_24.mp3"
+    },
+    {
+      "id": "s133",
+      "name": "bhr_scene_25.mp3"
+    },
+    {
+      "id": "s134",
+      "name": "bhr_scene_26.mp3"
+    },
+    {
+      "id": "s135",
+      "name": "bhr_scene_27.mp3"
+    },
+    {
+      "id": "s137",
+      "name": "bhr_scene_33.mp3"
+    },
+    {
+      "id": "s138",
+      "name": "bhr_scene_35.mp3"
+    },
+    {
+      "id": "s139",
+      "name": "bhr_scene_36.mp3"
+    },
+    {
+      "id": "s140",
+      "name": "bhr_scene_38.mp3"
+    },
+    {
+      "id": "s141",
+      "name": "bhr_scene_39.mp3"
+    },
+    {
+      "id": "s142",
+      "name": "bhr_scene_40.mp3"
+    },
+    {
+      "id": "s143",
+      "name": "bhr_scene_42.mp3"
+    },
+    {
+      "id": "s144",
+      "name": "bhr_scene_44.mp3"
+    },
+    {
+      "id": "s145",
+      "name": "bhr_scene_45.mp3"
+    },
+    {
+      "id": "s146",
+      "name": "bhr_scene_46.mp3"
+    },
+    {
+      "id": "s147",
+      "name": "bhr_scene_47.mp3"
+    },
+    {
+      "id": "s148",
+      "name": "bhr_scene_48.mp3"
+    },
+    {
+      "id": "s149",
+      "name": "bhr_scene_50.mp3"
+    },
+    {
+      "id": "s150",
+      "name": "bhr_scene_51.mp3"
+    },
+    {
+      "id": "s151",
+      "name": "bhr_scene_52.mp3"
+    },
+    {
+      "id": "s152",
+      "name": "bhr_scene_54.mp3"
+    },
+    {
+      "id": "s153",
+      "name": "bhr_scene_56.mp3"
+    },
+    {
+      "id": "s154",
+      "name": "bhr_scene_58.mp3"
+    },
+    {
+      "id": "s155",
+      "name": "bhr_scene_59.mp3"
+    },
+    {
+      "id": "s156",
+      "name": "bhr_scene_60.mp3"
+    },
+    {
+      "id": "s157",
+      "name": "bhr_scene_61.mp3"
+    },
+    {
+      "id": "s158",
+      "name": "bhr_scene_62.mp3"
+    },
+    {
+      "id": "s159",
+      "name": "bhr_scene_63.mp3"
+    },
+    {
+      "id": "s160",
+      "name": "bhr_scene_65.mp3"
+    },
+    {
+      "id": "s161",
+      "name": "bhr_scene_66.mp3"
+    },
+    {
+      "id": "s162",
+      "name": "bhr_scene_67.mp3"
+    },
+    {
+      "id": "s163",
+      "name": "bhr_scene_68.mp3"
+    },
+    {
+      "id": "s164",
+      "name": "bhr_scene_69.mp3"
+    },
+    {
+      "id": "s165",
+      "name": "bhr_scene_70.mp3"
+    },
+    {
+      "id": "s166",
+      "name": "bhr_scene_71.mp3"
+    },
+    {
+      "id": "s167",
+      "name": "bhr_scene_72.mp3"
+    },
+    {
+      "id": "s168",
+      "name": "bhr_scene_74.mp3"
+    },
+    {
+      "id": "s169",
+      "name": "bhr_scene_75.mp3"
+    },
+    {
+      "id": "s170",
+      "name": "bhr_scene_76.mp3"
+    },
+    {
+      "id": "s171",
+      "name": "bhr_scene_77.mp3"
+    },
+    {
+      "id": "s5",
+      "name": "brolefilmer-western-theme-by-brolefilmer-123625 (1).mp3"
+    },
+    {
+      "id": "s78",
+      "name": "Caution-Is-Required_60_WSR3773801.mp3"
+    },
+    {
+      "id": "s89",
+      "name": "Creaking_wooden_wago_#4-1781575311654.mp3"
+    },
+    {
+      "id": "s82",
+      "name": "deep_male_mumbling_i_#2-1781571557704.mp3"
+    },
+    {
+      "id": "s107",
+      "name": "dennish18-small-waves-onto-the-sand-143040.mp3"
+    },
+    {
       "id": "s1",
       "name": "detect.mp3"
+    },
+    {
+      "id": "s28",
+      "name": "dragon-studio-dragon-wings-flapping-478385.mp3"
+    },
+    {
+      "id": "s106",
+      "name": "dragon-studio-heavy-boulder-thud-515257.mp3"
+    },
+    {
+      "id": "s15",
+      "name": "dragon-studio-opening-door-450444.mp3"
+    },
+    {
+      "id": "s109",
+      "name": "dragon-studio-wooden-walls-creaking-474057.mp3"
+    },
+    {
+      "id": "s98",
+      "name": "DSGNBass-\u201cSlow,_deep_heartbea-Elevenlabs.mp3"
+    },
+    {
+      "id": "s96",
+      "name": "DSGNBoom-boom_swoosh-Elevenlabs.mp3"
+    },
+    {
+      "id": "s103",
+      "name": "DSGNBram-Cinematic_ambient_at-Elevenlabs (1).mp3"
+    },
+    {
+      "id": "s59",
+      "name": "DSGNBram-Cinematic_ambient_at-Elevenlabs.mp3"
+    },
+    {
+      "id": "s52",
+      "name": "DSGNEthr-Create_ultra-realist-Elevenlabs.mp3"
+    },
+    {
+      "id": "s58",
+      "name": "DSGNImpt-playful_impact_pop_w-Elevenlabs.mp3"
+    },
+    {
+      "id": "s21",
+      "name": "Faint_paper_crinkle__#1-1781481062390.mp3"
+    },
+    {
+      "id": "s20",
+      "name": "Faint_paper_crinkle__#2-1781481059817.mp3"
+    },
+    {
+      "id": "s71",
+      "name": "FEETAnml-Single_woolly_mammot-Elevenlabs.mp3"
+    },
+    {
+      "id": "s75",
+      "name": "FEETAnml-Slow,_heavy_footstep-Elevenlabs.mp3"
+    },
+    {
+      "id": "s9",
+      "name": "FEETHmn-Slow,_dragging_foots-Elevenlabs.mp3"
+    },
+    {
+      "id": "s42",
+      "name": "Follow the Drinkin' Gourd Karaoke Key of Dm - R. Smith Music (128k).mp3"
+    },
+    {
+      "id": "s51",
+      "name": "Four_ascending_cryst_#3-1781538060905.mp3"
+    },
+    {
+      "id": "s30",
+      "name": "freesound_community-005033_outside-tone-ambience-51399.mp3"
+    },
+    {
+      "id": "s12",
+      "name": "freesound_community-046940_water-slosh-in-metal-bottle-64120.mp3"
+    },
+    {
+      "id": "s14",
+      "name": "freesound_community-075698_drink-and-gulp-48263.mp3"
+    },
+    {
+      "id": "s112",
+      "name": "freesound_community-beach-ambiance-16328.mp3"
+    },
+    {
+      "id": "s40",
+      "name": "freesound_community-cloth-rustle-1-30053.mp3"
+    },
+    {
+      "id": "s69",
+      "name": "freesound_community-cloth-rustle-3-69380.mp3"
+    },
+    {
+      "id": "s85",
+      "name": "freesound_community-concrete-footsteps-6752.mp3"
+    },
+    {
+      "id": "s2",
+      "name": "freesound_community-crackling-fire-14759.mp3"
+    },
+    {
+      "id": "s25",
+      "name": "freesound_community-creasing-paper-92362.mp3"
+    },
+    {
+      "id": "s47",
+      "name": "freesound_community-filling-glass-various-sounds-68575.mp3"
+    },
+    {
+      "id": "s26",
+      "name": "freesound_community-foley-pat-on-the-jacket-60780.mp3"
+    },
+    {
+      "id": "s110",
+      "name": "freesound_community-footsteps-in-wet-coarse-sand-63970.mp3"
+    },
+    {
+      "id": "s34",
+      "name": "freesound_community-geese-fly-by-25581.mp3"
+    },
+    {
+      "id": "s29",
+      "name": "freesound_community-geese-honking-28995.mp3"
+    },
+    {
+      "id": "s22",
+      "name": "freesound_community-going-on-a-forest-road-gravel-and-grass-6404.mp3"
+    },
+    {
+      "id": "s87",
+      "name": "freesound_community-horse-with-old-cart-27042.mp3"
+    },
+    {
+      "id": "s6",
+      "name": "freesound_community-indoor-footsteps-6385.mp3"
+    },
+    {
+      "id": "s84",
+      "name": "freesound_community-item-equip-6904.mp3"
+    },
+    {
+      "id": "s4",
+      "name": "freesound_community-lighting-a-fire-14421.mp3"
+    },
+    {
+      "id": "s80",
+      "name": "freesound_community-marching-loop-32908.mp3"
+    },
+    {
+      "id": "s102",
+      "name": "freesound_community-metal-chain-7056.mp3"
+    },
+    {
+      "id": "s23",
+      "name": "freesound_community-night-ambience-59071.mp3"
+    },
+    {
+      "id": "s108",
+      "name": "freesound_community-oarsmanship_ss_1_hq-60613.mp3"
+    },
+    {
+      "id": "s10",
+      "name": "freesound_community-shirt-clothing-movement-6869.mp3"
+    },
+    {
+      "id": "s111",
+      "name": "freesound_community-summer-dawn-birds-phoenix-arizona-57353.mp3"
+    },
+    {
+      "id": "s32",
+      "name": "freesound_community-walking-through-grass-80308.mp3"
+    },
+    {
+      "id": "s11",
+      "name": "freesound_community-water-splash-102492.mp3"
+    },
+    {
+      "id": "s92",
+      "name": "freesound_community-whistle-from-lips-77154.mp3"
+    },
+    {
+      "id": "s91",
+      "name": "GOREMisc-Create_an_intense_ci-Elevenlabs.mp3"
+    },
+    {
+      "id": "s31",
+      "name": "Green-Hills-and-Gray-Skies_30ALT_WSR2371701.mp3"
+    },
+    {
+      "id": "s68",
+      "name": "hands_clasping_toget_#4-1781545023046.mp3"
+    },
+    {
+      "id": "s67",
+      "name": "hasin2004-lock-sound-effect-247455.mp3"
+    },
+    {
+      "id": "s136",
+      "name": "IMG_5032.mov"
+    },
+    {
+      "id": "s43",
+      "name": "lucas_lesc-impact-clothes-308657.mp3"
+    },
+    {
+      "id": "s95",
+      "name": "MAGEvil-Quiet_cursed_weapon_-Elevenlabs.mp3"
+    },
+    {
+      "id": "s48",
+      "name": "Magical_spawn_sound__#2-1781503266734.mp3"
+    },
+    {
+      "id": "s3",
+      "name": "masirez-match-strike-and-ignition-sound-scratching-and-flame-burst-298801.mp3"
+    },
+    {
+      "id": "s38",
+      "name": "Metal_lantern_being__#4-1781322552504.mp3"
+    },
+    {
+      "id": "s93",
+      "name": "MUSCInst-Dark_epic_orchestral-Elevenlabs.mp3"
+    },
+    {
+      "id": "s17",
+      "name": "MUSCPerc-afrobeat,_percussive-Elevenlabs (1).mp3"
+    },
+    {
+      "id": "s13",
+      "name": "MUSCPerc-Cinematic_Sound_Effe-Elevenlabs.mp3"
+    },
+    {
+      "id": "s81",
+      "name": "MUSCStr-Dark_villain_suspens-Elevenlabs.mp3"
+    },
+    {
+      "id": "s35",
+      "name": "musicholder-woosh-260275.mp3"
+    },
+    {
+      "id": "s57",
+      "name": "photos-searching-a-bag-415807.mp3"
+    },
+    {
+      "id": "s56",
+      "name": "Quick_thudding_shove_#3-1781538938716.mp3"
+    },
+    {
+      "id": "s54",
+      "name": "ribhavagrawal-fast-woosh-230497.mp3"
+    },
+    {
+      "id": "s60",
+      "name": "saboteurcomics-superfast-crunch-405118.mp3"
+    },
+    {
+      "id": "s41",
+      "name": "SCIShip-A_soft,_shimmering_s-Elevenlabs.mp3"
+    },
+    {
+      "id": "s62",
+      "name": "slight_clothes_rustl_#3-1781400466484.mp3"
+    },
+    {
+      "id": "s88",
+      "name": "Slow,_heavy_draft_ho_#3-1781575343603.mp3"
+    },
+    {
+      "id": "s100",
+      "name": "Soft-Wonder_60_AM09028.mp3"
+    },
+    {
+      "id": "s33",
+      "name": "Soft_fabric_rustle_a_#3-1781317999571.mp3"
+    },
+    {
+      "id": "s39",
+      "name": "Soft_metallic_resona_#4-1781322560236.mp3"
+    },
+    {
+      "id": "s53",
+      "name": "sonican-spiritual-nature-364866 (1).mp3"
+    },
+    {
+      "id": "s36",
+      "name": "soul_serenity_sounds-water-noises-241049.mp3"
+    },
+    {
+      "id": "s99",
+      "name": "soundsforyou-birds-singing-calm-river-nature-ambient-sound-127411.mp3"
+    },
+    {
+      "id": "s97",
+      "name": "spinopel-running-on-dirt-road-345729.mp3"
+    },
+    {
+      "id": "s16",
+      "name": "stereogenicstudio-swish-swoosh-woosh-sfx-17-357183.mp3"
+    },
+    {
+      "id": "s8",
+      "name": "swinging_a_brass_lan_#3-1781041236333.mp3"
+    },
+    {
+      "id": "s7",
+      "name": "swinging_a_brass_lan_#4-1781041236333.mp3"
+    },
+    {
+      "id": "s27",
+      "name": "UIAlert-Hybrid_Apple_Pay_+_T-Elevenlabs.mp3"
+    },
+    {
+      "id": "s72",
+      "name": "UIAlert-Soft_retro_computer_-Elevenlabs.mp3"
+    },
+    {
+      "id": "s77",
+      "name": "UIAlert-wrong_button_sound,_-Elevenlabs.mp3"
+    },
+    {
+      "id": "s44",
+      "name": "UIBeep-Create_a_very_short_-Elevenlabs.mp3"
+    },
+    {
+      "id": "s76",
+      "name": "UIClick-Clean_modern_and_pre-Elevenlabs.mp3"
+    },
+    {
+      "id": "s55",
+      "name": "UIClick-Clean_modern_UI_butt-Elevenlabs (1).mp3"
+    },
+    {
+      "id": "s50",
+      "name": "UIClick-Create_a_regular_in--Elevenlabs.mp3"
+    },
+    {
+      "id": "s74",
+      "name": "UIClick-soft_mobile_UI_tap_s-Elevenlabs.mp3"
+    },
+    {
+      "id": "s45",
+      "name": "UIMisc-A_short_UI_interface-Elevenlabs.mp3"
+    },
+    {
+      "id": "s19",
+      "name": "UIMisc-Cute_welcome_sound,_-Elevenlabs.mp3"
+    },
+    {
+      "id": "s49",
+      "name": "UIMvmt-Minimalist_slide_tra-Elevenlabs.mp3"
+    },
+    {
+      "id": "s73",
+      "name": "UIMvmt-Soft_UI_hover_sound.-Elevenlabs.mp3"
+    },
+    {
+      "id": "s79",
+      "name": "Village _ DD_TTRPG Ambience _ 1 Hour.mp3"
+    },
+    {
+      "id": "s105",
+      "name": "WATRWave-Short_harbor_sound_e-Elevenlabs.mp3"
+    },
+    {
+      "id": "s104",
+      "name": "WHSH-Cinematic_high-quali-Elevenlabs.mp3"
+    },
+    {
+      "id": "s83",
+      "name": "WHSH-Dark_cinematic_revea-Elevenlabs.mp3"
+    },
+    {
+      "id": "s65",
+      "name": "WHSH-Deep_cinematic_bass_-Elevenlabs.mp3"
+    },
+    {
+      "id": "s66",
+      "name": "WHSH-Soft_3-second_minima-Elevenlabs.mp3"
+    },
+    {
+      "id": "s94",
+      "name": "WHSH-zoom_in_whoosh-Elevenlabs.mp3"
+    },
+    {
+      "id": "s64",
+      "name": "WHSH-zoom_out_woosh-Elevenlabs.mp3"
     }
   ],
   "settings": {
     "global_detect_sound": "s1"
   },
-  "start": "b_01",
+  "start": "b_stretch_1",
   "blocks": [
     {
-      "id": "b_01",
+      "id": "b_stretch_1",
       "type": "playback",
-      "name": "01 · Prologue",
+      "name": "01\u201308 \u00b7 Prologue \u2192 Crossroads",
       "media": "m1",
       "range_s": [
         0,
-        172.333
+        304.933
       ],
-      "pos": [
-        60,
-        340
-      ],
-      "windows": []
-    },
-    {
-      "id": "b_02",
-      "type": "playback",
-      "name": "02 · Quilt Awakens",
-      "media": "m1",
-      "range_s": [
-        172.333,
-        200.6
-      ],
-      "pos": [
-        310,
-        340
-      ],
+      "master_audio": true,
       "windows": [
         {
           "id": "w_02_oi",
@@ -64,40 +726,9 @@
             "w": 0.5332956926919944,
             "h": 0.4394281414597442
           },
-          "appears_s": 12.63,
+          "appears_s": 184.96,
           "duration_s": 5.2
-        }
-      ]
-    },
-    {
-      "id": "b_03",
-      "type": "playback",
-      "name": "03 · Quilt Awakens",
-      "media": "m1",
-      "range_s": [
-        200.6,
-        213.433
-      ],
-      "pos": [
-        560,
-        340
-      ],
-      "windows": []
-    },
-    {
-      "id": "b_04",
-      "type": "playback",
-      "name": "04 · Quilt Awakens",
-      "media": "m1",
-      "range_s": [
-        213.433,
-        235.067
-      ],
-      "pos": [
-        810,
-        340
-      ],
-      "windows": [
+        },
         {
           "id": "w_04_oi",
           "label": "raise_hands",
@@ -107,25 +738,9 @@
             "hold_ms": 500
           },
           "region": null,
-          "appears_s": 10.57,
+          "appears_s": 224.0,
           "duration_s": 8.43
-        }
-      ]
-    },
-    {
-      "id": "b_05",
-      "type": "playback",
-      "name": "05 · Quilt Awakens",
-      "media": "m1",
-      "range_s": [
-        235.067,
-        261.867
-      ],
-      "pos": [
-        1060,
-        340
-      ],
-      "windows": [
+        },
         {
           "id": "w_05_oi",
           "label": "point_quilt_block",
@@ -140,60 +755,19 @@
             "w": 0.20993227267875336,
             "h": 0.3551542513167795
           },
-          "appears_s": 10.83,
+          "appears_s": 245.9,
           "duration_s": 6.03
         }
+      ],
+      "pos": [
+        80,
+        210
       ]
-    },
-    {
-      "id": "b_06",
-      "type": "playback",
-      "name": "06 · Crossroads",
-      "media": "m1",
-      "range_s": [
-        261.867,
-        271.867
-      ],
-      "pos": [
-        1310,
-        340
-      ],
-      "windows": []
-    },
-    {
-      "id": "b_07",
-      "type": "playback",
-      "name": "07 · Crossroads",
-      "media": "m1",
-      "range_s": [
-        271.867,
-        285.8
-      ],
-      "pos": [
-        1560,
-        340
-      ],
-      "windows": []
-    },
-    {
-      "id": "b_08",
-      "type": "playback",
-      "name": "08 · Crossroads",
-      "media": "m1",
-      "range_s": [
-        285.8,
-        304.933
-      ],
-      "pos": [
-        1810,
-        340
-      ],
-      "windows": []
     },
     {
       "id": "b_09",
       "type": "choice",
-      "name": "09 · Crossroads",
+      "name": "09 \u00b7 Crossroads",
       "media": "m1",
       "range_s": [
         304.933,
@@ -273,7 +847,7 @@
     {
       "id": "b_09_left",
       "type": "playback",
-      "name": "09L · confirm_left",
+      "name": "09L \u00b7 confirm_left",
       "media": "m1",
       "range_s": [
         336.033,
@@ -288,7 +862,7 @@
     {
       "id": "b_09_right",
       "type": "playback",
-      "name": "09R · confirm_right",
+      "name": "09R \u00b7 confirm_right",
       "media": "m1",
       "range_s": [
         352.033,
@@ -301,63 +875,15 @@
       "windows": []
     },
     {
-      "id": "b_10",
+      "id": "b_stretch_2",
       "type": "playback",
-      "name": "10 · Flying Geese",
+      "name": "10\u201318 \u00b7 Flying Geese \u2192 North Star",
       "media": "m1",
       "range_s": [
         359,
-        367.933
+        489.2
       ],
-      "pos": [
-        2560,
-        340
-      ],
-      "windows": []
-    },
-    {
-      "id": "b_11",
-      "type": "playback",
-      "name": "11 · Flying Geese",
-      "media": "m1",
-      "range_s": [
-        367.933,
-        383.133
-      ],
-      "pos": [
-        2810,
-        340
-      ],
-      "windows": []
-    },
-    {
-      "id": "b_12",
-      "type": "playback",
-      "name": "12 · Flying Geese",
-      "media": "m1",
-      "range_s": [
-        383.133,
-        395.9
-      ],
-      "pos": [
-        3060,
-        340
-      ],
-      "windows": []
-    },
-    {
-      "id": "b_13",
-      "type": "playback",
-      "name": "13 · Flying Geese",
-      "media": "m1",
-      "range_s": [
-        395.9,
-        435.267
-      ],
-      "pos": [
-        3310,
-        340
-      ],
+      "master_audio": true,
       "windows": [
         {
           "id": "w_13_oi",
@@ -378,90 +904,19 @@
             "w": 1,
             "h": 0.28
           },
-          "appears_s": 16,
+          "appears_s": 52.9,
           "duration_s": 7.9
         }
+      ],
+      "pos": [
+        1080,
+        210
       ]
-    },
-    {
-      "id": "b_14",
-      "type": "playback",
-      "name": "14 · North Star",
-      "media": "m1",
-      "range_s": [
-        435.267,
-        445.2
-      ],
-      "pos": [
-        3560,
-        340
-      ],
-      "windows": []
-    },
-    {
-      "id": "b_15",
-      "type": "playback",
-      "name": "15 · North Star",
-      "media": "m1",
-      "range_s": [
-        445.2,
-        455.667
-      ],
-      "pos": [
-        3810,
-        340
-      ],
-      "windows": []
-    },
-    {
-      "id": "b_16",
-      "type": "playback",
-      "name": "16 · North Star",
-      "media": "m1",
-      "range_s": [
-        455.667,
-        473.4
-      ],
-      "pos": [
-        4060,
-        340
-      ],
-      "windows": []
-    },
-    {
-      "id": "b_17",
-      "type": "playback",
-      "name": "17 · North Star",
-      "media": "m1",
-      "range_s": [
-        473.4,
-        483.333
-      ],
-      "pos": [
-        4310,
-        340
-      ],
-      "windows": []
-    },
-    {
-      "id": "b_18",
-      "type": "playback",
-      "name": "18 · North Star",
-      "media": "m1",
-      "range_s": [
-        483.333,
-        489.2
-      ],
-      "pos": [
-        4560,
-        340
-      ],
-      "windows": []
     },
     {
       "id": "b_19",
       "type": "playback",
-      "name": "19 · North Star (draw chain)",
+      "name": "19 \u00b7 North Star (draw chain)",
       "media": "m1",
       "range_s": [
         489.167,
@@ -549,12 +1004,313 @@
           "appears_s": 46.2,
           "duration_s": 2
         }
+      ],
+      "audio": [
+        {
+          "id": "a178",
+          "sound": "s42",
+          "at_s": 0.0,
+          "duration_s": 5.0,
+          "source_offset_s": 17.5,
+          "gain": 0.1948,
+          "fade_in_ms": 3400,
+          "fade_out_ms": 1333,
+          "sustain": false,
+          "continues": true,
+          "role": "sfx"
+        },
+        {
+          "id": "a179",
+          "sound": "s23",
+          "at_s": 0.0,
+          "duration_s": 5.0,
+          "source_offset_s": 0.234,
+          "gain": 0.5779,
+          "fade_in_ms": 466,
+          "fade_out_ms": 400,
+          "sustain": true,
+          "continues": true,
+          "role": "ambience"
+        },
+        {
+          "id": "a180",
+          "sound": "s128",
+          "at_s": 0.0,
+          "duration_s": 5.0,
+          "source_offset_s": 0.234,
+          "gain": 0.5495,
+          "fade_in_ms": 0,
+          "fade_out_ms": 0,
+          "sustain": false,
+          "continues": true,
+          "role": "vo"
+        },
+        {
+          "id": "a181",
+          "sound": "s13",
+          "at_s": 13.8,
+          "duration_s": 1.733,
+          "source_offset_s": 0.0,
+          "gain": 0.3557,
+          "fade_in_ms": 0,
+          "fade_out_ms": 0,
+          "sustain": false,
+          "continues": false,
+          "role": "sfx"
+        },
+        {
+          "id": "a182",
+          "sound": "s37",
+          "at_s": 15.533,
+          "duration_s": 13.333,
+          "source_offset_s": 49.367,
+          "gain": 0.0694,
+          "fade_in_ms": 1766,
+          "fade_out_ms": 1766,
+          "sustain": true,
+          "continues": false,
+          "role": "ambience"
+        },
+        {
+          "id": "a183",
+          "sound": "s23",
+          "at_s": 15.533,
+          "duration_s": 13.333,
+          "source_offset_s": 5.333,
+          "gain": 0.5779,
+          "fade_in_ms": 933,
+          "fade_out_ms": 966,
+          "sustain": false,
+          "continues": false,
+          "role": "sfx"
+        },
+        {
+          "id": "a184",
+          "sound": "s44",
+          "at_s": 15.633,
+          "duration_s": 1.033,
+          "source_offset_s": 0.0,
+          "gain": 1.0,
+          "fade_in_ms": 0,
+          "fade_out_ms": 0,
+          "sustain": false,
+          "continues": false,
+          "role": "sfx"
+        },
+        {
+          "id": "a185",
+          "sound": "s44",
+          "at_s": 19.233,
+          "duration_s": 0.933,
+          "source_offset_s": 0.0,
+          "gain": 1.0,
+          "fade_in_ms": 0,
+          "fade_out_ms": 0,
+          "sustain": false,
+          "continues": false,
+          "role": "sfx"
+        },
+        {
+          "id": "a186",
+          "sound": "s44",
+          "at_s": 22.733,
+          "duration_s": 0.867,
+          "source_offset_s": 0.0,
+          "gain": 1.0,
+          "fade_in_ms": 0,
+          "fade_out_ms": 0,
+          "sustain": false,
+          "continues": false,
+          "role": "sfx"
+        },
+        {
+          "id": "a187",
+          "sound": "s44",
+          "at_s": 26.6,
+          "duration_s": 0.8,
+          "source_offset_s": 0.0,
+          "gain": 1.0,
+          "fade_in_ms": 0,
+          "fade_out_ms": 0,
+          "sustain": false,
+          "continues": false,
+          "role": "sfx"
+        },
+        {
+          "id": "a188",
+          "sound": "s45",
+          "at_s": 27.4,
+          "duration_s": 1.467,
+          "source_offset_s": 0.0,
+          "gain": 0.2807,
+          "fade_in_ms": 0,
+          "fade_out_ms": 0,
+          "sustain": false,
+          "continues": false,
+          "role": "sfx"
+        },
+        {
+          "id": "a189",
+          "sound": "s13",
+          "at_s": 38.066,
+          "duration_s": 2.467,
+          "source_offset_s": 0.0,
+          "gain": 0.3557,
+          "fade_in_ms": 0,
+          "fade_out_ms": 0,
+          "sustain": false,
+          "continues": false,
+          "role": "sfx"
+        },
+        {
+          "id": "a190",
+          "sound": "s23",
+          "at_s": 39.5,
+          "duration_s": 16.7,
+          "source_offset_s": 18.567,
+          "gain": 0.5779,
+          "fade_in_ms": 800,
+          "fade_out_ms": 833,
+          "sustain": true,
+          "continues": false,
+          "role": "ambience"
+        },
+        {
+          "id": "a191",
+          "sound": "s37",
+          "at_s": 39.5,
+          "duration_s": 16.7,
+          "source_offset_s": 62.7,
+          "gain": 0.0708,
+          "fade_in_ms": 1966,
+          "fade_out_ms": 1866,
+          "sustain": true,
+          "continues": false,
+          "role": "ambience"
+        },
+        {
+          "id": "a192",
+          "sound": "s44",
+          "at_s": 39.8,
+          "duration_s": 1.033,
+          "source_offset_s": 0.0,
+          "gain": 1.0,
+          "fade_in_ms": 0,
+          "fade_out_ms": 0,
+          "sustain": false,
+          "continues": false,
+          "role": "sfx"
+        },
+        {
+          "id": "a193",
+          "sound": "s128",
+          "at_s": 41.2,
+          "duration_s": 14.967,
+          "source_offset_s": 5.433,
+          "gain": 0.5495,
+          "fade_in_ms": 0,
+          "fade_out_ms": 0,
+          "sustain": false,
+          "continues": false,
+          "role": "vo"
+        },
+        {
+          "id": "a194",
+          "sound": "s44",
+          "at_s": 43.266,
+          "duration_s": 0.933,
+          "source_offset_s": 0.0,
+          "gain": 1.0,
+          "fade_in_ms": 0,
+          "fade_out_ms": 0,
+          "sustain": false,
+          "continues": false,
+          "role": "sfx"
+        },
+        {
+          "id": "a195",
+          "sound": "s44",
+          "at_s": 47.3,
+          "duration_s": 0.8,
+          "source_offset_s": 0.0,
+          "gain": 1.0,
+          "fade_in_ms": 0,
+          "fade_out_ms": 0,
+          "sustain": false,
+          "continues": false,
+          "role": "sfx"
+        },
+        {
+          "id": "a196",
+          "sound": "s46",
+          "at_s": 48.1,
+          "duration_s": 3.033,
+          "source_offset_s": 0.0,
+          "gain": 0.3497,
+          "fade_in_ms": 0,
+          "fade_out_ms": 0,
+          "sustain": false,
+          "continues": false,
+          "role": "sfx"
+        },
+        {
+          "id": "a197",
+          "sound": "s47",
+          "at_s": 49.933,
+          "duration_s": 1.867,
+          "source_offset_s": 2.333,
+          "gain": 0.4084,
+          "fade_in_ms": 0,
+          "fade_out_ms": 0,
+          "sustain": false,
+          "continues": false,
+          "role": "sfx"
+        },
+        {
+          "id": "a198",
+          "sound": "s48",
+          "at_s": 51.6,
+          "duration_s": 3.367,
+          "source_offset_s": 2.467,
+          "gain": 0.0,
+          "fade_in_ms": 0,
+          "fade_out_ms": 1333,
+          "sustain": false,
+          "continues": false,
+          "role": "sfx"
+        },
+        {
+          "id": "a199",
+          "sound": "s49",
+          "at_s": 51.8,
+          "duration_s": 3.4,
+          "source_offset_s": 0.0,
+          "gain": 0.4888,
+          "fade_in_ms": 0,
+          "fade_out_ms": 0,
+          "sustain": false,
+          "continues": false,
+          "role": "sfx"
+        },
+        {
+          "id": "a200",
+          "sound": "s129",
+          "at_s": 56.166,
+          "duration_s": 0.034,
+          "source_offset_s": 0.0,
+          "gain": 0.5495,
+          "fade_in_ms": 0,
+          "fade_out_ms": 0,
+          "sustain": false,
+          "continues": false,
+          "role": "vo"
+        }
       ]
     },
     {
       "id": "b_20",
       "type": "playback",
-      "name": "20 · North Star (draw chain)",
+      "name": "20 \u00b7 North Star (draw chain)",
       "media": "m1",
       "range_s": [
         545.333,
@@ -626,66 +1382,371 @@
           "appears_s": 51.97,
           "duration_s": 5.43
         }
+      ],
+      "audio": [
+        {
+          "id": "a201",
+          "sound": "s23",
+          "at_s": 0.0,
+          "duration_s": 3.967,
+          "source_offset_s": 35.233,
+          "gain": 0.5779,
+          "fade_in_ms": 800,
+          "fade_out_ms": 833,
+          "sustain": true,
+          "continues": true,
+          "role": "ambience"
+        },
+        {
+          "id": "a202",
+          "sound": "s37",
+          "at_s": 0.0,
+          "duration_s": 3.967,
+          "source_offset_s": 79.366,
+          "gain": 0.0708,
+          "fade_in_ms": 1966,
+          "fade_out_ms": 1866,
+          "sustain": true,
+          "continues": true,
+          "role": "ambience"
+        },
+        {
+          "id": "a203",
+          "sound": "s128",
+          "at_s": 0.0,
+          "duration_s": 0.0,
+          "source_offset_s": 20.4,
+          "gain": 0.5495,
+          "fade_in_ms": 0,
+          "fade_out_ms": 0,
+          "sustain": false,
+          "continues": true,
+          "role": "vo"
+        },
+        {
+          "id": "a204",
+          "sound": "s129",
+          "at_s": 0.0,
+          "duration_s": 3.967,
+          "source_offset_s": 0.0,
+          "gain": 0.5495,
+          "fade_in_ms": 0,
+          "fade_out_ms": 0,
+          "sustain": false,
+          "continues": false,
+          "role": "vo"
+        },
+        {
+          "id": "a205",
+          "sound": "s13",
+          "at_s": 12.567,
+          "duration_s": 2.467,
+          "source_offset_s": 0.0,
+          "gain": 0.3557,
+          "fade_in_ms": 0,
+          "fade_out_ms": 0,
+          "sustain": false,
+          "continues": false,
+          "role": "sfx"
+        },
+        {
+          "id": "a206",
+          "sound": "s23",
+          "at_s": 14.1,
+          "duration_s": 16.467,
+          "source_offset_s": 39.2,
+          "gain": 0.5779,
+          "fade_in_ms": 800,
+          "fade_out_ms": 833,
+          "sustain": true,
+          "continues": false,
+          "role": "ambience"
+        },
+        {
+          "id": "a207",
+          "sound": "s37",
+          "at_s": 14.1,
+          "duration_s": 16.467,
+          "source_offset_s": 83.333,
+          "gain": 0.0708,
+          "fade_in_ms": 1500,
+          "fade_out_ms": 1433,
+          "sustain": true,
+          "continues": false,
+          "role": "ambience"
+        },
+        {
+          "id": "a208",
+          "sound": "s50",
+          "at_s": 14.534,
+          "duration_s": 0.633,
+          "source_offset_s": 0.0,
+          "gain": 1.0,
+          "fade_in_ms": 0,
+          "fade_out_ms": 0,
+          "sustain": false,
+          "continues": false,
+          "role": "sfx"
+        },
+        {
+          "id": "a209",
+          "sound": "s129",
+          "at_s": 18.634,
+          "duration_s": 0.833,
+          "source_offset_s": 5.533,
+          "gain": 0.5495,
+          "fade_in_ms": 0,
+          "fade_out_ms": 0,
+          "sustain": false,
+          "continues": false,
+          "role": "vo"
+        },
+        {
+          "id": "a210",
+          "sound": "s50",
+          "at_s": 18.634,
+          "duration_s": 0.6,
+          "source_offset_s": 0.0,
+          "gain": 1.0,
+          "fade_in_ms": 0,
+          "fade_out_ms": 0,
+          "sustain": false,
+          "continues": false,
+          "role": "sfx"
+        },
+        {
+          "id": "a211",
+          "sound": "s129",
+          "at_s": 22.434,
+          "duration_s": 0.867,
+          "source_offset_s": 6.367,
+          "gain": 0.5495,
+          "fade_in_ms": 0,
+          "fade_out_ms": 0,
+          "sustain": false,
+          "continues": false,
+          "role": "vo"
+        },
+        {
+          "id": "a212",
+          "sound": "s50",
+          "at_s": 22.434,
+          "duration_s": 0.533,
+          "source_offset_s": 0.0,
+          "gain": 1.0,
+          "fade_in_ms": 0,
+          "fade_out_ms": 0,
+          "sustain": false,
+          "continues": false,
+          "role": "sfx"
+        },
+        {
+          "id": "a213",
+          "sound": "s129",
+          "at_s": 26.267,
+          "duration_s": 4.3,
+          "source_offset_s": 7.233,
+          "gain": 0.5495,
+          "fade_in_ms": 0,
+          "fade_out_ms": 0,
+          "sustain": false,
+          "continues": false,
+          "role": "vo"
+        },
+        {
+          "id": "a214",
+          "sound": "s50",
+          "at_s": 26.267,
+          "duration_s": 0.5,
+          "source_offset_s": 0.0,
+          "gain": 1.0,
+          "fade_in_ms": 0,
+          "fade_out_ms": 0,
+          "sustain": false,
+          "continues": false,
+          "role": "sfx"
+        },
+        {
+          "id": "a215",
+          "sound": "s13",
+          "at_s": 39.367,
+          "duration_s": 2.467,
+          "source_offset_s": 0.0,
+          "gain": 0.3557,
+          "fade_in_ms": 0,
+          "fade_out_ms": 0,
+          "sustain": false,
+          "continues": false,
+          "role": "sfx"
+        },
+        {
+          "id": "a216",
+          "sound": "s129",
+          "at_s": 41.267,
+          "duration_s": 7.833,
+          "source_offset_s": 11.533,
+          "gain": 0.5495,
+          "fade_in_ms": 0,
+          "fade_out_ms": 0,
+          "sustain": false,
+          "continues": false,
+          "role": "vo"
+        },
+        {
+          "id": "a217",
+          "sound": "s23",
+          "at_s": 41.334,
+          "duration_s": 7.833,
+          "source_offset_s": 55.667,
+          "gain": 0.5779,
+          "fade_in_ms": 733,
+          "fade_out_ms": 633,
+          "sustain": true,
+          "continues": false,
+          "role": "ambience"
+        },
+        {
+          "id": "a218",
+          "sound": "s37",
+          "at_s": 41.334,
+          "duration_s": 7.767,
+          "source_offset_s": 62.7,
+          "gain": 0.0708,
+          "fade_in_ms": 1000,
+          "fade_out_ms": 1000,
+          "sustain": true,
+          "continues": false,
+          "role": "ambience"
+        },
+        {
+          "id": "a219",
+          "sound": "s51",
+          "at_s": 41.334,
+          "duration_s": 1.033,
+          "source_offset_s": 0.0,
+          "gain": 0.5404,
+          "fade_in_ms": 0,
+          "fade_out_ms": 0,
+          "sustain": false,
+          "continues": false,
+          "role": "sfx"
+        },
+        {
+          "id": "a220",
+          "sound": "s13",
+          "at_s": 57.967,
+          "duration_s": 2.467,
+          "source_offset_s": 0.0,
+          "gain": 0.3557,
+          "fade_in_ms": 0,
+          "fade_out_ms": 0,
+          "sustain": false,
+          "continues": false,
+          "role": "sfx"
+        },
+        {
+          "id": "a221",
+          "sound": "s42",
+          "at_s": 59.834,
+          "duration_s": 11.233,
+          "source_offset_s": 80.767,
+          "gain": 0.1441,
+          "fade_in_ms": 1233,
+          "fade_out_ms": 3933,
+          "sustain": true,
+          "continues": false,
+          "role": "ambience"
+        },
+        {
+          "id": "a222",
+          "sound": "s23",
+          "at_s": 59.834,
+          "duration_s": 11.233,
+          "source_offset_s": 63.5,
+          "gain": 0.5779,
+          "fade_in_ms": 666,
+          "fade_out_ms": 733,
+          "sustain": true,
+          "continues": false,
+          "role": "ambience"
+        },
+        {
+          "id": "a223",
+          "sound": "s129",
+          "at_s": 59.834,
+          "duration_s": 7.167,
+          "source_offset_s": 19.367,
+          "gain": 0.5495,
+          "fade_in_ms": 0,
+          "fade_out_ms": 0,
+          "sustain": false,
+          "continues": false,
+          "role": "vo"
+        },
+        {
+          "id": "a224",
+          "sound": "s52",
+          "at_s": 59.834,
+          "duration_s": 8.067,
+          "source_offset_s": 0.0,
+          "gain": 0.2262,
+          "fade_in_ms": 0,
+          "fade_out_ms": 0,
+          "sustain": false,
+          "continues": false,
+          "role": "sfx"
+        },
+        {
+          "id": "a225",
+          "sound": "s41",
+          "at_s": 61.834,
+          "duration_s": 9.2,
+          "source_offset_s": 0.0,
+          "gain": 2.0632,
+          "fade_in_ms": 1366,
+          "fade_out_ms": 0,
+          "sustain": false,
+          "continues": false,
+          "role": "sfx"
+        },
+        {
+          "id": "a226",
+          "sound": "s129",
+          "at_s": 67.0,
+          "duration_s": 4.033,
+          "source_offset_s": 26.533,
+          "gain": 0.7272,
+          "fade_in_ms": 0,
+          "fade_out_ms": 0,
+          "sustain": false,
+          "continues": false,
+          "role": "vo"
+        },
+        {
+          "id": "a227",
+          "sound": "s130",
+          "at_s": 71.034,
+          "duration_s": 0.033,
+          "source_offset_s": 0.0,
+          "gain": 0.5495,
+          "fade_in_ms": 0,
+          "fade_out_ms": 0,
+          "sustain": false,
+          "continues": false,
+          "role": "vo"
+        }
       ]
     },
     {
-      "id": "b_21",
+      "id": "b_stretch_3",
       "type": "playback",
-      "name": "21 · North Star",
+      "name": "21\u201336 \u00b7 North Star \u2192 Bear Paw",
       "media": "m1",
       "range_s": [
         616.4,
-        621.4
+        935.167
       ],
-      "pos": [
-        5310,
-        340
-      ],
-      "windows": []
-    },
-    {
-      "id": "b_22",
-      "type": "playback",
-      "name": "22 · Monkey Wrench",
-      "media": "m1",
-      "range_s": [
-        621.4,
-        631
-      ],
-      "pos": [
-        5560,
-        340
-      ],
-      "windows": []
-    },
-    {
-      "id": "b_23",
-      "type": "playback",
-      "name": "23 · Monkey Wrench",
-      "media": "m1",
-      "range_s": [
-        630.967,
-        656
-      ],
-      "pos": [
-        5810,
-        340
-      ],
-      "windows": []
-    },
-    {
-      "id": "b_24",
-      "type": "playback",
-      "name": "24 · Monkey Wrench",
-      "media": "m1",
-      "range_s": [
-        656,
-        712.933
-      ],
-      "pos": [
-        6060,
-        340
-      ],
+      "master_audio": true,
       "windows": [
         {
           "id": "w_24_oi0",
@@ -701,7 +1762,7 @@
             "w": 0.2,
             "h": 0.28
           },
-          "appears_s": 11.17,
+          "appears_s": 50.77,
           "duration_s": 6.37
         },
         {
@@ -718,25 +1779,9 @@
             "w": 0.2,
             "h": 0.28
           },
-          "appears_s": 23.5,
+          "appears_s": 63.1,
           "duration_s": 6.17
-        }
-      ]
-    },
-    {
-      "id": "b_25",
-      "type": "playback",
-      "name": "25 · Monkey Wrench",
-      "media": "m1",
-      "range_s": [
-        712.933,
-        751.933
-      ],
-      "pos": [
-        6310,
-        340
-      ],
-      "windows": [
+        },
         {
           "id": "w_25_oi",
           "label": "touch_temple",
@@ -748,55 +1793,9 @@
             "use_pose": true
           },
           "region": null,
-          "appears_s": 14.07,
+          "appears_s": 110.6,
           "duration_s": 6.3
-        }
-      ]
-    },
-    {
-      "id": "b_28",
-      "type": "playback",
-      "name": "28 · Shoofly",
-      "media": "m1",
-      "range_s": [
-        751.933,
-        760.267
-      ],
-      "pos": [
-        6560,
-        340
-      ],
-      "windows": []
-    },
-    {
-      "id": "b_29",
-      "type": "playback",
-      "name": "29 · Shoofly",
-      "media": "m1",
-      "range_s": [
-        760.267,
-        795.267
-      ],
-      "pos": [
-        6810,
-        340
-      ],
-      "windows": []
-    },
-    {
-      "id": "b_30",
-      "type": "playback",
-      "name": "30 · Shoofly",
-      "media": "m1",
-      "range_s": [
-        795.267,
-        815
-      ],
-      "pos": [
-        7060,
-        340
-      ],
-      "windows": [
+        },
         {
           "id": "w_30_oi",
           "label": "scan_survey",
@@ -808,25 +1807,9 @@
             "hold_ms": 200
           },
           "region": null,
-          "appears_s": 5.9,
+          "appears_s": 184.77,
           "duration_s": 5.23
-        }
-      ]
-    },
-    {
-      "id": "b_31",
-      "type": "playback",
-      "name": "31 · Shoofly",
-      "media": "m1",
-      "range_s": [
-        815,
-        834.467
-      ],
-      "pos": [
-        7310,
-        340
-      ],
-      "windows": [
+        },
         {
           "id": "w_31_oi",
           "label": "three_knock",
@@ -839,25 +1822,9 @@
             "refractory_ms": 220
           },
           "region": null,
-          "appears_s": 4.5,
+          "appears_s": 203.1,
           "duration_s": 5.63
-        }
-      ]
-    },
-    {
-      "id": "b_32",
-      "type": "playback",
-      "name": "32 · Shoofly",
-      "media": "m1",
-      "range_s": [
-        834.467,
-        855.767
-      ],
-      "pos": [
-        7560,
-        340
-      ],
-      "windows": [
+        },
         {
           "id": "w_32_oi",
           "label": "clasp_hand",
@@ -872,70 +1839,9 @@
             "w": 0.4,
             "h": 0.4
           },
-          "appears_s": 6.1,
+          "appears_s": 224.17,
           "duration_s": 6.03
-        }
-      ]
-    },
-    {
-      "id": "b_33",
-      "type": "playback",
-      "name": "33 · Shoofly",
-      "media": "m1",
-      "range_s": [
-        855.767,
-        875.933
-      ],
-      "pos": [
-        7810,
-        340
-      ],
-      "windows": []
-    },
-    {
-      "id": "b_34",
-      "type": "playback",
-      "name": "34 · Bear Paw",
-      "media": "m1",
-      "range_s": [
-        875.9,
-        884.567
-      ],
-      "pos": [
-        8060,
-        340
-      ],
-      "windows": []
-    },
-    {
-      "id": "b_35",
-      "type": "playback",
-      "name": "35 · Bear Paw",
-      "media": "m1",
-      "range_s": [
-        884.567,
-        915.167
-      ],
-      "pos": [
-        8310,
-        340
-      ],
-      "windows": []
-    },
-    {
-      "id": "b_36",
-      "type": "playback",
-      "name": "36 · Bear Paw",
-      "media": "m1",
-      "range_s": [
-        915.167,
-        935.167
-      ],
-      "pos": [
-        8560,
-        340
-      ],
-      "windows": [
+        },
         {
           "id": "w_36_oi",
           "label": "scan_survey",
@@ -947,15 +1853,19 @@
             "hold_ms": 200
           },
           "region": null,
-          "appears_s": 9.8,
+          "appears_s": 308.57,
           "duration_s": 5.5
         }
+      ],
+      "pos": [
+        1830,
+        210
       ]
     },
     {
       "id": "b_37",
       "type": "choice",
-      "name": "37 · Bear Paw",
+      "name": "37 \u00b7 Bear Paw",
       "media": "m1",
       "range_s": [
         935.167,
@@ -1024,7 +1934,7 @@
     {
       "id": "b_37_left",
       "type": "playback",
-      "name": "37L · wrong_path",
+      "name": "37L \u00b7 wrong_path",
       "media": "m1",
       "range_s": [
         952.5,
@@ -1039,7 +1949,7 @@
     {
       "id": "b_37_right",
       "type": "playback",
-      "name": "37R · correct_path",
+      "name": "37R \u00b7 correct_path",
       "media": "m1",
       "range_s": [
         957.6,
@@ -1052,63 +1962,15 @@
       "windows": []
     },
     {
-      "id": "b_38",
+      "id": "b_stretch_4",
       "type": "playback",
-      "name": "38 · Bear Paw",
+      "name": "38\u201349 \u00b7 Bear Paw \u2192 Wagon Wheel",
       "media": "m1",
       "range_s": [
         961.433,
-        975.267
+        1079.3
       ],
-      "pos": [
-        9310,
-        340
-      ],
-      "windows": []
-    },
-    {
-      "id": "b_43",
-      "type": "playback",
-      "name": "43 · Bowtie Hourglass",
-      "media": "m1",
-      "range_s": [
-        975.233,
-        984.167
-      ],
-      "pos": [
-        9560,
-        340
-      ],
-      "windows": []
-    },
-    {
-      "id": "b_44",
-      "type": "playback",
-      "name": "44 · Bowtie Hourglass",
-      "media": "m1",
-      "range_s": [
-        984.167,
-        1001.967
-      ],
-      "pos": [
-        9810,
-        340
-      ],
-      "windows": []
-    },
-    {
-      "id": "b_45",
-      "type": "playback",
-      "name": "45 · Bowtie Hourglass",
-      "media": "m1",
-      "range_s": [
-        1001.967,
-        1070.967
-      ],
-      "pos": [
-        10060,
-        340
-      ],
+      "master_audio": true,
       "windows": [
         {
           "id": "w_45_oi0",
@@ -1122,7 +1984,7 @@
             "radius_scale": 1.4
           },
           "region": null,
-          "appears_s": 21.6,
+          "appears_s": 62.13,
           "duration_s": 5.77
         },
         {
@@ -1134,30 +1996,19 @@
             "dead_zone_frac": 0.05
           },
           "region": null,
-          "appears_s": 36.53,
+          "appears_s": 77.06,
           "duration_s": 5.83
         }
-      ]
-    },
-    {
-      "id": "b_49",
-      "type": "playback",
-      "name": "49 · Wagon Wheel",
-      "media": "m1",
-      "range_s": [
-        1070.933,
-        1079.3
       ],
       "pos": [
-        10310,
-        340
-      ],
-      "windows": []
+        2830,
+        210
+      ]
     },
     {
       "id": "b_50",
       "type": "choice",
-      "name": "50 · Wagon Wheel",
+      "name": "50 \u00b7 Wagon Wheel",
       "media": "m1",
       "range_s": [
         1079.3,
@@ -1226,7 +2077,7 @@
     {
       "id": "b_50_left",
       "type": "playback",
-      "name": "50L · path_a",
+      "name": "50L \u00b7 path_a",
       "media": "m1",
       "range_s": [
         1121.567,
@@ -1241,7 +2092,7 @@
     {
       "id": "b_50_right",
       "type": "playback",
-      "name": "50R · path_b",
+      "name": "50R \u00b7 path_b",
       "media": "m1",
       "range_s": [
         1143.467,
@@ -1256,7 +2107,7 @@
     {
       "id": "b_57_l",
       "type": "playback",
-      "name": "57 · Tumbling Blocks (L)",
+      "name": "57 \u00b7 Tumbling Blocks (L)",
       "media": "m1",
       "range_s": [
         1166.567,
@@ -1271,7 +2122,7 @@
     {
       "id": "b_58",
       "type": "playback",
-      "name": "58 · Tumbling Blocks",
+      "name": "58 \u00b7 Tumbling Blocks",
       "media": "m1",
       "range_s": [
         1174.433,
@@ -1299,7 +2150,7 @@
     {
       "id": "b_57_r",
       "type": "playback",
-      "name": "57 · Tumbling Blocks (R)",
+      "name": "57 \u00b7 Tumbling Blocks (R)",
       "media": "m1",
       "range_s": [
         1166.567,
@@ -1314,7 +2165,7 @@
     {
       "id": "b_59",
       "type": "playback",
-      "name": "59 · Tumbling Blocks",
+      "name": "59 \u00b7 Tumbling Blocks",
       "media": "m1",
       "range_s": [
         1198.1,
@@ -1340,18 +2191,15 @@
       ]
     },
     {
-      "id": "b_60",
+      "id": "b_stretch_5",
       "type": "playback",
-      "name": "60 · Tumbling Blocks",
+      "name": "60\u201379 \u00b7 Tumbling Blocks \u2192 Epilogue",
       "media": "m1",
       "range_s": [
         1217.633,
-        1238.067
+        1521.033
       ],
-      "pos": [
-        11560,
-        340
-      ],
+      "master_audio": true,
       "windows": [
         {
           "id": "w_60_oi",
@@ -1366,23 +2214,7 @@
           "region": null,
           "appears_s": 5.4,
           "duration_s": 5.57
-        }
-      ]
-    },
-    {
-      "id": "b_61",
-      "type": "playback",
-      "name": "61 · Tumbling Blocks",
-      "media": "m1",
-      "range_s": [
-        1238.033,
-        1268
-      ],
-      "pos": [
-        11810,
-        340
-      ],
-      "windows": [
+        },
         {
           "id": "w_61_oi",
           "label": "run_arms",
@@ -1392,25 +2224,9 @@
             "window_ms": 2000
           },
           "region": null,
-          "appears_s": 4.53,
+          "appears_s": 24.93,
           "duration_s": 6.5
-        }
-      ]
-    },
-    {
-      "id": "b_66",
-      "type": "playback",
-      "name": "66 · Conestogo",
-      "media": "m1",
-      "range_s": [
-        1267.967,
-        1435.133
-      ],
-      "pos": [
-        12060,
-        340
-      ],
-      "windows": [
+        },
         {
           "id": "w_66_oi0",
           "label": "unravel",
@@ -1419,7 +2235,7 @@
             "min_cycles": 2
           },
           "region": null,
-          "appears_s": 74.8,
+          "appears_s": 125.13,
           "duration_s": 4.23
         },
         {
@@ -1431,7 +2247,7 @@
             "max_stroke_ms": 600
           },
           "region": null,
-          "appears_s": 87.27,
+          "appears_s": 137.6,
           "duration_s": 6.7
         },
         {
@@ -1443,7 +2259,7 @@
             "window_ms": 400
           },
           "region": null,
-          "appears_s": 104.47,
+          "appears_s": 154.8,
           "duration_s": 7.1
         },
         {
@@ -1454,7 +2270,7 @@
             "min_strokes": 2
           },
           "region": null,
-          "appears_s": 120.8,
+          "appears_s": 171.13,
           "duration_s": 6.83
         },
         {
@@ -1465,102 +2281,31 @@
             "hold_ms": 400
           },
           "region": null,
-          "appears_s": 149.07,
+          "appears_s": 199.4,
           "duration_s": 6.7
         }
-      ]
-    },
-    {
-      "id": "b_79",
-      "type": "playback",
-      "name": "79 · Epilogue",
-      "media": "m1",
-      "range_s": [
-        1435.1,
-        1521.033
       ],
       "pos": [
-        12310,
-        340
-      ],
-      "windows": []
+        4830,
+        210
+      ]
     }
   ],
   "edges": [
     {
-      "from": "b_01",
-      "to": "b_02"
-    },
-    {
-      "from": "b_02",
-      "to": "b_03"
-    },
-    {
-      "from": "b_03",
-      "to": "b_04"
-    },
-    {
-      "from": "b_04",
-      "to": "b_05"
-    },
-    {
-      "from": "b_05",
-      "to": "b_06"
-    },
-    {
-      "from": "b_06",
-      "to": "b_07"
-    },
-    {
-      "from": "b_07",
-      "to": "b_08"
-    },
-    {
-      "from": "b_08",
+      "from": "b_stretch_1",
       "to": "b_09"
     },
     {
       "from": "b_09_left",
-      "to": "b_10"
+      "to": "b_stretch_2"
     },
     {
       "from": "b_09_right",
-      "to": "b_10"
+      "to": "b_stretch_2"
     },
     {
-      "from": "b_10",
-      "to": "b_11"
-    },
-    {
-      "from": "b_11",
-      "to": "b_12"
-    },
-    {
-      "from": "b_12",
-      "to": "b_13"
-    },
-    {
-      "from": "b_13",
-      "to": "b_14"
-    },
-    {
-      "from": "b_14",
-      "to": "b_15"
-    },
-    {
-      "from": "b_15",
-      "to": "b_16"
-    },
-    {
-      "from": "b_16",
-      "to": "b_17"
-    },
-    {
-      "from": "b_17",
-      "to": "b_18"
-    },
-    {
-      "from": "b_18",
+      "from": "b_stretch_2",
       "to": "b_19"
     },
     {
@@ -1569,90 +2314,22 @@
     },
     {
       "from": "b_20",
-      "to": "b_21"
+      "to": "b_stretch_3"
     },
     {
-      "from": "b_21",
-      "to": "b_22"
-    },
-    {
-      "from": "b_22",
-      "to": "b_23"
-    },
-    {
-      "from": "b_23",
-      "to": "b_24"
-    },
-    {
-      "from": "b_24",
-      "to": "b_25"
-    },
-    {
-      "from": "b_25",
-      "to": "b_28"
-    },
-    {
-      "from": "b_28",
-      "to": "b_29"
-    },
-    {
-      "from": "b_29",
-      "to": "b_30"
-    },
-    {
-      "from": "b_30",
-      "to": "b_31"
-    },
-    {
-      "from": "b_31",
-      "to": "b_32"
-    },
-    {
-      "from": "b_32",
-      "to": "b_33"
-    },
-    {
-      "from": "b_33",
-      "to": "b_34"
-    },
-    {
-      "from": "b_34",
-      "to": "b_35"
-    },
-    {
-      "from": "b_35",
-      "to": "b_36"
-    },
-    {
-      "from": "b_36",
+      "from": "b_stretch_3",
       "to": "b_37"
     },
     {
       "from": "b_37_left",
-      "to": "b_38"
+      "to": "b_stretch_4"
     },
     {
       "from": "b_37_right",
-      "to": "b_38"
+      "to": "b_stretch_4"
     },
     {
-      "from": "b_38",
-      "to": "b_43"
-    },
-    {
-      "from": "b_43",
-      "to": "b_44"
-    },
-    {
-      "from": "b_44",
-      "to": "b_45"
-    },
-    {
-      "from": "b_45",
-      "to": "b_49"
-    },
-    {
-      "from": "b_49",
+      "from": "b_stretch_4",
       "to": "b_50"
     },
     {
@@ -1673,23 +2350,11 @@
     },
     {
       "from": "b_58",
-      "to": "b_60"
+      "to": "b_stretch_5"
     },
     {
       "from": "b_59",
-      "to": "b_60"
-    },
-    {
-      "from": "b_60",
-      "to": "b_61"
-    },
-    {
-      "from": "b_61",
-      "to": "b_66"
-    },
-    {
-      "from": "b_66",
-      "to": "b_79"
+      "to": "b_stretch_5"
     }
   ]
 }

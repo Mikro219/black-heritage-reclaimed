@@ -1,0 +1,101 @@
+{
+  "shot": "08",
+  "audio_events": [
+    {
+      "file": "freesound_community-night-ambience-59071__t0_14800.ogg",
+      "role": "ambience",
+      "at_s": 0.0,
+      "duration_s": 0.333,
+      "source_offset_s": 14.467,
+      "gain": 1.006,
+      "fade_in_ms": 466,
+      "fade_out_ms": 466,
+      "sustain": true,
+      "continues": true
+    },
+    {
+      "file": "bensound-tenderness__t9600_44300.ogg",
+      "role": "music",
+      "at_s": 0.0,
+      "duration_s": 19.133,
+      "source_offset_s": 24.067,
+      "gain": 0.0634,
+      "fade_in_ms": 1300,
+      "fade_out_ms": 1200,
+      "sustain": true,
+      "continues": true
+    },
+    {
+      "file": "bhr_scene_07.mp3",
+      "role": "vo",
+      "at_s": 0.0,
+      "duration_s": 0.333,
+      "source_offset_s": 14.467,
+      "gain": 0.5495,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": true
+    },
+    {
+      "file": "freesound_community-creasing-paper-92362__t0_3000.ogg",
+      "role": "sfx",
+      "at_s": 0.0,
+      "duration_s": 1.0,
+      "source_offset_s": 2.0,
+      "gain": 1.0,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": true
+    },
+    {
+      "file": "bhr_scene_08.mp3",
+      "role": "vo",
+      "at_s": 0.333,
+      "duration_s": 18.267,
+      "source_offset_s": 0.0,
+      "gain": 0.5495,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "freesound_community-creasing-paper-92362__t3000_1100.ogg",
+      "role": "sfx",
+      "at_s": 18.0,
+      "duration_s": 1.1,
+      "source_offset_s": 3.0,
+      "gain": 1.0,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "bhr_scene_09-A__t0_11233.ogg",
+      "role": "vo",
+      "at_s": 18.6,
+      "duration_s": 0.533,
+      "source_offset_s": 0.0,
+      "gain": 0.5495,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "freesound_community-night-ambience-59071__t0_11233.ogg",
+      "role": "ambience",
+      "at_s": 19.1,
+      "duration_s": 0.033,
+      "source_offset_s": 0.0,
+      "gain": 0.5021,
+      "fade_in_ms": 866,
+      "fade_out_ms": 900,
+      "sustain": true,
+      "continues": false
+    }
+  ]
+}

@@ -2,9 +2,11 @@ pygame>=2.5
 mediapipe==0.10.14
 opencv-python>=4.9
 Pillow>=10.0
-grlib>=0.1
 pydub>=0.25
 sounddevice>=0.4
 vosk>=0.3.45
 pywin32>=306
 PyMuPDF>=1.23
+# Optional: DirectShow camera-name matching (host profile device_name_match).
+# Without it the runtime falls back to the numeric camera index.
+pygrabber>=0.2

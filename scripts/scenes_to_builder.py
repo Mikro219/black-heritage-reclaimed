@@ -8,7 +8,7 @@ experience) into an Experience Builder project (.bhrx.json).
 Source of truth:
   * scripts/copy_frames.py SHOT_FRAMES — each shot's [global_start, global_end]
     frame range in the master video (final_frames/ was extracted 1:1 from
-    assets/"BHR Draft 1.mp4", 30fps, 25:21 = 45631 frames).
+    assets/video/"BHR Draft 1.mp4", 30fps, 25:21 = 45631 frames).
   * scenes/<act>/shot_NN/metadata.json — interactions, forks, OI windows.
 
 Mapping into editor blocks:

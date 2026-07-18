@@ -1,0 +1,53 @@
+{
+  "shot": "21",
+  "audio_events": [
+    {
+      "file": "Follow the Drinkin' Gourd Karaoke Key of Dm - R. Smith Music (128k)__t80767_16200.ogg",
+      "role": "ambience",
+      "at_s": 0.0,
+      "duration_s": 4.967,
+      "source_offset_s": 92.0,
+      "gain": 0.1441,
+      "fade_in_ms": 1233,
+      "fade_out_ms": 3933,
+      "sustain": true,
+      "continues": true
+    },
+    {
+      "file": "freesound_community-night-ambience-59071__t63500_16200.ogg",
+      "role": "ambience",
+      "at_s": 0.0,
+      "duration_s": 4.967,
+      "source_offset_s": 74.733,
+      "gain": 0.5779,
+      "fade_in_ms": 666,
+      "fade_out_ms": 733,
+      "sustain": true,
+      "continues": true
+    },
+    {
+      "file": "bhr_scene_21.mp3",
+      "role": "vo",
+      "at_s": 0.0,
+      "duration_s": 4.967,
+      "source_offset_s": 0.033,
+      "gain": 0.5495,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": true
+    },
+    {
+      "file": "Metal_lantern_being__#4-1781322552504__t2167_1733.ogg",
+      "role": "sfx",
+      "at_s": 2.767,
+      "duration_s": 1.733,
+      "source_offset_s": 2.167,
+      "gain": 0.327,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    }
+  ]
+}

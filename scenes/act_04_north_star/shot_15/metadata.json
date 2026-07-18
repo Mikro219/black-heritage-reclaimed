@@ -1,0 +1,101 @@
+{
+  "shot": "15",
+  "audio_events": [
+    {
+      "file": "freesound_community-night-ambience-59071__t0_38667.ogg",
+      "role": "ambience",
+      "at_s": 0.0,
+      "duration_s": 10.467,
+      "source_offset_s": 0.4,
+      "gain": 0.5779,
+      "fade_in_ms": 466,
+      "fade_out_ms": 466,
+      "sustain": true,
+      "continues": true
+    },
+    {
+      "file": "bensound-pianomoment__t0_29933.ogg",
+      "role": "ambience",
+      "at_s": 0.0,
+      "duration_s": 10.467,
+      "source_offset_s": 0.4,
+      "gain": 0.0138,
+      "fade_in_ms": 1133,
+      "fade_out_ms": 2566,
+      "sustain": true,
+      "continues": true
+    },
+    {
+      "file": "bhr_scene_15.mp3",
+      "role": "vo",
+      "at_s": 0.0,
+      "duration_s": 10.433,
+      "source_offset_s": 0.4,
+      "gain": 0.5495,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": true
+    },
+    {
+      "file": "Metal_lantern_being__#4-1781322552504__t1000_2000.ogg",
+      "role": "sfx",
+      "at_s": 0.0,
+      "duration_s": 1.6,
+      "source_offset_s": 1.4,
+      "gain": 0.3866,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": true
+    },
+    {
+      "file": "Soft_metallic_resona_#4-1781322560236__t0_933.ogg",
+      "role": "sfx",
+      "at_s": 1.133,
+      "duration_s": 0.933,
+      "source_offset_s": 0.0,
+      "gain": 2.9327,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "freesound_community-cloth-rustle-1-30053__t0_633.ogg",
+      "role": "sfx",
+      "at_s": 7.4,
+      "duration_s": 0.633,
+      "source_offset_s": 0.0,
+      "gain": 1.0,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "bhr_scene_16.mp3",
+      "role": "vo",
+      "at_s": 10.433,
+      "duration_s": 0.033,
+      "source_offset_s": 0.0,
+      "gain": 0.5495,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "SCIShip-A_soft,_shimmering_s-Elevenlabs__t0_17733.ogg",
+      "role": "sfx",
+      "at_s": 10.433,
+      "duration_s": 0.033,
+      "source_offset_s": 0.0,
+      "gain": 2.4676,
+      "fade_in_ms": 1366,
+      "fade_out_ms": 1300,
+      "sustain": false,
+      "continues": false
+    }
+  ]
+}

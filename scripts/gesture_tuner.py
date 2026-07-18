@@ -306,11 +306,11 @@ GESTURES = [
     dict(
         name="unravel",
         label="CG · Scene 11 · AL-11-011",
-        desc="Wrists wind around each other (rope) — ≥2 cycles  |  +/-: window_ms  |  [/]: prox_frac (↑ = more lenient overlap)",
+        desc="Hands circle across the ELBOW LINE — ≥2 crossings-pairs per wrist  |  +/-: prox_frac (↑ = hands may be farther apart)  |  [/]: band_frac (↓ = smaller circles count)",
         type="unravel",
-        params={"min_cycles": 2, "window_ms": 3000, "min_amplitude_frac": 0.10, "prox_frac": 0.25},
-        tune_key="window_ms", tune_step=200,
-        tune_key2="prox_frac", tune_step2=0.05,
+        params={"min_cycles": 2, "window_ms": 3000, "band_frac": 0.08, "prox_frac": 0.25},
+        tune_key="prox_frac", tune_step=0.05,
+        tune_key2="band_frac", tune_step2=0.01,
         accent=(80, 200, 255), highlights=[0, 15, 16],
     ),
     # ── paddle ────────────────────────────────────────────────────────────
@@ -1064,10 +1064,12 @@ def draw_run_arms_info(frame, context, params, pose_lm, w, h, accent):
 
 
 def draw_unravel_info(frame, context, params, pose_lm, w, h, accent):
-    """Show diff-signal oscillation bar and wrist proximity indicator."""
+    """Elbow-line crossing model: draw the elbow-elbow line + hysteresis band,
+    wrist dots, and the per-wrist crossing counts the detector fires on."""
     if pose_lm is None:
         return
     sh_l, sh_r   = pose_lm[11], pose_lm[12]
+    el_l, el_r   = pose_lm[13], pose_lm[14]
     hip_l, hip_r = pose_lm[23], pose_lm[24]
     lw, rw       = pose_lm[15], pose_lm[16]
 
@@ -1078,23 +1080,40 @@ def draw_unravel_info(frame, context, params, pose_lm, w, h, accent):
     sh_width   = abs(sh_l.x - sh_r.x)
     prox_ok    = wrist_dist < params.get("prox_frac", 0.25) * max(sh_width, 0.10)
 
-    # Shoulder / hip bands
+    # Shoulder / hip bands (torso constraint)
     cv2.line(frame, (0, int(shoulder_y * h)), (w, int(shoulder_y * h)), (100, 100, 100), 1)
     cv2.line(frame, (0, int(hip_y * h)),      (w, int(hip_y * h)),      (100, 100, 100), 1)
 
-    # Wrist dots
+    # Elbow line + hysteresis band, extended across the frame (mirrored x).
+    dx, dy = el_r.x - el_l.x, el_r.y - el_l.y
+    line_len = _math.hypot(dx, dy)
+    if line_len >= 0.03:
+        band = params.get("band_frac", 0.08) * max(sh_width, 0.10)
+        ux, uy = dx / line_len, dy / line_len          # along the line
+        nx, ny = -uy, ux                               # normal
+        cx, cy = (el_l.x + el_r.x) / 2, (el_l.y + el_r.y) / 2
+        for off, color, thick in ((0.0, accent, 2),
+                                  (band, (120, 120, 120), 1),
+                                  (-band, (120, 120, 120), 1)):
+            ax, ay = cx + nx * off - ux, cy + ny * off - uy
+            bx, by = cx + nx * off + ux, cy + ny * off + uy
+            cv2.line(frame, (int((1 - ax) * w), int(ay * h)),
+                     (int((1 - bx) * w), int(by * h)), color, thick, cv2.LINE_AA)
+
+    # Wrist dots (red when the proximity constraint is failing)
     for idx in [15, 16]:
         lm = pose_lm[idx]
         color = accent if prox_ok else (200, 80, 80)
         px, py = int((1 - lm.x) * w), int(lm.y * h)
         cv2.circle(frame, (px, py), 10, color, -1)
 
-    # Zero-crossing count
-    history = context.get("unravel_diff_history", [])
-    diffs = [d for _, d in history]
-    crossings = sum(1 for i in range(1, len(diffs)) if (diffs[i-1] > 0) != (diffs[i] > 0))
-    min_cycles = params.get("min_cycles", 2)
-    cv2.putText(frame, f"prox: {'OK' if prox_ok else 'FAR'}  crossings: {crossings}/{min_cycles*2}",
+    # Per-wrist elbow-line crossings — the exact counts the detector fires on.
+    crossings = context.get("unravel_crossings", {})
+    need = params.get("min_cycles", 2) * 2
+    cv2.putText(frame,
+                f"prox: {'OK' if prox_ok else 'FAR'}  crossings  "
+                f"L: {len(crossings.get('L', []))}/{need}  "
+                f"R: {len(crossings.get('R', []))}/{need}",
                 (12, h - 40), cv2.FONT_HERSHEY_SIMPLEX, 0.55, accent, 1, cv2.LINE_AA)
 
 

@@ -1,7 +1,7 @@
 """
 prepare_hand_icons.py — one-shot asset prep for the on-screen hand cursors.
 
-Reads the labelled reference sheets in `assets/Hand Assets/` (white background,
+Reads the labelled reference sheets in `assets/source/Hand Assets/` (white background,
 black text label in the bottom-left corner), strips the background and the
 label, crops to the hand, and writes runtime-ready transparent PNGs to
 `assets/hand_icons/`:
@@ -18,7 +18,7 @@ from pathlib import Path
 from PIL import Image
 
 ROOT = Path(__file__).resolve().parent.parent
-SRC = ROOT / "assets" / "Hand Assets"
+SRC = ROOT / "assets" / "source" / "Hand Assets"
 DST = ROOT / "assets" / "hand_icons"
 
 # Source sheet number -> output icon name

@@ -8,8 +8,7 @@ from engines.depth.fusion import (PoseDepth, metric_point, metric_speed_mm_s,
                                   trusted_landmark)
 from engines.detectors.rules import (forward_reach, point_region, push_out,
                                      speed_bilateral, throw)
-from tests.mocks import (LM, flat_sampler, make_hand, pose33, seq_sampler,
-                         zone_sampler)
+from tests.mocks import LM, flat_sampler, pose33, seq_sampler, zone_sampler
 
 
 class TestPoseDepthCore(unittest.TestCase):
@@ -97,44 +96,56 @@ class TestThrowDepthDelta(unittest.TestCase):
 
 
 class TestPushOutDepth(unittest.TestCase):
+    """POSE-ONLY: both pose wrists must show a real depth approach."""
+
     PARAMS = {"min_depth_delta_mm": 200, "window_ms": 500}
 
+    def _pose(self):
+        return pose33({15: LM(0.65, 0.55, visibility=0.9),
+                       16: LM(0.35, 0.55, visibility=0.9)})
+
     def test_bilateral_approach_fires(self):
-        h1, h2 = make_hand(0.3, 0.5), make_hand(0.7, 0.5)
-        ctx = {"_depth_mm_at": seq_sampler([1500, 1500, 1400, 1400, 1250, 1250])}
+        # wrist_depth_or_z samples L then R each frame -> pairs per frame.
+        ctx = {"_pose_lm": self._pose(),
+               "_depth_mm_at": seq_sampler([1500, 1500, 1400, 1400, 1250, 1250])}
         fired = False
         for _ in range(3):
-            fired = push_out.detect([h1, h2], self.PARAMS, ctx) or fired
+            fired = push_out.detect([], self.PARAMS, ctx) or fired
             time.sleep(0.03)
         self.assertTrue(fired)
 
-    def test_static_depth_suppresses_bbox_proxy(self):
-        h1, h2 = make_hand(0.3, 0.5), make_hand(0.7, 0.5)
-        ctx = {"_depth_mm_at": flat_sampler(1500.0)}
+    def test_static_depth_does_not_fire(self):
+        ctx = {"_pose_lm": self._pose(), "_depth_mm_at": flat_sampler(1500.0)}
         fired = False
         for _ in range(5):
-            fired = push_out.detect([h1, h2], self.PARAMS, ctx) or fired
+            fired = push_out.detect([], self.PARAMS, ctx) or fired
             time.sleep(0.03)
         self.assertFalse(fired)
 
 
 class TestForwardReachDepth(unittest.TestCase):
-    PARAMS = {"min_depth_delta_mm": 180, "window_frames": 6}
+    """POSE-ONLY: a single trusted pose wrist approaching the camera."""
+
+    PARAMS = {"min_depth_delta_mm": 180, "window_ms": 900}
+
+    def _pose(self):
+        # Only the LEFT wrist is trusted, so the seq sampler feeds one wrist.
+        return pose33({15: LM(0.60, 0.50, visibility=0.9),
+                       16: LM(0.35, 0.85, visibility=0.1)})
 
     def test_approach_fires(self):
-        h = make_hand(0.3, 0.5)
-        ctx = {"_depth_mm_at": seq_sampler([1500, 1450, 1380, 1290, 1200])}
+        ctx = {"_pose_lm": self._pose(),
+               "_depth_mm_at": seq_sampler([1500, 1450, 1380, 1290, 1200])}
         fired = False
         for _ in range(5):
-            fired = forward_reach.detect([h], self.PARAMS, ctx) or fired
+            fired = forward_reach.detect([], self.PARAMS, ctx) or fired
         self.assertTrue(fired)
 
     def test_static_depth_does_not_fire(self):
-        h = make_hand(0.3, 0.5)
-        ctx = {"_depth_mm_at": flat_sampler(1500.0)}
+        ctx = {"_pose_lm": self._pose(), "_depth_mm_at": flat_sampler(1500.0)}
         fired = False
         for _ in range(8):
-            fired = forward_reach.detect([h], self.PARAMS, ctx) or fired
+            fired = forward_reach.detect([], self.PARAMS, ctx) or fired
         self.assertFalse(fired)
 
 

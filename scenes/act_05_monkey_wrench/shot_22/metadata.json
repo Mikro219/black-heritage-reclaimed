@@ -1,0 +1,89 @@
+{
+  "shot": "22",
+  "audio_events": [
+    {
+      "file": "Faint_paper_crinkle__#2-1781481059817.mp3",
+      "role": "sfx",
+      "at_s": 1.267,
+      "duration_s": 0.867,
+      "source_offset_s": 0.0,
+      "gain": 2.4676,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "Faint_paper_crinkle__#1-1781481062390.mp3",
+      "role": "sfx",
+      "at_s": 2.133,
+      "duration_s": 1.033,
+      "source_offset_s": 0.0,
+      "gain": 2.4676,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "Faint_paper_crinkle__#1-1781481062390.mp3",
+      "role": "sfx",
+      "at_s": 7.333,
+      "duration_s": 1.033,
+      "source_offset_s": 0.0,
+      "gain": 1.5348,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "soul_serenity_sounds-water-noises-241049__t0_34267.ogg",
+      "role": "ambience",
+      "at_s": 9.567,
+      "duration_s": 0.033,
+      "source_offset_s": 0.0,
+      "gain": 0.6082,
+      "fade_in_ms": 2000,
+      "fade_out_ms": 0,
+      "sustain": true,
+      "continues": false
+    },
+    {
+      "file": "freesound_community-night-ambience-59071__t0_34267.ogg",
+      "role": "ambience",
+      "at_s": 9.567,
+      "duration_s": 0.033,
+      "source_offset_s": 0.0,
+      "gain": 0.5021,
+      "fade_in_ms": 1533,
+      "fade_out_ms": 0,
+      "sustain": true,
+      "continues": false
+    },
+    {
+      "file": "sonican-spiritual-nature-364866 (1)__t0_33900.ogg",
+      "role": "music",
+      "at_s": 9.567,
+      "duration_s": 0.033,
+      "source_offset_s": 0.0,
+      "gain": 0.0815,
+      "fade_in_ms": 1366,
+      "fade_out_ms": 1533,
+      "sustain": true,
+      "continues": false
+    },
+    {
+      "file": "bhr_scene_23.mp3",
+      "role": "vo",
+      "at_s": 9.567,
+      "duration_s": 0.033,
+      "source_offset_s": 0.0,
+      "gain": 0.5495,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    }
+  ]
+}

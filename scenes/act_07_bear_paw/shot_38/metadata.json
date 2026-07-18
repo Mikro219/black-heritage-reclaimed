@@ -1,8 +1,118 @@
 {
-    "shot": "38",
-    "kind": "playback",
-    "assigned_to": "TBD",
-    "audio_lines": [],
-    "audio": "audio.mp3",
-    "_note": "Continues after the fork resolves on the correct path. Global frames 28844-29258."
+  "shot": "38",
+  "kind": "playback",
+  "assigned_to": "TBD",
+  "audio_lines": [],
+  "audio": "audio.mp3",
+  "_note": "Continues after the fork resolves on the correct path. Global frames 28844-29258.",
+  "audio_events": [
+    {
+      "file": "freesound_community-night-ambience-59071__t52300_22567.ogg",
+      "role": "ambience",
+      "at_s": 0.0,
+      "duration_s": 13.7,
+      "source_offset_s": 61.167,
+      "gain": 0.5021,
+      "fade_in_ms": 866,
+      "fade_out_ms": 900,
+      "sustain": true,
+      "continues": true
+    },
+    {
+      "file": "bensound-paperback__t66533_22567.ogg",
+      "role": "music",
+      "at_s": 0.0,
+      "duration_s": 13.7,
+      "source_offset_s": 75.4,
+      "gain": 0.1197,
+      "fade_in_ms": 2100,
+      "fade_out_ms": 2633,
+      "sustain": true,
+      "continues": true
+    },
+    {
+      "file": "bhr_scene_42.mp3",
+      "role": "vo",
+      "at_s": 0.0,
+      "duration_s": 13.7,
+      "source_offset_s": 0.067,
+      "gain": 0.5495,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": true
+    },
+    {
+      "file": "freesound_community-walking-through-grass-80308__t1333_900.ogg",
+      "role": "sfx",
+      "at_s": 0.133,
+      "duration_s": 0.9,
+      "source_offset_s": 1.333,
+      "gain": 1.0,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "freesound_community-walking-through-grass-80308__t2233_500.ogg",
+      "role": "sfx",
+      "at_s": 1.2,
+      "duration_s": 0.5,
+      "source_offset_s": 2.233,
+      "gain": 1.0,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "freesound_community-shirt-clothing-movement-6869__t1933_1467.ogg",
+      "role": "sfx",
+      "at_s": 4.767,
+      "duration_s": 1.467,
+      "source_offset_s": 1.933,
+      "gain": 1.0,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "freesound_community-046940_water-slosh-in-metal-bottle-64120__t0_733.ogg",
+      "role": "sfx",
+      "at_s": 6.133,
+      "duration_s": 0.733,
+      "source_offset_s": 0.0,
+      "gain": 0.5021,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "freesound_community-075698_drink-and-gulp-48263__t333_633.ogg",
+      "role": "sfx",
+      "at_s": 6.633,
+      "duration_s": 0.633,
+      "source_offset_s": 0.333,
+      "gain": 0.6832,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "freesound_community-075698_drink-and-gulp-48263__t1500_533.ogg",
+      "role": "sfx",
+      "at_s": 7.267,
+      "duration_s": 0.533,
+      "source_offset_s": 1.5,
+      "gain": 1.0,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    }
+  ]
 }

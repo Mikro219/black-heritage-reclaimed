@@ -1,0 +1,101 @@
+{
+  "shot": "18",
+  "audio_events": [
+    {
+      "file": "freesound_community-night-ambience-59071__t0_38667.ogg",
+      "role": "ambience",
+      "at_s": 0.0,
+      "duration_s": 0.133,
+      "source_offset_s": 38.533,
+      "gain": 0.5779,
+      "fade_in_ms": 466,
+      "fade_out_ms": 466,
+      "sustain": true,
+      "continues": true
+    },
+    {
+      "file": "bhr_scene_17.mp3",
+      "role": "vo",
+      "at_s": 0.0,
+      "duration_s": 0.133,
+      "source_offset_s": 9.967,
+      "gain": 0.5495,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": true
+    },
+    {
+      "file": "Follow the Drinkin' Gourd Karaoke Key of Dm - R. Smith Music (128k)__t1700_20800.ogg",
+      "role": "sfx",
+      "at_s": 0.0,
+      "duration_s": 5.867,
+      "source_offset_s": 11.667,
+      "gain": 0.1948,
+      "fade_in_ms": 3400,
+      "fade_out_ms": 1333,
+      "sustain": false,
+      "continues": true
+    },
+    {
+      "file": "freesound_community-creasing-paper-92362__t2133_533.ogg",
+      "role": "sfx",
+      "at_s": 0.0,
+      "duration_s": 0.4,
+      "source_offset_s": 2.267,
+      "gain": 1.0,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": true
+    },
+    {
+      "file": "bhr_scene_18.mp3",
+      "role": "vo",
+      "at_s": 0.133,
+      "duration_s": 5.467,
+      "source_offset_s": 0.0,
+      "gain": 0.5495,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "freesound_community-creasing-paper-92362__t3000_467.ogg",
+      "role": "sfx",
+      "at_s": 5.367,
+      "duration_s": 0.467,
+      "source_offset_s": 3.0,
+      "gain": 1.0,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "freesound_community-night-ambience-59071__t0_5233.ogg",
+      "role": "ambience",
+      "at_s": 5.6,
+      "duration_s": 0.267,
+      "source_offset_s": 0.0,
+      "gain": 0.5779,
+      "fade_in_ms": 466,
+      "fade_out_ms": 400,
+      "sustain": true,
+      "continues": false
+    },
+    {
+      "file": "bhr_scene_19__t0_5233.ogg",
+      "role": "vo",
+      "at_s": 5.6,
+      "duration_s": 0.267,
+      "source_offset_s": 0.0,
+      "gain": 0.5495,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    }
+  ]
+}

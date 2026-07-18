@@ -1,8 +1,130 @@
 {
-    "shot": "44",
-    "kind": "playback",
-    "assigned_to": "TBD",
-    "audio_lines": [],
-    "audio": "audio.mp3",
-    "_note": "Pan into Hamilton street. Global frames 29526-30059."
+  "shot": "44",
+  "kind": "playback",
+  "assigned_to": "TBD",
+  "audio_lines": [],
+  "audio": "audio.mp3",
+  "_note": "Pan into Hamilton street. Global frames 29526-30059.",
+  "audio_events": [
+    {
+      "file": "Caution-Is-Required_60_WSR3773801__t0_23500.ogg",
+      "role": "music",
+      "at_s": 0.567,
+      "duration_s": 17.233,
+      "source_offset_s": 0.0,
+      "gain": 0.0689,
+      "fade_in_ms": 1400,
+      "fade_out_ms": 1433,
+      "sustain": true,
+      "continues": false
+    },
+    {
+      "file": "bhr_scene_44.mp3",
+      "role": "vo",
+      "at_s": 0.567,
+      "duration_s": 11.367,
+      "source_offset_s": 0.0,
+      "gain": 0.5495,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "UIAlert-Soft_retro_computer_-Elevenlabs.mp3",
+      "role": "sfx",
+      "at_s": 4.3,
+      "duration_s": 0.733,
+      "source_offset_s": 0.0,
+      "gain": 0.3557,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "UIMvmt-Soft_UI_hover_sound.-Elevenlabs.mp3",
+      "role": "sfx",
+      "at_s": 5.3,
+      "duration_s": 0.533,
+      "source_offset_s": 0.0,
+      "gain": 4.1812,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "UIClick-soft_mobile_UI_tap_s-Elevenlabs.mp3",
+      "role": "sfx",
+      "at_s": 6.8,
+      "duration_s": 2.067,
+      "source_offset_s": 0.0,
+      "gain": 1.0,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "freesound_community-creasing-paper-92362__t1900_867.ogg",
+      "role": "sfx",
+      "at_s": 11.5,
+      "duration_s": 0.867,
+      "source_offset_s": 1.9,
+      "gain": 1.0,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "bhr_scene_45__t867_5384.ogg",
+      "role": "vo",
+      "at_s": 11.933,
+      "duration_s": 5.4,
+      "source_offset_s": 0.867,
+      "gain": 0.5495,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "freesound_community-creasing-paper-92362__t2700_800.ogg",
+      "role": "sfx",
+      "at_s": 16.933,
+      "duration_s": 0.8,
+      "source_offset_s": 2.7,
+      "gain": 1.0,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "Village _ DD_TTRPG Ambience _ 1 Hour__t11600_19767.ogg",
+      "role": "ambience",
+      "at_s": 17.333,
+      "duration_s": 0.467,
+      "source_offset_s": 11.6,
+      "gain": 1.3431,
+      "fade_in_ms": 1033,
+      "fade_out_ms": 933,
+      "sustain": true,
+      "continues": false
+    },
+    {
+      "file": "bhr_scene_46__t0_5900.ogg",
+      "role": "vo",
+      "at_s": 17.333,
+      "duration_s": 0.467,
+      "source_offset_s": 0.0,
+      "gain": 0.5495,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    }
+  ]
 }

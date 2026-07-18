@@ -1,0 +1,125 @@
+{
+  "shot": "11",
+  "audio_events": [
+    {
+      "file": "dragon-studio-dragon-wings-flapping-478385__t0_9533_x2.ogg",
+      "role": "ambience",
+      "at_s": 0.633,
+      "duration_s": 12.6,
+      "source_offset_s": 0.0,
+      "gain": 0.185,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": true,
+      "continues": false
+    },
+    {
+      "file": "freesound_community-geese-honking-28995__t2200_4667.ogg",
+      "role": "ambience",
+      "at_s": 0.633,
+      "duration_s": 4.667,
+      "source_offset_s": 2.2,
+      "gain": 0.1979,
+      "fade_in_ms": 366,
+      "fade_out_ms": 0,
+      "sustain": true,
+      "continues": false
+    },
+    {
+      "file": "freesound_community-005033_outside-tone-ambience-51399__t633_14833.ogg",
+      "role": "music",
+      "at_s": 0.633,
+      "duration_s": 14.567,
+      "source_offset_s": 0.633,
+      "gain": 0.0947,
+      "fade_in_ms": 333,
+      "fade_out_ms": 600,
+      "sustain": true,
+      "continues": false
+    },
+    {
+      "file": "Green-Hills-and-Gray-Skies_30ALT_WSR2371701__t0_41433.ogg",
+      "role": "music",
+      "at_s": 0.633,
+      "duration_s": 14.567,
+      "source_offset_s": 0.0,
+      "gain": 0.0963,
+      "fade_in_ms": 1433,
+      "fade_out_ms": 1500,
+      "sustain": true,
+      "continues": false
+    },
+    {
+      "file": "bhr_scene_11.mp3",
+      "role": "vo",
+      "at_s": 0.633,
+      "duration_s": 14.567,
+      "source_offset_s": 0.0,
+      "gain": 0.5495,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "freesound_community-walking-through-grass-80308__t1333_900.ogg",
+      "role": "sfx",
+      "at_s": 0.9,
+      "duration_s": 0.9,
+      "source_offset_s": 1.333,
+      "gain": 1.0,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "Soft_fabric_rustle_a_#3-1781317999571.mp3",
+      "role": "sfx",
+      "at_s": 1.567,
+      "duration_s": 1.567,
+      "source_offset_s": 0.0,
+      "gain": 1.5263,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "freesound_community-walking-through-grass-80308__t2233_1067.ogg",
+      "role": "sfx",
+      "at_s": 2.333,
+      "duration_s": 1.067,
+      "source_offset_s": 2.233,
+      "gain": 1.0,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "freesound_community-geese-honking-28995__t8767_3533.ogg",
+      "role": "ambience",
+      "at_s": 7.2,
+      "duration_s": 3.533,
+      "source_offset_s": 8.767,
+      "gain": 0.1979,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": true,
+      "continues": false
+    },
+    {
+      "file": "freesound_community-creasing-paper-92362__t2067_933.ogg",
+      "role": "sfx",
+      "at_s": 15.0,
+      "duration_s": 0.2,
+      "source_offset_s": 2.067,
+      "gain": 1.0,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    }
+  ]
+}

@@ -1,17 +1,26 @@
 """
 capcut_audio — import the CapCut master-timeline audio into the BHR experience.
 
-Source of truth: assets/draft_content.json — the CapCut project the master
-draft MP4 was exported from. Its audio tracks place the delivered stem MP3s
-(assets/Audio Files/) on the same 30fps master timeline that copy_frames.py's
+Source of truth: assets/audio/draft_content.json — the CapCut project the
+master draft MP4 was exported from. Its audio tracks place the delivered stem
+MP3s (assets/audio/stems/) on the same 30fps master timeline that copy_frames.py's
 SHOT_FRAMES maps onto shots. This script cuts those placements against the
 shot spans and emits per-shot ``audio_events`` (the layered-audio schema read
 by sequence_loader / played by engines.audio_mixer.ShotAudioMixer).
 
 What is imported: every placement of a standalone audio material
-(``extract_music`` / ``music`` types) whose name matches a delivered file.
-What is skipped: ``video_original_sound`` (Auntie Liza's VO baked into the
-scene renders — not delivered as stems) and CapCut-internal compound clips.
+(``extract_music`` / ``music`` types) whose name matches a delivered file,
+plus — since July 2026 — every ``video_original_sound`` placement (Auntie
+Liza's VO, sliced from the scene renders). VO placements resolve to the
+extracted comp audio in assets/audio/voice_lines/bhr_scene_NN.mp3 (scene
+number parsed from the render's file name, plus explicit overrides such as
+SC09 Option A/B -> bhr_scene_09-A/-B). A VO source only imports when the
+local file's duration agrees with the draft's render within
+VO_DUR_TOLERANCE_S — re-cut comps are skipped with a warning until their
+offsets are re-aligned by hand. Sources not present locally are likewise
+skipped with a warning (re-run the import when they land). ``--no-vo``
+restores the stems-only import (for when real AL-line recordings replace
+the comp VO). Still skipped: CapCut-internal compound clips.
 
 Track → role mapping (verified against the draft):
     tracks 0–3  → sfx        (one-shots, frame-anchored)
@@ -24,13 +33,14 @@ one placement split across shots share a single render — that is what lets the
 mixer hand a bed over between shots without restarting it.
 
 Usage:
-    py -3.12 scripts/capcut_audio.py assets/draft_content.json               # report
-    py -3.12 scripts/capcut_audio.py assets/draft_content.json --apply-scenes
-    py -3.12 scripts/capcut_audio.py assets/draft_content.json --to-builder BHR_Experience.bhrx.json
+    py -3.12 scripts/capcut_audio.py assets/audio/draft_content.json               # report
+    py -3.12 scripts/capcut_audio.py assets/audio/draft_content.json --apply-scenes
+    py -3.12 scripts/capcut_audio.py assets/audio/draft_content.json --to-builder BHR_Experience.bhrx.json
 
-    --audio-dir DIR   where the stem files live (default: assets/Audio Files)
+    --audio-dir DIR   where the stem files live (default: assets/audio/stems)
     --no-trim         skip ffmpeg pre-rendering; events reference the original
                       files (offsets are lost — degraded but functional)
+    --no-vo           stems only; skip VO (video_original_sound) placements
 
 --apply-scenes writes ONLY the "audio_events" key into each live
 scenes/<act>/shot_NN/metadata.json (idempotent re-runs) and copies the
@@ -43,6 +53,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -72,6 +83,63 @@ TRIM_TAIL_S   = 0.25
 # bed (CapCut-style manual looping). Merge when the gap is below this.
 BED_MERGE_GAP_S = 0.75
 
+# Roles that play as looping sustain beds; "sfx" and "vo" are one-shots.
+BED_ROLES = ("music", "ambience")
+
+# --- VO (video_original_sound) source resolution -----------------------------
+# The draft slices VO from the scene renders; we resolve each render to the
+# comp audio extracted by scripts/extract_comp_audio.py.
+VO_DIR = ROOT / "assets" / "audio" / "voice_lines"
+
+# norm_name(source file name) -> local audio file (absolute Path).
+VO_OVERRIDES = {
+    "sc09_v1-optiona.mov": VO_DIR / "bhr_scene_09-A.mp3",
+    "sc09_v1-optionb.mov": VO_DIR / "bhr_scene_09-B.mp3",
+    "img_5032.mov":        ROOT / "assets" / "audio" / "stems" / "IMG_5032.mov",
+}
+
+VO_SCENE_RE = re.compile(r"(?:sc[_ ]?|scene[_ ]?)(\d+)", re.I)
+
+# A VO source only imports when the local file's duration matches the draft's
+# render within this tolerance — beyond it the comp was re-cut and the draft's
+# source offsets no longer line up (user decision July 2026: 0.5s).
+VO_DUR_TOLERANCE_S = 0.5
+
+_probe_cache: dict[str, float | None] = {}
+
+
+def probe_duration(path: Path) -> float | None:
+    """Duration in seconds via ffprobe (cached); None when unavailable."""
+    key = str(path)
+    if key in _probe_cache:
+        return _probe_cache[key]
+    dur = None
+    ffprobe = shutil.which("ffprobe")
+    if ffprobe and path.exists():
+        result = subprocess.run(
+            [ffprobe, "-v", "error", "-show_entries", "format=duration",
+             "-of", "csv=p=0", str(path)],
+            capture_output=True, text=True)
+        try:
+            dur = float(result.stdout.strip())
+        except ValueError:
+            dur = None
+    _probe_cache[key] = dur
+    return dur
+
+
+def resolve_vo_source(source_name: str) -> Path | None:
+    """Map a render file name (e.g. 'SC20_V1.mov', 'BHR_scene02.mov') to the
+    local voice-line file, or None when unmapped/missing."""
+    override = VO_OVERRIDES.get(norm_name(source_name))
+    if override is not None:
+        return override if override.exists() else None
+    m = VO_SCENE_RE.search(source_name)
+    if m is None:
+        return None
+    candidate = VO_DIR / f"bhr_scene_{int(m.group(1)):02d}.mp3"
+    return candidate if candidate.exists() else None
+
 
 def norm_name(s: str) -> str:
     return unicodedata.normalize("NFC", s).strip().lower()
@@ -96,11 +164,13 @@ def index_audio_files(audio_dir: Path) -> dict[str, Path]:
     return idx
 
 
-def load_placements(draft_path: Path, audio_dir: Path):
+def load_placements(draft_path: Path, audio_dir: Path, include_vo: bool = True):
     """Parse the draft into placement dicts + a skip/mismatch summary.
 
     placement: {name, path, role, track, t0, dur, src_off, speed, gain,
                 fade_in_ms, fade_out_ms, natural_s}
+    vo_skips: [{name, reason, t0, dur}] — VO placements that could not be
+    imported (unmapped source / missing file / re-cut comp).
     """
     with open(draft_path, encoding="utf-8") as f:
         draft = json.load(f)
@@ -113,23 +183,56 @@ def load_placements(draft_path: Path, audio_dir: Path):
     placements: list[dict] = []
     stats = Counter()
     unmatched: Counter = Counter()
+    vo_skips: list[dict] = []
 
     atracks = [t for t in draft.get("tracks", []) if t.get("type") == "audio"]
     for ti, track in enumerate(atracks):
-        role = ROLE_BY_TRACK[ti] if ti < len(ROLE_BY_TRACK) else "sfx"
+        track_role = ROLE_BY_TRACK[ti] if ti < len(ROLE_BY_TRACK) else "sfx"
         for seg in track.get("segments", []):
             mat = auds.get(seg.get("material_id"))
             if mat is None:
                 stats["no_material"] += 1
                 continue
+            tgt = seg.get("target_timerange", {})
+            src = seg.get("source_timerange", {})
+
             if mat.get("type") == "video_original_sound":
-                stats["vo_render"] += 1          # baked VO — not a stem
-                continue
-            path = files.get(norm_name(mat.get("name", "")))
-            if path is None:
-                stats["unmatched"] += 1          # compound clips etc.
-                unmatched[mat.get("name", "?")] += 1
-                continue
+                # Auntie Liza's VO, sliced from a scene render — resolve to
+                # the extracted comp audio.
+                stats["vo_render"] += 1
+                if not include_vo:
+                    continue
+                src_name = Path(mat.get("path") or mat.get("name", "?")).name
+                local = resolve_vo_source(src_name)
+                reason = None
+                natural = mat.get("duration", 0) / US
+                if local is None:
+                    reason = "no local voice-line file"
+                else:
+                    local_dur = probe_duration(local)
+                    if local_dur is None:
+                        reason = "ffprobe unavailable — cannot verify timing"
+                    elif abs(local_dur - natural) > VO_DUR_TOLERANCE_S:
+                        reason = (f"comp re-cut (local {local_dur:.2f}s vs "
+                                  f"draft render {natural:.2f}s)")
+                    else:
+                        natural = local_dur   # trust the file we will slice
+                if reason is not None:
+                    stats["vo_skipped"] += 1
+                    vo_skips.append({"name": src_name, "reason": reason,
+                                     "t0": tgt.get("start", 0) / US,
+                                     "dur": tgt.get("duration", 0) / US})
+                    continue
+                name, path, role = local.name, local, "vo"
+                stats["vo_placed"] += 1
+            else:
+                path = files.get(norm_name(mat.get("name", "")))
+                if path is None:
+                    stats["unmatched"] += 1          # compound clips etc.
+                    unmatched[mat.get("name", "?")] += 1
+                    continue
+                name, role = mat["name"], track_role
+                natural = mat.get("duration", 0) / US
 
             fade_in_ms = fade_out_ms = 0
             for ref in seg.get("extra_material_refs", []):
@@ -138,10 +241,8 @@ def load_placements(draft_path: Path, audio_dir: Path):
                     fade_in_ms  = int(fd.get("fade_in_duration", 0) / 1000)
                     fade_out_ms = int(fd.get("fade_out_duration", 0) / 1000)
 
-            tgt = seg.get("target_timerange", {})
-            src = seg.get("source_timerange", {})
             placements.append({
-                "name":       mat["name"],
+                "name":       name,
                 "path":       path,
                 "role":       role,
                 "track":      ti,
@@ -152,19 +253,19 @@ def load_placements(draft_path: Path, audio_dir: Path):
                 "gain":       float(seg.get("volume", 1.0)),
                 "fade_in_ms":  fade_in_ms,
                 "fade_out_ms": fade_out_ms,
-                "natural_s":  mat.get("duration", 0) / US,
+                "natural_s":  natural,
             })
             stats["placed"] += 1
 
-    return placements, stats, unmatched
+    return placements, stats, unmatched, vo_skips
 
 
 def merge_bed_runs(placements: list[dict]) -> list[dict]:
     """Merge back-to-back same-file bed placements on the same track into one
-    logical placement (CapCut manual looping). SFX placements pass through —
-    repeats there are intentional (e.g. paper crinkles)."""
-    beds = [p for p in placements if p["role"] != "sfx"]
-    sfx  = [p for p in placements if p["role"] == "sfx"]
+    logical placement (CapCut manual looping). SFX and VO placements pass
+    through — repeats there are intentional (paper crinkles; VO slices)."""
+    beds = [p for p in placements if p["role"] in BED_ROLES]
+    sfx  = [p for p in placements if p["role"] not in BED_ROLES]
 
     merged: list[dict] = []
     beds.sort(key=lambda p: (p["track"], norm_name(p["name"]), p["t0"]))
@@ -233,6 +334,10 @@ def needs_trim(p: dict) -> bool:
         return True
     if p["src_off"] > TRIM_OFFSET_S:
         return True
+    # pygame can only play audio containers — a video source (VO sliced from
+    # a .mov render) must always be re-rendered.
+    if p["path"].suffix.lower() not in AUDIO_EXTS:
+        return True
     return p["dur"] < p["natural_s"] - TRIM_TAIL_S
 
 
@@ -300,7 +405,7 @@ def pieces_to_events(pieces: list[dict], pool: Path,
             "gain":            round(pc["gain"], 4),
             "fade_in_ms":      pc["fade_in_ms"],
             "fade_out_ms":     pc["fade_out_ms"],
-            "sustain":         pc["role"] != "sfx",
+            "sustain":         pc["role"] in BED_ROLES,
             "continues":       pc["continues"],
         })
     return events
@@ -318,18 +423,35 @@ def _copy_into_pool(src: Path, pool: Path) -> None:
 # Modes
 # ---------------------------------------------------------------------------
 
-def report(by_shot, placements, stats, unmatched, dropped) -> None:
+def report(by_shot, placements, stats, unmatched, dropped,
+           vo_skips=()) -> None:
     W = 66
     print("=" * W)
     print("CapCut audio import — report")
     print("=" * W)
     print(f"  placements matched: {stats['placed']}  "
           f"(after bed merging: {len(placements)})")
-    print(f"  VO render sound skipped: {stats['vo_render']}   "
+    print(f"  VO placements imported: {stats['vo_placed']} of "
+          f"{stats['vo_render']}   "
           f"unmatched materials skipped: {stats['unmatched']}")
     if unmatched:
         names = ", ".join(sorted(unmatched)[:6])
         print(f"    unmatched: {names}{' …' if len(unmatched) > 6 else ''}")
+    if vo_skips:
+        spans = shot_spans()
+        print(f"  VO placements skipped: {len(vo_skips)}")
+        by_source: dict[str, dict] = {}
+        for sk in vo_skips:
+            shots = [shot for _, shot, s0, s1 in spans
+                     if min(sk["t0"] + sk["dur"], s1) - max(sk["t0"], s0) > 1e-6]
+            rec = by_source.setdefault(sk["name"], {"reason": sk["reason"],
+                                                    "n": 0, "shots": set()})
+            rec["n"] += 1
+            rec["shots"].update(shots)
+        for name, rec in sorted(by_source.items()):
+            shots = ", ".join(sorted(rec["shots"])) or "none"
+            print(f"    WARNING {name}: {rec['reason']} — "
+                  f"{rec['n']} slice(s), shots {shots}")
     print(f"  placements dropped (no shot covers them): {dropped}")
     print("-" * W)
     total = 0
@@ -420,7 +542,7 @@ def to_builder(placements: list[dict], project_path: Path) -> None:
                 "gain":            round(pc["gain"], 4),
                 "fade_in_ms":      pc["fade_in_ms"],
                 "fade_out_ms":     pc["fade_out_ms"],
-                "sustain":         pc["role"] != "sfx",
+                "sustain":         pc["role"] in BED_ROLES,
                 "continues":       pc["continues"],
                 "role":            pc["role"],
             })
@@ -438,6 +560,14 @@ def to_builder(placements: list[dict], project_path: Path) -> None:
           f"{project_path.name} ({dropped} placements fell outside all blocks); "
           f"{len(project['sounds'])} sounds registered")
 
+    # Refresh the builder's auto-loaded bundle so the merged project shows up
+    # the next time index.html is opened (file:// pages cannot fetch JSON).
+    try:
+        from bundle_builder_project import write_bundle
+        write_bundle(project_path)
+    except Exception as exc:                          # bundling is best-effort
+        print(f"[capcut_audio] WARNING could not refresh builder bundle: {exc}")
+
 
 # ---------------------------------------------------------------------------
 
@@ -446,7 +576,7 @@ def main() -> int:
         description="Import CapCut master-timeline audio as BHR audio_events")
     parser.add_argument("draft", type=Path, help="CapCut draft_content.json")
     parser.add_argument("--audio-dir", type=Path,
-                        default=ROOT / "assets" / "Audio Files")
+                        default=ROOT / "assets" / "audio" / "stems")
     parser.add_argument("--apply-scenes", action="store_true",
                         help="write audio_events into the live scenes/ tree")
     parser.add_argument("--scenes-root", type=Path, default=ROOT / "scenes",
@@ -455,6 +585,10 @@ def main() -> int:
                         help="merge audio clips into a .bhrx.json project")
     parser.add_argument("--no-trim", action="store_true",
                         help="skip ffmpeg pre-rendering of offset/cut clips")
+    parser.add_argument("--no-vo", action="store_true",
+                        help="stems only — skip video_original_sound (VO) "
+                             "placements (use once real AL-line recordings "
+                             "replace the comp VO)")
     args = parser.parse_args()
 
     if not args.draft.exists():
@@ -462,13 +596,14 @@ def main() -> int:
     if not args.audio_dir.is_dir():
         sys.exit(f"audio dir not found: {args.audio_dir}")
 
-    raw, stats, unmatched = load_placements(args.draft, args.audio_dir)
+    raw, stats, unmatched, vo_skips = load_placements(
+        args.draft, args.audio_dir, include_vo=not args.no_vo)
     placements = merge_bed_runs(raw)
 
     spans = [(shot, s0, s1) for _, shot, s0, s1 in shot_spans()]
     by_shot, dropped = cut_against_spans(placements, spans)
 
-    report(by_shot, placements, stats, unmatched, dropped)
+    report(by_shot, placements, stats, unmatched, dropped, vo_skips)
 
     ffmpeg = shutil.which("ffmpeg")
     if not args.no_trim and ffmpeg is None and (args.apply_scenes):

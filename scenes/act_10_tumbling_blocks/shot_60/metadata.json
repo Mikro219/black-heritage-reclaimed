@@ -1,22 +1,281 @@
 {
-    "shot": "60",
-    "kind": "playback",
-    "assigned_to": "TBD",
-    "audio_lines": ["AL-10-004"],
-    "audio": "audio.mp3",
-    "_note": "Tumbling Blocks (Scene 10) — AL-10-004 fast_gather OI (written as non-blocking OI per Mike). Playback with frame-gated fast-gather OI; frames play straight through. OI window: global 36692-36858 -> local [163, 329]. Shot base global frame = 36530.",
-    "interaction": {
-        "tier": "OI",
-        "id": "fast_gather",
-        "type": "speed_bilateral",
-        "params": {
-            "min_bursts": 3,
-            "burst_window_ms": 3000,
-            "velocity_multiplier": 2.0,
-            "use_pose": true
-        },
-        "sfx": "detect.mp3",
-        "feedback": "green_flash",
-        "oi_frame_window": [163, 329]
+  "shot": "60",
+  "kind": "playback",
+  "assigned_to": "TBD",
+  "audio_lines": [
+    "AL-10-004"
+  ],
+  "audio": "audio.mp3",
+  "_note": "Tumbling Blocks (Scene 10) \u2014 AL-10-004 fast_gather OI (written as non-blocking OI per Mike). Playback with frame-gated fast-gather OI; frames play straight through. OI window: global 36692-36858 -> local [163, 329]. Shot base global frame = 36530.",
+  "interaction": {
+    "tier": "OI",
+    "id": "fast_gather",
+    "type": "speed_bilateral",
+    "params": {
+      "min_bursts": 3,
+      "burst_window_ms": 3000,
+      "velocity_multiplier": 2.0,
+      "use_pose": true
+    },
+    "sfx": "detect.mp3",
+    "feedback": "green_flash",
+    "oi_frame_window": [
+      163,
+      329
+    ]
+  },
+  "audio_events": [
+    {
+      "file": "freesound_community-005033_outside-tone-ambience-51399__t2333_9333.ogg",
+      "role": "ambience",
+      "at_s": 0.0,
+      "duration_s": 1.0,
+      "source_offset_s": 10.667,
+      "gain": 0.0737,
+      "fade_in_ms": 1033,
+      "fade_out_ms": 1100,
+      "sustain": true,
+      "continues": true
+    },
+    {
+      "file": "GOREMisc-Create_an_intense_ci-Elevenlabs__t17200_10967.ogg",
+      "role": "sfx",
+      "at_s": 0.0,
+      "duration_s": 2.633,
+      "source_offset_s": 25.533,
+      "gain": 0.1026,
+      "fade_in_ms": 666,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": true
+    },
+    {
+      "file": "MUSCInst-Dark_epic_orchestral-Elevenlabs__t0_3267_x0p9.ogg",
+      "role": "ambience",
+      "at_s": 0.0,
+      "duration_s": 2.633,
+      "source_offset_s": 0.57,
+      "gain": 0.3739,
+      "fade_in_ms": 833,
+      "fade_out_ms": 566,
+      "sustain": true,
+      "continues": true
+    },
+    {
+      "file": "bhr_scene_61__t0_2700.ogg",
+      "role": "vo",
+      "at_s": 0.0,
+      "duration_s": 2.633,
+      "source_offset_s": 0.067,
+      "gain": 0.3263,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": true
+    },
+    {
+      "file": "MUSCPerc-Cinematic_Sound_Effe-Elevenlabs__t0_1867.ogg",
+      "role": "sfx",
+      "at_s": 11.467,
+      "duration_s": 1.867,
+      "source_offset_s": 0.0,
+      "gain": 0.3557,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "MUSCInst-Dark_epic_orchestral-Elevenlabs__t5640_9633_x0p9.ogg",
+      "role": "music",
+      "at_s": 13.333,
+      "duration_s": 7.1,
+      "source_offset_s": 5.64,
+      "gain": 0.3739,
+      "fade_in_ms": 600,
+      "fade_out_ms": 666,
+      "sustain": true,
+      "continues": false
+    },
+    {
+      "file": "bhr_scene_61__t2700_3233.ogg",
+      "role": "vo",
+      "at_s": 13.333,
+      "duration_s": 3.233,
+      "source_offset_s": 2.7,
+      "gain": 0.3263,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "WHSH-Dark_cinematic_revea-Elevenlabs__t0_1233.ogg",
+      "role": "sfx",
+      "at_s": 13.333,
+      "duration_s": 1.233,
+      "source_offset_s": 0.0,
+      "gain": 0.1778,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "photos-searching-a-bag-415807__t0_867.ogg",
+      "role": "ambience",
+      "at_s": 14.067,
+      "duration_s": 0.867,
+      "source_offset_s": 0.0,
+      "gain": 0.0085,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": true,
+      "continues": false
+    },
+    {
+      "file": "Quick_thudding_shove_#3-1781538938716__t867_867.ogg",
+      "role": "sfx",
+      "at_s": 14.067,
+      "duration_s": 0.867,
+      "source_offset_s": 0.867,
+      "gain": 0.3162,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "WHSH-zoom_in_whoosh-Elevenlabs__t367_867.ogg",
+      "role": "sfx",
+      "at_s": 14.767,
+      "duration_s": 0.867,
+      "source_offset_s": 0.367,
+      "gain": 0.1778,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "photos-searching-a-bag-415807__t0_4767.ogg",
+      "role": "ambience",
+      "at_s": 15.733,
+      "duration_s": 4.7,
+      "source_offset_s": 0.0,
+      "gain": 0.0074,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": true,
+      "continues": false
+    },
+    {
+      "file": "Quick_thudding_shove_#3-1781538938716__t867_867.ogg",
+      "role": "sfx",
+      "at_s": 15.733,
+      "duration_s": 0.867,
+      "source_offset_s": 0.867,
+      "gain": 0.3162,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "WHSH-Soft_3-second_minima-Elevenlabs__t0_1467.ogg",
+      "role": "sfx",
+      "at_s": 15.933,
+      "duration_s": 1.467,
+      "source_offset_s": 0.0,
+      "gain": 0.1778,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "bhr_scene_61__t5933_4133.ogg",
+      "role": "vo",
+      "at_s": 16.567,
+      "duration_s": 3.867,
+      "source_offset_s": 5.933,
+      "gain": 0.5054,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "Quick_thudding_shove_#3-1781538938716__t867_867.ogg",
+      "role": "sfx",
+      "at_s": 17.1,
+      "duration_s": 0.867,
+      "source_offset_s": 0.867,
+      "gain": 0.3162,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "WHSH-Dark_cinematic_revea-Elevenlabs__t0_1233.ogg",
+      "role": "sfx",
+      "at_s": 17.4,
+      "duration_s": 1.233,
+      "source_offset_s": 0.0,
+      "gain": 0.1778,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "Quick_thudding_shove_#3-1781538938716__t867_867.ogg",
+      "role": "sfx",
+      "at_s": 18.267,
+      "duration_s": 0.867,
+      "source_offset_s": 0.867,
+      "gain": 0.3162,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "WHSH-zoom_in_whoosh-Elevenlabs__t367_867.ogg",
+      "role": "sfx",
+      "at_s": 18.833,
+      "duration_s": 0.867,
+      "source_offset_s": 0.367,
+      "gain": 0.1778,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "Quick_thudding_shove_#3-1781538938716__t867_867.ogg",
+      "role": "sfx",
+      "at_s": 19.633,
+      "duration_s": 0.8,
+      "source_offset_s": 0.867,
+      "gain": 0.3162,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "MAGEvil-Quiet_cursed_weapon_-Elevenlabs__t0_2267.ogg",
+      "role": "sfx",
+      "at_s": 20.333,
+      "duration_s": 0.1,
+      "source_offset_s": 0.0,
+      "gain": 0.3359,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
     }
+  ]
 }

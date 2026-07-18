@@ -1,8 +1,46 @@
 {
-    "shot": "79",
-    "kind": "playback",
-    "assigned_to": "TBD",
-    "audio_lines": [],
-    "audio": "audio.mp3",
-    "_note": "Epilogue / Final Address (non-interactive, input locked). Plays straight through to the end of the footage. Global frames 43054-45631 (end)."
+  "shot": "79",
+  "kind": "playback",
+  "assigned_to": "TBD",
+  "audio_lines": [],
+  "audio": "audio.mp3",
+  "_note": "Epilogue / Final Address (non-interactive, input locked). Plays straight through to the end of the footage. Global frames 43054-45631 (end).",
+  "audio_events": [
+    {
+      "file": "Soft-Wonder_60_AM09028__t42133_12700.ogg",
+      "role": "music",
+      "at_s": 0.0,
+      "duration_s": 6.433,
+      "source_offset_s": 48.4,
+      "gain": 0.0,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": true,
+      "continues": true
+    },
+    {
+      "file": "bhr_scene_77.mp3",
+      "role": "vo",
+      "at_s": 0.0,
+      "duration_s": 0.067,
+      "source_offset_s": 6.267,
+      "gain": 0.5495,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": true
+    },
+    {
+      "file": "freesound_community-beach-ambiance-16328__t0_85800.ogg",
+      "role": "sfx",
+      "at_s": 0.067,
+      "duration_s": 85.8,
+      "source_offset_s": 0.0,
+      "gain": 0.3263,
+      "fade_in_ms": 1700,
+      "fade_out_ms": 1833,
+      "sustain": false,
+      "continues": false
+    }
+  ]
 }

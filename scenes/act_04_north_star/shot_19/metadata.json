@@ -1,67 +1,525 @@
 {
-    "shot": "19",
-    "kind": "interactive",
-    "assigned_to": "TBD",
-    "audio_lines": ["AL-04-007"],
-    "audio": "audio.mp3",
+  "shot": "19",
+  "kind": "interactive",
+  "assigned_to": "TBD",
+  "audio_lines": [
+    "AL-04-007"
+  ],
+  "audio": "audio.mp3",
+  "hold_ms": 500,
+  "segments": {
+    "intro": [
+      1,
+      130
+    ],
+    "idle_1": [
+      465,
+      465
+    ],
+    "play_to_2": [
+      466,
+      488
+    ],
+    "idle_2": [
+      550,
+      550
+    ],
+    "play_to_3": [
+      576,
+      598
+    ],
+    "idle_3": [
+      660,
+      660
+    ],
+    "play_to_4": [
+      682,
+      718
+    ],
+    "idle_4": [
+      719,
+      719
+    ],
+    "play_to_5": [
+      798,
+      840
+    ],
+    "idle_5": [
+      1191,
+      1191
+    ],
+    "play_to_6": [
+      1192,
+      1228
+    ],
+    "idle_6": [
+      1267,
+      1267
+    ],
+    "play_to_7": [
+      1298,
+      1330
+    ],
+    "idle_7": [
+      1387,
+      1387
+    ],
+    "conclusion": [
+      1418,
+      1686
+    ]
+  },
+  "interaction": {
+    "tier": "CG",
     "hold_ms": 500,
-    "segments": {
-        "intro":      [1,    130],
-        "idle_1":     [465,  465],
-        "play_to_2":  [466,  488],
-        "idle_2":     [550,  550],
-        "play_to_3":  [576,  598],
-        "idle_3":     [660,  660],
-        "play_to_4":  [682,  718],
-        "idle_4":     [719,  719],
-        "play_to_5":  [798,  840],
-        "idle_5":     [1191, 1191],
-        "play_to_6":  [1192, 1228],
-        "idle_6":     [1267, 1267],
-        "play_to_7":  [1298, 1330],
-        "idle_7":     [1387, 1387],
-        "conclusion": [1418, 1686]
-    },
-    "interaction": {
-        "tier": "CG",
-        "hold_ms": 500,
-        "interaction_fsm": {
-            "gesture_type": "draw",
-            "initial": "stroke_1",
-            "states": {
-                "stroke_1":   { "segment": "idle_1",    "loop": true,  "directions": ["left"]                                    },
-                "play_to_2":  { "segment": "play_to_2", "loop": false, "on_enter_sfx": "stroke1.mp3"                             },
-                "stroke_2":   { "segment": "idle_2",    "loop": true,  "directions": ["down"]                                    },
-                "play_to_3":  { "segment": "play_to_3", "loop": false, "on_enter_sfx": "stroke2.mp3"                             },
-                "stroke_3":   { "segment": "idle_3",    "loop": true,  "directions": ["right"]                                   },
-                "play_to_4":  { "segment": "play_to_4", "loop": false, "on_enter_sfx": "stroke3.mp3"                             },
-                "stroke_4":   { "segment": "idle_4",    "loop": true,  "directions": ["up"]                                      },
-                "play_to_5":  { "segment": "play_to_5", "loop": false, "on_enter_sfx": "stroke4.mp3"                             },
-                "stroke_5":   { "segment": "idle_5",    "loop": true,  "directions": ["up_left"]                                 },
-                "play_to_6":  { "segment": "play_to_6", "loop": false, "on_enter_sfx": "stroke5.mp3"                             },
-                "stroke_6":   { "segment": "idle_6",    "loop": true,  "directions": ["up_left"]                                 },
-                "play_to_7":  { "segment": "play_to_7", "loop": false, "on_enter_sfx": "stroke6.mp3"                             },
-                "stroke_7":   { "segment": "idle_7",    "loop": true,  "directions": ["left"]                                    },
-                "conclusion": { "segment": "conclusion","loop": false, "on_enter_sfx": "stroke7.mp3"                             }
-            },
-            "transitions": [
-                { "from": "stroke_1",   "on": "draw_left",    "to": "play_to_2"   },
-                { "from": "play_to_2",  "on": "segment_end",  "to": "stroke_2"    },
-                { "from": "stroke_2",   "on": "draw_down",    "to": "play_to_3"   },
-                { "from": "play_to_3",  "on": "segment_end",  "to": "stroke_3"    },
-                { "from": "stroke_3",   "on": "draw_right",   "to": "play_to_4"   },
-                { "from": "play_to_4",  "on": "segment_end",  "to": "stroke_4"    },
-                { "from": "stroke_4",   "on": "draw_up",      "to": "play_to_5"    },
-                { "from": "play_to_5",  "on": "segment_end",  "to": "stroke_5"    },
-                { "from": "stroke_5",   "on": "draw_up_left", "to": "play_to_6"   },
-                { "from": "play_to_6",  "on": "segment_end",  "to": "stroke_6"    },
-                { "from": "stroke_6",   "on": "draw_up_left", "to": "play_to_7"   },
-                { "from": "play_to_7",  "on": "segment_end",  "to": "stroke_7"    },
-                { "from": "stroke_7",   "on": "draw_left",    "to": "conclusion"  },
-                { "from": "conclusion", "on": "segment_end",  "to": "__advance__" }
-            ],
-            "fallback": { "timeout_s": 30, "on_timeout": "auto_advance" }
+    "interaction_fsm": {
+      "gesture_type": "draw",
+      "initial": "stroke_1",
+      "states": {
+        "stroke_1": {
+          "segment": "idle_1",
+          "loop": true,
+          "directions": [
+            "left"
+          ]
+        },
+        "play_to_2": {
+          "segment": "play_to_2",
+          "loop": false,
+          "on_enter_sfx": "stroke1.mp3"
+        },
+        "stroke_2": {
+          "segment": "idle_2",
+          "loop": true,
+          "directions": [
+            "down"
+          ]
+        },
+        "play_to_3": {
+          "segment": "play_to_3",
+          "loop": false,
+          "on_enter_sfx": "stroke2.mp3"
+        },
+        "stroke_3": {
+          "segment": "idle_3",
+          "loop": true,
+          "directions": [
+            "right"
+          ]
+        },
+        "play_to_4": {
+          "segment": "play_to_4",
+          "loop": false,
+          "on_enter_sfx": "stroke3.mp3"
+        },
+        "stroke_4": {
+          "segment": "idle_4",
+          "loop": true,
+          "directions": [
+            "up"
+          ]
+        },
+        "play_to_5": {
+          "segment": "play_to_5",
+          "loop": false,
+          "on_enter_sfx": "stroke4.mp3"
+        },
+        "stroke_5": {
+          "segment": "idle_5",
+          "loop": true,
+          "directions": [
+            "up_left"
+          ]
+        },
+        "play_to_6": {
+          "segment": "play_to_6",
+          "loop": false,
+          "on_enter_sfx": "stroke5.mp3"
+        },
+        "stroke_6": {
+          "segment": "idle_6",
+          "loop": true,
+          "directions": [
+            "up_left"
+          ]
+        },
+        "play_to_7": {
+          "segment": "play_to_7",
+          "loop": false,
+          "on_enter_sfx": "stroke6.mp3"
+        },
+        "stroke_7": {
+          "segment": "idle_7",
+          "loop": true,
+          "directions": [
+            "left"
+          ]
+        },
+        "conclusion": {
+          "segment": "conclusion",
+          "loop": false,
+          "on_enter_sfx": "stroke7.mp3"
         }
+      },
+      "transitions": [
+        {
+          "from": "stroke_1",
+          "on": "draw_left",
+          "to": "play_to_2"
+        },
+        {
+          "from": "play_to_2",
+          "on": "segment_end",
+          "to": "stroke_2"
+        },
+        {
+          "from": "stroke_2",
+          "on": "draw_down",
+          "to": "play_to_3"
+        },
+        {
+          "from": "play_to_3",
+          "on": "segment_end",
+          "to": "stroke_3"
+        },
+        {
+          "from": "stroke_3",
+          "on": "draw_right",
+          "to": "play_to_4"
+        },
+        {
+          "from": "play_to_4",
+          "on": "segment_end",
+          "to": "stroke_4"
+        },
+        {
+          "from": "stroke_4",
+          "on": "draw_up",
+          "to": "play_to_5"
+        },
+        {
+          "from": "play_to_5",
+          "on": "segment_end",
+          "to": "stroke_5"
+        },
+        {
+          "from": "stroke_5",
+          "on": "draw_up_left",
+          "to": "play_to_6"
+        },
+        {
+          "from": "play_to_6",
+          "on": "segment_end",
+          "to": "stroke_6"
+        },
+        {
+          "from": "stroke_6",
+          "on": "draw_up_left",
+          "to": "play_to_7"
+        },
+        {
+          "from": "play_to_7",
+          "on": "segment_end",
+          "to": "stroke_7"
+        },
+        {
+          "from": "stroke_7",
+          "on": "draw_left",
+          "to": "conclusion"
+        },
+        {
+          "from": "conclusion",
+          "on": "segment_end",
+          "to": "__advance__"
+        }
+      ],
+      "fallback": {
+        "timeout_s": 30,
+        "on_timeout": "auto_advance"
+      }
+    }
+  },
+  "fallback": {
+    "timeout_s": 60,
+    "reprompt_s": [],
+    "on_timeout": "auto_advance"
+  },
+  "audio_events": [
+    {
+      "file": "Follow the Drinkin' Gourd Karaoke Key of Dm - R. Smith Music (128k)__t1700_20800.ogg",
+      "role": "sfx",
+      "at_s": 0.0,
+      "duration_s": 5.0,
+      "source_offset_s": 17.5,
+      "gain": 0.1948,
+      "fade_in_ms": 3400,
+      "fade_out_ms": 1333,
+      "sustain": false,
+      "continues": true
     },
-    "fallback": { "timeout_s": 60, "reprompt_s": [], "on_timeout": "auto_advance" }
+    {
+      "file": "freesound_community-night-ambience-59071__t0_5233.ogg",
+      "role": "ambience",
+      "at_s": 0.0,
+      "duration_s": 5.0,
+      "source_offset_s": 0.233,
+      "gain": 0.5779,
+      "fade_in_ms": 466,
+      "fade_out_ms": 400,
+      "sustain": true,
+      "continues": true
+    },
+    {
+      "file": "bhr_scene_19__t0_5233.ogg",
+      "role": "vo",
+      "at_s": 0.0,
+      "duration_s": 5.0,
+      "source_offset_s": 0.233,
+      "gain": 0.5495,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": true
+    },
+    {
+      "file": "MUSCPerc-Cinematic_Sound_Effe-Elevenlabs__t0_1733.ogg",
+      "role": "sfx",
+      "at_s": 13.8,
+      "duration_s": 1.733,
+      "source_offset_s": 0.0,
+      "gain": 0.3557,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "bensound-pianomoment__t49367_13333.ogg",
+      "role": "ambience",
+      "at_s": 15.533,
+      "duration_s": 13.333,
+      "source_offset_s": 49.367,
+      "gain": 0.0694,
+      "fade_in_ms": 1766,
+      "fade_out_ms": 1766,
+      "sustain": true,
+      "continues": false
+    },
+    {
+      "file": "freesound_community-night-ambience-59071__t5333_13333.ogg",
+      "role": "sfx",
+      "at_s": 15.533,
+      "duration_s": 13.333,
+      "source_offset_s": 5.333,
+      "gain": 0.5779,
+      "fade_in_ms": 933,
+      "fade_out_ms": 966,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "UIBeep-Create_a_very_short_-Elevenlabs__t0_1033.ogg",
+      "role": "sfx",
+      "at_s": 15.633,
+      "duration_s": 1.033,
+      "source_offset_s": 0.0,
+      "gain": 1.0,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "UIBeep-Create_a_very_short_-Elevenlabs__t0_933_x1p10714.ogg",
+      "role": "sfx",
+      "at_s": 19.233,
+      "duration_s": 0.933,
+      "source_offset_s": 0.0,
+      "gain": 1.0,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "UIBeep-Create_a_very_short_-Elevenlabs__t0_867_x1p2.ogg",
+      "role": "sfx",
+      "at_s": 22.733,
+      "duration_s": 0.867,
+      "source_offset_s": 0.0,
+      "gain": 1.0,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "UIBeep-Create_a_very_short_-Elevenlabs__t0_800_x1p3.ogg",
+      "role": "sfx",
+      "at_s": 26.6,
+      "duration_s": 0.8,
+      "source_offset_s": 0.0,
+      "gain": 1.0,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "UIMisc-A_short_UI_interface-Elevenlabs__t0_1467.ogg",
+      "role": "sfx",
+      "at_s": 27.4,
+      "duration_s": 1.467,
+      "source_offset_s": 0.0,
+      "gain": 0.2807,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "MUSCPerc-Cinematic_Sound_Effe-Elevenlabs__t0_2467.ogg",
+      "role": "sfx",
+      "at_s": 38.067,
+      "duration_s": 2.467,
+      "source_offset_s": 0.0,
+      "gain": 0.3557,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "freesound_community-night-ambience-59071__t18567_20633.ogg",
+      "role": "ambience",
+      "at_s": 39.5,
+      "duration_s": 16.7,
+      "source_offset_s": 18.567,
+      "gain": 0.5779,
+      "fade_in_ms": 800,
+      "fade_out_ms": 833,
+      "sustain": true,
+      "continues": false
+    },
+    {
+      "file": "bensound-pianomoment__t62700_20633.ogg",
+      "role": "ambience",
+      "at_s": 39.5,
+      "duration_s": 16.7,
+      "source_offset_s": 62.7,
+      "gain": 0.0708,
+      "fade_in_ms": 1966,
+      "fade_out_ms": 1866,
+      "sustain": true,
+      "continues": false
+    },
+    {
+      "file": "UIBeep-Create_a_very_short_-Elevenlabs__t0_1033.ogg",
+      "role": "sfx",
+      "at_s": 39.8,
+      "duration_s": 1.033,
+      "source_offset_s": 0.0,
+      "gain": 1.0,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "bhr_scene_19__t5433_14961.ogg",
+      "role": "vo",
+      "at_s": 41.2,
+      "duration_s": 14.967,
+      "source_offset_s": 5.433,
+      "gain": 0.5495,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "UIBeep-Create_a_very_short_-Elevenlabs__t0_933_x1p10714.ogg",
+      "role": "sfx",
+      "at_s": 43.267,
+      "duration_s": 0.933,
+      "source_offset_s": 0.0,
+      "gain": 1.0,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "UIBeep-Create_a_very_short_-Elevenlabs__t0_800_x1p3.ogg",
+      "role": "sfx",
+      "at_s": 47.3,
+      "duration_s": 0.8,
+      "source_offset_s": 0.0,
+      "gain": 1.0,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "AMBFant-stars-Elevenlabs__t0_3033.ogg",
+      "role": "sfx",
+      "at_s": 48.1,
+      "duration_s": 3.033,
+      "source_offset_s": 0.0,
+      "gain": 0.3497,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "freesound_community-filling-glass-various-sounds-68575__t2333_1867.ogg",
+      "role": "sfx",
+      "at_s": 49.933,
+      "duration_s": 1.867,
+      "source_offset_s": 2.333,
+      "gain": 0.4084,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "Magical_spawn_sound__#2-1781503266734__t2467_3367.ogg",
+      "role": "sfx",
+      "at_s": 51.6,
+      "duration_s": 3.367,
+      "source_offset_s": 2.467,
+      "gain": 0.0,
+      "fade_in_ms": 0,
+      "fade_out_ms": 1333,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "UIMvmt-Minimalist_slide_tra-Elevenlabs__t0_1933_x0p57.ogg",
+      "role": "sfx",
+      "at_s": 51.8,
+      "duration_s": 3.4,
+      "source_offset_s": 0.0,
+      "gain": 0.4888,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "bhr_scene_20__t0_3967.ogg",
+      "role": "vo",
+      "at_s": 56.167,
+      "duration_s": 0.033,
+      "source_offset_s": 0.0,
+      "gain": 0.5495,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    }
+  ]
 }

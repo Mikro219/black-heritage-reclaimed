@@ -1,4 +1,4 @@
-"""RenderEngine headless smoke: hand cursors, interaction indicators, tutorial
+﻿"""RenderEngine headless smoke: hand cursors, interaction indicators, tutorial
 card, pause/flash bookkeeping, segment overshoot carry, skeleton toggle."""
 
 import os
@@ -12,21 +12,6 @@ import pygame
 
 from engines.render_engine import RenderEngine
 from tests.mocks import Bus, LM
-
-
-class Hand:
-    def __init__(self):
-        self.landmark = [LM(0.5, 0.5) for _ in range(21)]
-
-
-class _Cls:
-    def __init__(self, label):
-        self.label = label
-
-
-class Handed:
-    def __init__(self, label):
-        self.classification = [_Cls(label)]
 
 
 class TestRenderEngine(unittest.TestCase):
@@ -46,6 +31,69 @@ class TestRenderEngine(unittest.TestCase):
     def test_hand_icons_loaded(self):
         self.assertEqual(len(self.r._hand_icons), 8)
 
+    def test_cursor_fades_in_during_window_and_out_after(self):
+        """Cursors are window-scoped: alpha ramps up while a window is armed,
+        ramps back to zero (hidden) once it closes, and never shows outside."""
+        r = self.r
+        r._cursor_fade_alpha = 0.0
+        # no window -> stays hidden
+        r._cursor_fade_t = time.monotonic() - 0.2
+        r._draw_hand_cursors(pose_data=self.pose,
+                             gesture_debug={"active_type": None})
+        self.assertEqual(r._cursor_fade_alpha, 0.0)
+
+        # window opens -> alpha climbs (0.1s clamped step over 0.4s fade-in)
+        armed = {"active_type": "presence_bilateral", "active_params": {}}
+        r._cursor_fade_t = time.monotonic() - 0.2
+        r._draw_hand_cursors(pose_data=self.pose, gesture_debug=armed)
+        self.assertGreater(r._cursor_fade_alpha, 0.0)
+        for _ in range(8):
+            r._cursor_fade_t = time.monotonic() - 0.2
+            r._draw_hand_cursors(pose_data=self.pose, gesture_debug=armed)
+        self.assertEqual(r._cursor_fade_alpha, 1.0)
+        self.assertEqual(r._cursor_fade_mode, "grab")
+
+        # window closes -> fades out, keeping the last mode, then fully hides
+        r._cursor_fade_t = time.monotonic() - 0.2
+        r._draw_hand_cursors(pose_data=self.pose,
+                             gesture_debug={"active_type": None})
+        self.assertLess(r._cursor_fade_alpha, 1.0)
+        self.assertGreater(r._cursor_fade_alpha, 0.0)
+        self.assertEqual(r._cursor_fade_mode, "grab")
+        for _ in range(8):
+            r._cursor_fade_t = time.monotonic() - 0.2
+            r._draw_hand_cursors(pose_data=self.pose,
+                                 gesture_debug={"active_type": None})
+        self.assertEqual(r._cursor_fade_alpha, 0.0)
+
+    def test_camera_setup_screen(self):
+        import numpy as np
+        # no frame, no pose -> draws the prompt, body not in frame
+        self.assertFalse(self.r.draw_camera_setup(None, None))
+        frame = np.zeros((36, 64, 3), dtype=np.uint8)
+        # pose without visible ankles -> still not ok
+        pose = [LM(0.5, 0.5, visibility=0.9) for _ in range(33)]
+        pose[27] = LM(0.5, 0.9, visibility=0.1)
+        pose[28] = LM(0.5, 0.9, visibility=0.1)
+        self.assertFalse(self.r.draw_camera_setup(frame, pose))
+        # head + both ankles confidently inside the frame -> ok
+        pose[0]  = LM(0.5, 0.10, visibility=0.9)
+        pose[27] = LM(0.45, 0.92, visibility=0.9)
+        pose[28] = LM(0.55, 0.92, visibility=0.9)
+        self.assertTrue(self.r.draw_camera_setup(frame, pose))
+        # a landmark hugging the border does not count as in frame
+        pose[0] = LM(0.5, 0.005, visibility=0.9)
+        self.assertFalse(self.r.draw_camera_setup(frame, pose))
+
+    def test_input_locked_window_counts_as_closed(self):
+        r = self.r
+        r._cursor_fade_alpha = 1.0
+        r._cursor_fade_t = time.monotonic() - 0.2
+        r._draw_hand_cursors(pose_data=self.pose,
+                             gesture_debug={"active_type": "presence_bilateral",
+                                            "input_locked": True})
+        self.assertLess(r._cursor_fade_alpha, 1.0)
+
     def test_cursor_and_indicator_modes_draw(self):
         cases = [
             {"active_type": None},                                    # dots
@@ -60,15 +108,12 @@ class TestRenderEngine(unittest.TestCase):
         ]
         for gd in cases:
             with self.subTest(gd=gd):
-                self.r.update(landmark_data=[Hand()],
-                              handedness_data=[Handed("Left")],
-                              pose_data=self.pose, gesture_debug=gd)
+                self.r.update(pose_data=self.pose, gesture_debug=gd)
 
     def test_tutorial_card_while_paused(self):
         self.r.pause()
         try:
-            self.r.update(landmark_data=[Hand()], handedness_data=[Handed("L")],
-                          pose_data=self.pose,
+            self.r.update(pose_data=self.pose,
                           gesture_debug={"active_type": "presence_bilateral",
                                          "active_params": {}},
                           tutorial_card={"title": "Welcome!", "prompt": "Raise hands",
@@ -90,8 +135,7 @@ class TestRenderEngine(unittest.TestCase):
         try:
             self.assertTrue(self.r._show_skeleton)
             self.assertFalse(self.r._debug)
-            self.r.update(landmark_data=[Hand()], handedness_data=[Handed("L")],
-                          pose_data=self.pose, gesture_debug={"active_type": None})
+            self.r.update(pose_data=self.pose, gesture_debug={"active_type": None})
         finally:
             self.r.toggle_skeleton()
 

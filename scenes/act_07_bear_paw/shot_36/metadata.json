@@ -1,22 +1,123 @@
 {
-    "shot": "36",
-    "kind": "playback",
-    "assigned_to": "TBD",
-    "audio_lines": [],
-    "audio": "audio.mp3",
-    "_note": "Playback with frame-gated survey OI (Bear's Paw — scan the ground for prints). Survey window: global 27750-27914 -> local [295, 459]. Shot base global frame = 27456.",
-    "interaction": {
-        "tier": "OI",
-        "id": "scan_survey",
-        "type": "survey",
-        "params": {
-            "brow_y": 0.45,
-            "scan_window_ms": 2000,
-            "min_x_delta": 0.06,
-            "hold_ms": 200
-        },
-        "sfx": "detect.mp3",
-        "feedback": "green_flash",
-        "oi_frame_window": [295, 459]
+  "shot": "36",
+  "kind": "playback",
+  "assigned_to": "TBD",
+  "audio_lines": [],
+  "audio": "audio.mp3",
+  "_note": "Playback with frame-gated survey OI (Bear's Paw \u2014 scan the ground for prints). Survey window: global 27750-27914 -> local [295, 459]. Shot base global frame = 27456.",
+  "interaction": {
+    "tier": "OI",
+    "id": "scan_survey",
+    "type": "survey",
+    "params": {
+      "brow_y": 0.45,
+      "scan_window_ms": 2000,
+      "min_x_delta": 0.06,
+      "hold_ms": 200
+    },
+    "sfx": "detect.mp3",
+    "feedback": "green_flash",
+    "oi_frame_window": [
+      295,
+      459
+    ]
+  },
+  "audio_events": [
+    {
+      "file": "bensound-paperback__t10100_37067.ogg",
+      "role": "music",
+      "at_s": 0.0,
+      "duration_s": 7.333,
+      "source_offset_s": 39.833,
+      "gain": 0.1197,
+      "fade_in_ms": 1566,
+      "fade_out_ms": 2033,
+      "sustain": true,
+      "continues": true
+    },
+    {
+      "file": "bhr_scene_38__t0_7933.ogg",
+      "role": "vo",
+      "at_s": 0.0,
+      "duration_s": 7.333,
+      "source_offset_s": 0.6,
+      "gain": 0.5495,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": true
+    },
+    {
+      "file": "freesound_community-night-ambience-59071__t36100_7500.ogg",
+      "role": "sfx",
+      "at_s": 0.0,
+      "duration_s": 7.4,
+      "source_offset_s": 36.2,
+      "gain": 0.5943,
+      "fade_in_ms": 733,
+      "fade_out_ms": 700,
+      "sustain": false,
+      "continues": true
+    },
+    {
+      "file": "MUSCPerc-Cinematic_Sound_Effe-Elevenlabs__t0_1733.ogg",
+      "role": "sfx",
+      "at_s": 16.2,
+      "duration_s": 1.733,
+      "source_offset_s": 0.0,
+      "gain": 0.3557,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "bensound-paperback__t47167_8700.ogg",
+      "role": "music",
+      "at_s": 18.033,
+      "duration_s": 1.967,
+      "source_offset_s": 47.167,
+      "gain": 0.1197,
+      "fade_in_ms": 1833,
+      "fade_out_ms": 1866,
+      "sustain": true,
+      "continues": false
+    },
+    {
+      "file": "bhr_scene_38__t7933_1533.ogg",
+      "role": "vo",
+      "at_s": 18.033,
+      "duration_s": 1.533,
+      "source_offset_s": 7.933,
+      "gain": 0.5495,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "freesound_community-night-ambience-59071__t43600_8700.ogg",
+      "role": "sfx",
+      "at_s": 18.033,
+      "duration_s": 1.967,
+      "source_offset_s": 43.6,
+      "gain": 0.5021,
+      "fade_in_ms": 900,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "bhr_scene_39__t967_4033.ogg",
+      "role": "vo",
+      "at_s": 19.567,
+      "duration_s": 0.433,
+      "source_offset_s": 0.967,
+      "gain": 0.6082,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
     }
+  ]
 }

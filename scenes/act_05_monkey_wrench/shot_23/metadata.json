@@ -1,0 +1,113 @@
+{
+  "shot": "23",
+  "audio_events": [
+    {
+      "file": "soul_serenity_sounds-water-noises-241049__t0_34267.ogg",
+      "role": "ambience",
+      "at_s": 0.0,
+      "duration_s": 25.033,
+      "source_offset_s": 0.0,
+      "gain": 0.6082,
+      "fade_in_ms": 2000,
+      "fade_out_ms": 0,
+      "sustain": true,
+      "continues": true
+    },
+    {
+      "file": "freesound_community-night-ambience-59071__t0_34267.ogg",
+      "role": "ambience",
+      "at_s": 0.0,
+      "duration_s": 25.033,
+      "source_offset_s": 0.0,
+      "gain": 0.5021,
+      "fade_in_ms": 1533,
+      "fade_out_ms": 0,
+      "sustain": true,
+      "continues": true
+    },
+    {
+      "file": "sonican-spiritual-nature-364866 (1)__t0_33900.ogg",
+      "role": "music",
+      "at_s": 0.0,
+      "duration_s": 25.033,
+      "source_offset_s": 0.0,
+      "gain": 0.0815,
+      "fade_in_ms": 1366,
+      "fade_out_ms": 1533,
+      "sustain": true,
+      "continues": true
+    },
+    {
+      "file": "bhr_scene_23.mp3",
+      "role": "vo",
+      "at_s": 0.0,
+      "duration_s": 25.033,
+      "source_offset_s": 0.0,
+      "gain": 0.5495,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": true
+    },
+    {
+      "file": "freesound_community-046940_water-slosh-in-metal-bottle-64120__t0_367.ogg",
+      "role": "sfx",
+      "at_s": 2.3,
+      "duration_s": 0.367,
+      "source_offset_s": 0.0,
+      "gain": 0.263,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "freesound_community-046940_water-slosh-in-metal-bottle-64120__t367_333.ogg",
+      "role": "sfx",
+      "at_s": 3.933,
+      "duration_s": 0.333,
+      "source_offset_s": 0.367,
+      "gain": 0.263,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "ribhavagrawal-fast-woosh-230497__t0_1167_x0p564516.ogg",
+      "role": "sfx",
+      "at_s": 4.733,
+      "duration_s": 2.067,
+      "source_offset_s": 0.0,
+      "gain": 0.5404,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "freesound_community-046940_water-slosh-in-metal-bottle-64120__t700_433.ogg",
+      "role": "sfx",
+      "at_s": 4.9,
+      "duration_s": 0.433,
+      "source_offset_s": 0.7,
+      "gain": 0.263,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "lucas_lesc-impact-clothes-308657__t1300_1100.ogg",
+      "role": "sfx",
+      "at_s": 21.8,
+      "duration_s": 1.1,
+      "source_offset_s": 1.3,
+      "gain": 0.1618,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    }
+  ]
+}

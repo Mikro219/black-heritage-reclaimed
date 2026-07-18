@@ -25,12 +25,23 @@ def fixture_project() -> dict:
         "name": "Fixture Flow",
         "fps": 30,
         "media": [{"id": "m1", "name": "master.mp4", "duration_s": 60.0}],
-        "sounds": [{"id": "s1", "name": "detect.mp3"}],
+        "sounds": [{"id": "s1", "name": "detect.mp3"},
+                   {"id": "s2", "name": "night_bed.mp3"},
+                   {"id": "s3", "name": "crinkle.mp3"}],
         "settings": {"global_detect_sound": "s1"},
         "start": "b_intro",
         "blocks": [
             {"id": "b_intro", "type": "playback", "name": "Intro", "media": "m1",
              "range_s": [0.0, 6.0], "pos": [0, 0],
+             "audio": [
+                 {"id": "a1", "sound": "s2", "role": "ambience", "at_s": 0.0,
+                  "duration_s": None, "source_offset_s": 0, "gain": 0.4,
+                  "fade_in_ms": 300, "fade_out_ms": 600, "sustain": True,
+                  "continues": False},
+                 {"id": "a2", "sound": "s3", "role": "sfx", "at_s": 2.5,
+                  "duration_s": 1.0, "source_offset_s": 0, "gain": 1.0,
+                  "fade_in_ms": 0, "fade_out_ms": 0, "sustain": False,
+                  "continues": False}],
              "windows": [
                  {"id": "w_reach", "label": "Reach flask", "detector": "forward_reach",
                   "params": {"area_growth_threshold": 0.3},
@@ -38,6 +49,11 @@ def fixture_project() -> dict:
                   "appears_s": 2.0, "duration_s": 2.5}]},
             {"id": "b_choice", "type": "choice", "name": "Choose Direction", "media": "m1",
              "range_s": [6.0, 12.0], "hold": "pause_end", "pos": [0, 0],
+             "audio": [
+                 {"id": "a3", "sound": "s2", "role": "ambience", "at_s": 0.0,
+                  "duration_s": None, "source_offset_s": 0, "gain": 0.4,
+                  "fade_in_ms": 0, "fade_out_ms": 600, "sustain": True,
+                  "continues": True}],
              "branches": [
                  {"id": "br_l", "window": "w_left", "to": "b_forest", "label": "Go Left"},
                  {"id": "br_r", "window": "w_right", "to": "b_river", "label": "Go Right"},
@@ -89,6 +105,9 @@ class TestExperienceExport(unittest.TestCase):
         cls.project_path = tmp_path / "fixture.bhrx.json"
         with open(cls.project_path, "w", encoding="utf-8") as f:
             json.dump(fixture_project(), f)
+        # sound files next to the project so the audio exporter resolves them
+        (tmp_path / "night_bed.mp3").write_bytes(b"bed")
+        (tmp_path / "crinkle.mp3").write_bytes(b"sfx")
         cls.out = tmp_path / "scenes_generated"
         export_experience.warnings.clear()
         export_experience.export(cls.project_path, cls.out, do_frames=False,
@@ -265,9 +284,52 @@ class TestExperienceExport(unittest.TestCase):
                 if s.play_if:
                     self.assertIsNotNone(by_id[s.play_if["shot"]].interaction)
 
+    # ── layered stem audio (audio_events) ──────────────────────────────────
+
+    def test_block_audio_exports_as_audio_events(self):
+        intro = self.shots[0]
+        events = intro.audio_events
+        self.assertEqual(len(events), 2)
+        bed = next(e for e in events if e["role"] == "ambience")
+        sfx = next(e for e in events if e["role"] == "sfx")
+        self.assertTrue(bed["sustain"])
+        self.assertFalse(bed["continues"])
+        self.assertEqual(bed["fade_in_ms"], 300)
+        self.assertAlmostEqual(bed["gain"], 0.4)
+        self.assertFalse(sfx["sustain"])
+        self.assertAlmostEqual(sfx["at_s"], 2.5)
+        # loader resolved both against the exported _audio pool
+        for e in events:
+            self.assertIsNotNone(e["path"], e["file"])
+            self.assertTrue(e["path"].exists())
+
+    def test_audio_pool_holds_referenced_files(self):
+        pool = self.out / "_audio"
+        self.assertTrue((pool / "night_bed.mp3").exists())
+        self.assertTrue((pool / "crinkle.mp3").exists())
+
+    def test_bed_continuity_pair_is_consistent(self):
+        intro, choice = self.shots[0], self.shots[1]
+        bed = next(e for e in intro.audio_events if e["sustain"])
+        cont = next(e for e in choice.audio_events if e["continues"])
+        self.assertEqual(bed["file"], cont["file"],
+                         "handover match key is the shared file name")
+
+    def test_audio_events_within_shot_span(self):
+        for s in self.shots:
+            length = None
+            if s.segments:
+                length = max(rng[1] for rng in s.segments.values()) / (s.fps or 30)
+            for e in s.audio_events:
+                self.assertGreaterEqual(e["at_s"], 0.0, f"shot {s.shot}")
+                if length is not None:
+                    self.assertLessEqual(e["at_s"], length + 0.001,
+                                         f"shot {s.shot}: {e['file']}")
+
     def test_editor_detector_registry_matches_runtime(self):
         """tools/experience_builder/js/detectors.js is hand-synced from the
-        runtime REGISTRY — every non-voice type it offers must exist."""
+        runtime REGISTRY — the sync must hold in BOTH directions: no unknown
+        types offered, and no runtime detector silently missing from the tool."""
         js = (ROOT / "tools" / "experience_builder" / "js" / "detectors.js").read_text(
             encoding="utf-8")
         import re
@@ -275,6 +337,9 @@ class TestExperienceExport(unittest.TestCase):
         offered.discard("voice")
         unknown = offered - set(REGISTRY)
         self.assertFalse(unknown, f"detectors.js offers unknown types: {sorted(unknown)}")
+        missing = set(REGISTRY) - offered
+        self.assertFalse(missing,
+                         f"detectors.js is missing runtime detectors: {sorted(missing)}")
 
 
 if __name__ == "__main__":

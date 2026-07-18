@@ -1,4 +1,4 @@
-"""
+﻿"""
 main.py — Black Heritage Reclaimed entry point.
 
 Boot sequence:
@@ -15,6 +15,8 @@ import json
 import os
 import socket
 import sys
+import time
+from collections import deque
 from pathlib import Path
 
 import cv2
@@ -25,10 +27,50 @@ from engines.gesture_engine import GestureEngine
 from engines.voice_engine import VoiceEngine
 from engines.render_engine import RenderEngine
 from engines.sequence_loader import load_sequence
-from engines.shot_sequence_player import ShotSequencePlayer, PLAYER_RUNNING
+from engines.shot_sequence_player import ShotSequencePlayer, PLAYER_RUNNING, PLAYER_FINAL
 from engines.narration_adapter import NarrationAdapter
 from engines.audio_mixer import ShotAudioMixer
 from engines.tutorial_engine import TutorialEngine
+
+
+class MetaVoice:
+    """Long-lived voice commands outside shot wiring: "skip" during the
+    tutorial / prologue / epilogue, "ready" on the camera-setup screen.
+
+    The voice engine expires windows and clears them all on every input_lock,
+    so ensure() re-opens the wanted window whenever it vanished. Fired events
+    arrive on the voice thread; they queue here and main's loop drains them.
+    """
+
+    def __init__(self, voice: VoiceEngine):
+        self._voice = voice
+        self._events: deque[str] = deque()
+        self._wid = None
+        self._desc = None
+        voice.subscribe(self._on_event)
+
+    def _on_event(self, ev) -> None:                # voice thread
+        if str(ev.vi_id).startswith("meta_"):
+            self._events.append(ev.vi_id)
+
+    def ensure(self, desc) -> None:
+        """desc: (vi_id, [keywords]) to keep open, or None for no meta window."""
+        if desc == self._desc and (desc is None or self._voice.window_open(self._wid)):
+            return
+        if self._wid:
+            self._voice.close_window(self._wid)
+            self._wid = None
+        self._desc = desc
+        if desc is not None:
+            vi_id, keywords = desc
+            self._wid = self._voice.open_window({
+                "id": vi_id, "keywords": keywords, "mode": "keyword",
+                "tier": "reaction", "window_ms": 3_600_000,
+            })
+
+    def drain(self):
+        while self._events:
+            yield self._events.popleft()
 
 
 # Frozen (PyInstaller) builds: __file__ points inside the bundled _internal dir,
@@ -109,54 +151,51 @@ def open_camera(profile: dict, config: dict | None = None):
     return cap
 
 
+def _enumerate_camera_names() -> list[str]:
+    """DirectShow device friendly names, index-aligned with cv2 CAP_DSHOW.
+
+    Needs the optional `pygrabber` package (pip install pygrabber) — OpenCV
+    itself cannot report device names. Returns [] when unavailable."""
+    try:
+        from pygrabber.dshow_graph import FilterGraph  # type: ignore
+        return FilterGraph().get_input_devices()
+    except Exception:
+        return []
+
+
 def _open_by_name(name: str | None, fallback_name: str | None, fallback_index: int,
                   backend: int, w: int, h: int, fps: int) -> cv2.VideoCapture:
-    """Try each camera index until we find one whose DirectShow friendly name matches."""
-    for idx in range(10):
-        cap = cv2.VideoCapture(idx, backend)
-        if not cap.isOpened():
-            cap.release()
-            continue
-        friendly = _get_dshow_friendly_name(idx)
-        if name and name.lower() in friendly.lower():
-            _set_cap_props(cap, w, h, fps)
-            print(f"[main] Opened camera '{friendly}' at index {idx}", file=sys.stderr)
-            return cap
-        if fallback_name and fallback_name.lower() in friendly.lower():
-            _set_cap_props(cap, w, h, fps)
-            print(f"[main] Opened camera '{friendly}' (fallback match) at index {idx}", file=sys.stderr)
-            return cap
-        cap.release()
+    """Resolve the camera index by DirectShow friendly name, then open it ONCE."""
+    names = _enumerate_camera_names()
+    idx = None
+    if names:
+        for want in (name, fallback_name):
+            if not want:
+                continue
+            for i, friendly in enumerate(names):
+                if want.lower() in friendly.lower():
+                    idx = i
+                    print(f"[main] Camera '{friendly}' matched {want!r} at index {i}",
+                          file=sys.stderr)
+                    break
+            if idx is not None:
+                break
+        if idx is None:
+            print(f"[main] No camera name matched {name!r}/{fallback_name!r} "
+                  f"among {names} — using index {fallback_index}", file=sys.stderr)
+    else:
+        print("[main] Camera name matching unavailable (pip install pygrabber) "
+              f"— using index {fallback_index}", file=sys.stderr)
 
-    # Last resort: use the numeric fallback index
-    cap = cv2.VideoCapture(fallback_index, backend)
+    cap = cv2.VideoCapture(fallback_index if idx is None else idx, backend)
     _set_cap_props(cap, w, h, fps)
-    print(f"[main] No name-matched camera found; using index {fallback_index}", file=sys.stderr)
     return cap
-
-
-def _get_dshow_friendly_name(index: int) -> str:
-    """Best-effort friendly name lookup for a camera index via cv2 backend property."""
-    try:
-        cap = cv2.VideoCapture(index, cv2.CAP_DSHOW)
-        name = cap.getBackendName() if cap.isOpened() else ""
-        cap.release()
-        return name
-    except Exception:
-        return ""
 
 
 def _set_cap_props(cap: cv2.VideoCapture, w: int, h: int, fps: int):
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, w)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
     cap.set(cv2.CAP_PROP_FPS, fps)
-
-
-def init_display(profile: dict) -> pygame.Surface:
-    display_cfg = profile.get("display", {})
-    w, h = display_cfg.get("resolution", [1920, 1080])
-    flags = pygame.FULLSCREEN if display_cfg.get("fullscreen", False) else 0
-    return pygame.display.set_mode((w, h), flags)
 
 
 def detector_test(detector_name: str, params: dict):
@@ -427,17 +466,31 @@ def main():
     tutorial_was_active = False
     player.pause()
     render.pause()
+    gesture.pause()
     pygame.mixer.pause()
+
+    # Meta voice commands ("skip" / "ready") + camera-setup screen + end loop.
+    meta_voice = MetaVoice(voice)
+    camera_setup_active = bool(config.get("camera_setup", {}).get("enabled", False))
+    end_loop_cfg = config.get("end_loop", {})
+    final_since = None   # when the player entered FINAL_ADDRESS (for the loop)
+    if camera_setup_active:
+        print("[main] camera setup — frame your body, then ENTER or say 'ready'")
     print("[main] started PAUSED — press Space to begin")
 
     while True:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                _shutdown(cap, gesture, voice)
+                _shutdown(cap, gesture, voice, render)
                 return
             if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-                _shutdown(cap, gesture, voice)
+                _shutdown(cap, gesture, voice, render)
                 return
+            if camera_setup_active and event.type == pygame.KEYDOWN and \
+                    event.key in (pygame.K_RETURN, pygame.K_SPACE, pygame.K_p):
+                camera_setup_active = False
+                print("[main] camera setup confirmed — press Space to begin")
+                continue
             if event.type == pygame.KEYDOWN and event.key in (pygame.K_SPACE, pygame.K_p):
                 # Toggle pause/play. Freezes frames, audio, the shot clock and
                 # detection together; resume shifts every timer so nothing fires late.
@@ -449,6 +502,7 @@ def main():
                     paused = True
                     player.pause()
                     render.pause()
+                    gesture.pause()
                     pygame.mixer.pause()
                     print("[main] PAUSED")
                 elif tutorial.begin():
@@ -459,6 +513,7 @@ def main():
                     paused = False
                     player.resume()
                     render.resume()
+                    gesture.resume()
                     pygame.mixer.unpause()
                     print("[main] RESUMED")
             if event.type == pygame.KEYDOWN and event.key in (pygame.K_F11, pygame.K_f):
@@ -471,8 +526,8 @@ def main():
             if event.type == pygame.KEYDOWN and event.key == pygame.K_s:
                 if tutorial.active:
                     tutorial.skip()
-                # Skip the prologue (act 0) — cut any playing narration and jump.
-                elif player.skip_prologue():
+                # Skip the prologue (act 0) or the epilogue — cut audio and jump.
+                elif player.skip_prologue() or player.skip_epilogue():
                     pygame.mixer.stop()
             if event.type == pygame.KEYDOWN and event.key == pygame.K_RIGHT and not paused:
                 player._advance()
@@ -488,12 +543,64 @@ def main():
                 if event.type == pygame.MOUSEMOTION and event.buttons[0]:
                     render.handle_volume_click(event.pos)
 
+        # ── Meta voice commands: keep the right window open, act on fires ──
+        if camera_setup_active:
+            meta_desired = ("meta_ready", ["ready"])
+        elif tutorial.active:
+            meta_desired = ("meta_skip", ["skip"])
+        else:
+            shot = player.current_shot
+            act = shot.act if shot else None
+            if not paused and (act == "00" or act in ShotSequencePlayer.EPILOGUE_ACTS):
+                meta_desired = ("meta_skip", ["skip"])
+            else:
+                meta_desired = None
+        meta_voice.ensure(meta_desired)
+        for vi_id in meta_voice.drain():
+            if vi_id == "meta_ready" and camera_setup_active:
+                camera_setup_active = False
+                print("[main] camera setup confirmed by voice — press Space to begin")
+            elif vi_id == "meta_skip":
+                if tutorial.active:
+                    print("[main] voice skip — tutorial")
+                    tutorial.skip()
+                elif player.skip_prologue() or player.skip_epilogue():
+                    pygame.mixer.stop()   # cut any playing narration/beds
+
+        # ── Camera-setup screen: live view + skeleton until confirmed ──
+        if camera_setup_active:
+            gesture.update()   # refresh the published skeleton; nothing is armed
+            render.draw_camera_setup(gesture.latest_camera_frame(),
+                                     gesture.fresh_pose_lm())
+            clock.tick(render_fps)
+            continue
+
+        # ── End of experience: hold on FINAL_ADDRESS, then loop to the start ──
+        if end_loop_cfg.get("enabled") and player.player_state == PLAYER_FINAL:
+            if final_since is None:
+                final_since = time.monotonic()
+                print(f"[main] experience complete — looping back in "
+                      f"{end_loop_cfg.get('delay_s', 5)}s")
+            elif time.monotonic() - final_since >= float(end_loop_cfg.get("delay_s", 5)):
+                final_since = None
+                pygame.mixer.stop()
+                player.start(0)
+                player.pause()
+                render.pause()
+                gesture.pause()
+                tutorial.done = False   # a fresh visitor gets the tutorial again
+                paused = True
+                print("[main] looped back to the beginning — PAUSED (press Space)")
+        else:
+            final_since = None
+
         # Tutorial finished (completed or skipped) while the experience was held
         # paused for it — release everything in one place.
         if paused and tutorial_was_active and not tutorial.active:
             paused = False
             player.resume()
             render.resume()
+            gesture.resume()
             pygame.mixer.unpause()
             print("[main] tutorial done — RESUMED")
         tutorial_was_active = tutorial.active
@@ -519,10 +626,14 @@ def main():
         clock.tick(render_fps)
 
 
-def _shutdown(cap, gesture, voice):
+def _shutdown(cap, gesture, voice, render=None):
     voice.stop()
     gesture.close()
     cap.release()
+    # Stop the frame-cache worker so a mid-build pack doesn't leave a
+    # framecache.npy.building temp behind (also swept at next start).
+    if render is not None and getattr(render, "_cache", None) is not None:
+        render._cache.stop()
     pygame.quit()
     sys.exit(0)
 

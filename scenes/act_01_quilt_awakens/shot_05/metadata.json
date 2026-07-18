@@ -1,19 +1,127 @@
 {
-    "shot": "05",
-    "kind": "playback",
-    "assigned_to": "elayna",
-    "audio_lines": ["AL-01-010"],
-    "audio": "audio.mp3",
-    "interaction": {
-        "tier": "OI",
-        "id": "point_quilt_block",
-        "type": "point_target_held",
-        "params": {
-            "hold_ms": 600,
-            "region_rect": { "x": 0.55, "y": 0.08, "w": 0.28, "h": 0.32 }
-        },
-        "sfx": "detect.mp3",
-        "feedback": "green_flash",
-        "oi_frame_window": [326, 506]
+  "shot": "05",
+  "kind": "playback",
+  "assigned_to": "elayna",
+  "audio_lines": [
+    "AL-01-010"
+  ],
+  "audio": "audio.mp3",
+  "interaction": {
+    "tier": "OI",
+    "id": "point_quilt_block",
+    "type": "point_target_held",
+    "params": {
+      "hold_ms": 600,
+      "region_rect": {
+        "x": 0.55,
+        "y": 0.08,
+        "w": 0.28,
+        "h": 0.32
+      }
+    },
+    "sfx": "detect.mp3",
+    "feedback": "green_flash",
+    "oi_frame_window": [
+      326,
+      506
+    ]
+  },
+  "audio_events": [
+    {
+      "file": "MUSCPerc-Cinematic_Sound_Effe-Elevenlabs__t0_2467.ogg",
+      "role": "sfx",
+      "at_s": 0.0,
+      "duration_s": 0.467,
+      "source_offset_s": 2.0,
+      "gain": 0.3557,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": true
+    },
+    {
+      "file": "brolefilmer-western-theme-by-brolefilmer-123625 (1)__t64333_8800.ogg",
+      "role": "ambience",
+      "at_s": 0.0,
+      "duration_s": 8.6,
+      "source_offset_s": 64.533,
+      "gain": 0.0901,
+      "fade_in_ms": 1233,
+      "fade_out_ms": 1000,
+      "sustain": true,
+      "continues": true
+    },
+    {
+      "file": "bhr_scene_05__t1933_6267.ogg",
+      "role": "vo",
+      "at_s": 2.333,
+      "duration_s": 6.267,
+      "source_offset_s": 1.933,
+      "gain": 0.5495,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "benkirb-shine-6-268910__t67_1533_x1p47.ogg",
+      "role": "sfx",
+      "at_s": 2.733,
+      "duration_s": 1.533,
+      "source_offset_s": 0.067,
+      "gain": 0.1385,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "MUSCPerc-Cinematic_Sound_Effe-Elevenlabs__t0_2467.ogg",
+      "role": "sfx",
+      "at_s": 17.9,
+      "duration_s": 2.467,
+      "source_offset_s": 0.0,
+      "gain": 0.3557,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "brolefilmer-western-theme-by-brolefilmer-123625 (1)__t83733_7400.ogg",
+      "role": "ambience",
+      "at_s": 19.2,
+      "duration_s": 7.4,
+      "source_offset_s": 83.733,
+      "gain": 0.0,
+      "fade_in_ms": 1133,
+      "fade_out_ms": 0,
+      "sustain": true,
+      "continues": false
+    },
+    {
+      "file": "UIMisc-Cute_welcome_sound,_-Elevenlabs.mp3",
+      "role": "sfx",
+      "at_s": 19.2,
+      "duration_s": 1.033,
+      "source_offset_s": 0.0,
+      "gain": 1.0,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
+    },
+    {
+      "file": "bhr_scene_05__t10167_6867.ogg",
+      "role": "vo",
+      "at_s": 19.533,
+      "duration_s": 6.867,
+      "source_offset_s": 10.167,
+      "gain": 0.5495,
+      "fade_in_ms": 0,
+      "fade_out_ms": 0,
+      "sustain": false,
+      "continues": false
     }
+  ]
 }

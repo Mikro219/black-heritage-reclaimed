@@ -4,7 +4,7 @@ a BHR runtime scenes tree.
 
     py -3.12 scripts/export_experience.py "My_Experience.bhrx.json"
     py -3.12 scripts/export_experience.py project.bhrx.json --no-frames
-    py -3.12 scripts/export_experience.py project.bhrx.json --video "assets/BHR Draft 1.mp4"
+    py -3.12 scripts/export_experience.py project.bhrx.json --video "assets/video/BHR Draft 1.mp4"
     py -3.12 scripts/export_experience.py project.bhrx.json --out export/my_scenes
 
 Output (default export/scenes_generated/ — the live scenes/ tree is NEVER touched):
@@ -462,7 +462,10 @@ def resolve_video(project: dict, media_id: str | None,
     if media is None:
         return None
     name = media["name"]
-    for candidate in (project_path.parent / name, ROOT / "assets" / name, Path(name)):
+    for candidate in (project_path.parent / name,
+                      ROOT / "assets" / "video" / name,
+                      ROOT / "assets" / "video" / "comps" / name,
+                      ROOT / "assets" / name, Path(name)):
         if candidate.exists():
             return candidate
     return None
@@ -496,7 +499,9 @@ def resolve_detect_sound(project: dict, project_path: Path,
     if sound is None:
         return None
     name = sound["name"]
-    for candidate in (project_path.parent / name, ROOT / "assets" / name, Path(name)):
+    for candidate in (project_path.parent / name,
+                      ROOT / "assets" / "audio" / "stems" / name,
+                      ROOT / "assets" / name, Path(name)):
         if candidate.exists():
             return candidate
     # Fall back to any copy in the live scenes tree (the runtime ships one per
@@ -511,14 +516,16 @@ def resolve_detect_sound(project: dict, project_path: Path,
 # ---------------------------------------------------------------------------
 
 def resolve_sound_file(name: str, project_path: Path) -> Path | None:
-    """Find a sound file by name: next to the project, in assets/, or anywhere
-    under assets/Audio Files/ (the delivered stem drop)."""
-    for candidate in (project_path.parent / name, ROOT / "assets" / name):
+    """Find a sound file by name: next to the project, in assets/audio/stems/
+    (the delivered stem drop), or anywhere under assets/audio/."""
+    for candidate in (project_path.parent / name,
+                      ROOT / "assets" / "audio" / "stems" / name,
+                      ROOT / "assets" / name):
         if candidate.exists():
             return candidate
-    stems_dir = ROOT / "assets" / "Audio Files"
-    if stems_dir.is_dir():
-        hits = sorted(stems_dir.rglob(name))
+    audio_dir = ROOT / "assets" / "audio"
+    if audio_dir.is_dir():
+        hits = sorted(audio_dir.rglob(name))
         if hits:
             return hits[0]
     return None
@@ -606,7 +613,8 @@ def block_audio_events(block: dict, sounds_by_id: dict, project_path: Path,
             "gain":            round(float(clip.get("gain", 1.0)), 4),
             "fade_in_ms":      int(clip.get("fade_in_ms") or 0),
             "fade_out_ms":     int(clip.get("fade_out_ms") or 0),
-            "sustain":         bool(clip.get("sustain", role != "sfx")),
+            "sustain":         bool(clip.get("sustain",
+                                             role in ("music", "ambience"))),
             "continues":       bool(clip.get("continues", False)),
         })
     events.sort(key=lambda e: e["at_s"])
@@ -676,7 +684,7 @@ def export(project_path: Path, out_root: Path, do_frames: bool,
             if fork_shot:
                 meta["play_if"] = {"shot": fork_shot, "branch": tag["branch"]}
 
-        if block.get("audio"):
+        if block.get("audio") and not block.get("master_audio"):
             events = block_audio_events(block, sounds_by_id, project_path,
                                         audio_pool, audio_ffmpeg, rendered)
             if events:
@@ -684,6 +692,32 @@ def export(project_path: Path, out_root: Path, do_frames: bool,
 
         shot_dir = act_dir / f"shot_{shot_id}"
         shot_dir.mkdir(parents=True, exist_ok=True)
+
+        # master_audio: slice the source video's own baked mix to the
+        # runtime's whole-file audio.mp3 convention (played on channel 0,
+        # suppressed only when audio_events exist — they don't here).
+        if block.get("master_audio") and not meta.get("audio_events"):
+            video = resolve_video(project, block.get("media"), project_path,
+                                  video_override)
+            if video is None or audio_ffmpeg is None:
+                warn(f"shot {shot_id} ({block.get('name')!r}): master_audio "
+                     f"needs the source video and ffmpeg — audio skipped")
+            else:
+                meta["audio"] = "audio.mp3"
+                mp3 = shot_dir / "audio.mp3"
+                if not mp3.exists():
+                    dur = max(0.05, rng[1] - rng[0])
+                    result = subprocess.run(
+                        [audio_ffmpeg, "-hide_banner", "-loglevel", "error",
+                         "-y", "-ss", f"{rng[0]:.3f}", "-t", f"{dur:.3f}",
+                         "-i", str(video), "-vn", "-c:a", "libmp3lame",
+                         "-q:a", "3", str(mp3)],
+                        capture_output=True, text=True)
+                    if result.returncode != 0:
+                        warn(f"shot {shot_id}: master-mix audio extraction "
+                             f"failed: {result.stderr.strip()[:160]}")
+                        meta.pop("audio", None)
+
         with open(shot_dir / "metadata.json", "w", encoding="utf-8") as f:
             json.dump(meta, f, indent=2)
 

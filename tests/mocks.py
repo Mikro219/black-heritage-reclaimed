@@ -12,43 +12,25 @@ class Hand:
 
 
 def pose33(overrides=None):
-    """A standing MediaPipe Pose: shoulders at y=0.40, hips 0.75, wrists down
-    at the sides (y=0.85), eyes at 0.30. Override any index with a dict."""
-    lms = [LM(0.5, 0.5) for _ in range(33)]
+    """A standing MediaPipe Pose: shoulders at y=0.40, hips 0.75, arms hanging
+    (elbows 0.62, wrists 0.85, index tips 0.90), eyes at 0.30. Override any
+    index with a dict. Low-visibility (0.3) index tips by default so helpers
+    fall back to the wrist unless a test raises them."""
+    lms = [LM(0.5, 0.5, visibility=0.0) for _ in range(33)]
     base = {11: LM(0.6, 0.40), 12: LM(0.4, 0.40),    # shoulders
+            13: LM(0.63, 0.62), 14: LM(0.37, 0.62),  # elbows
             23: LM(0.58, 0.75), 24: LM(0.42, 0.75),  # hips
             15: LM(0.65, 0.85, visibility=0.9),      # left wrist
             16: LM(0.35, 0.85, visibility=0.9),      # right wrist
+            19: LM(0.66, 0.90, visibility=0.3),      # left index (pose hand pt)
+            20: LM(0.34, 0.90, visibility=0.3),      # right index
             2: LM(0.52, 0.30), 5: LM(0.48, 0.30),    # eyes
+            7: LM(0.56, 0.28), 8: LM(0.44, 0.28),    # ears
             9: LM(0.51, 0.34), 10: LM(0.49, 0.34)}   # mouth
     base.update(overrides or {})
     for i, lm in base.items():
         lms[i] = lm
     return lms
-
-
-def make_hand(cx, cy, size=0.12, shape="point"):
-    """21-landmark Hands detection. shape: "point" (index out, others curled),
-    "open" (all out), "fist" (all curled)."""
-    lms = [LM(cx, cy) for _ in range(21)]
-    lms[0] = LM(cx, cy + size)               # wrist below the palm
-    fingers = {"index": (5, 6, 7, 8), "middle": (9, 10, 11, 12),
-               "ring": (13, 14, 15, 16), "pinky": (17, 18, 19, 20)}
-    xoff = {"index": -0.02, "middle": 0.0, "ring": 0.02, "pinky": 0.04}
-    for name, (mcp, pip, dip, tip) in fingers.items():
-        x = cx + xoff[name]
-        extended = shape == "open" or (shape == "point" and name == "index")
-        lms[mcp] = LM(x, cy + size * 0.4)
-        if extended:
-            lms[pip] = LM(x, cy - size * 0.2)
-            lms[dip] = LM(x, cy - size * 0.6)
-            lms[tip] = LM(x, cy - size)
-        else:  # curled: tip folds back toward the wrist, closer than pip
-            lms[pip] = LM(x, cy + size * 0.1)
-            lms[dip] = LM(x, cy + size * 0.35)
-            lms[tip] = LM(x, cy + size * 0.55)
-    lms[4] = LM(cx - 0.04, cy + size * 0.2)  # thumb tip, neutral
-    return Hand(lms)
 
 
 # -- depth samplers (context["_depth_mm_at"] stand-ins) ----------------------
