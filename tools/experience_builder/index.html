@@ -73,9 +73,12 @@
           <div class="d2" style="font-size:11.5px;margin-top:2px;">or click to browse</div>
         </div>
       </div>
-      <div class="lib-section-head"><span>Sounds · <span id="lib-sound-count">0</span></span></div>
+      <div class="lib-section-head"><span>Sounds · <span id="lib-sound-count">0</span></span>
+        <button class="li-btn" id="lib-link-folder" title="Link a folder of audio files — re-links every sound in the project by name"><span class="msr">folder_open</span></button>
+      </div>
+      <div style="padding:0 12px 8px;"><input type="text" id="lib-sound-filter" placeholder="Filter sounds…" spellcheck="false" style="width:100%;box-sizing:border-box;background:var(--bg-2);border:1px solid var(--border-2);border-radius:8px;color:var(--text);font:500 12px 'IBM Plex Sans',sans-serif;padding:7px 10px;outline:none;"></div>
       <div class="lib-list" id="lib-sound-list"></div>
-      <div class="lib-hint">The <b style="color:var(--amber);">DETECT</b> sound plays every time any interaction fires — in preview and in the exported experience. Click the bolt on a sound to make it the global detect sound.</div>
+      <div class="lib-hint">The <b style="color:var(--amber);">DETECT</b> sound plays every time any interaction fires — in preview and in the exported experience. Click the bolt on a sound to make it the global detect sound. Drag a sound onto a timeline audio lane to place it on the selected block.</div>
     </div>
 
     <div class="lib-page" data-page="actions">
@@ -124,6 +127,7 @@
 
   <!-- ═══ BOTTOM TIMELINE ═══ -->
   <div id="timeline">
+    <div id="tl-resizer" title="Drag to resize the timeline"></div>
     <div id="tl-empty"><span class="msr" style="font-size:18px;color:var(--text-faint);">movie</span>Select a playback or choice block to edit its timeline.</div>
     <div id="tl-body">
       <div id="tl-head">
@@ -149,6 +153,12 @@
         <div id="tl-ruler"></div>
         <div id="tl-track">
           <div id="tl-playhead" style="left:0;"></div>
+        </div>
+        <div id="tl-audio-lanes">
+          <div class="tl-alane" data-role="vo"><span class="alane-label">VO</span><div class="alane-track"></div></div>
+          <div class="tl-alane" data-role="music"><span class="alane-label">MUSIC</span><div class="alane-track"></div></div>
+          <div class="tl-alane" data-role="ambience"><span class="alane-label">AMB</span><div class="alane-track"></div></div>
+          <div class="tl-alane" data-role="sfx"><span class="alane-label">SFX</span><div class="alane-track"></div></div>
         </div>
       </div>
     </div>
@@ -219,6 +229,70 @@
   </div>
 </div>
 
+<!-- ═══ AUDIO CLIP MODAL ═══ -->
+<div class="modal-scrim" id="ac-modal">
+  <div class="modal" style="width:420px;">
+    <div class="modal-head">
+      <span class="msr" style="color:var(--sky);">graphic_eq</span>
+      <span class="m-title" id="ac-title">Audio clip</span>
+      <span class="m-sub" id="ac-sub"></span>
+      <button class="m-close" id="ac-close"><span class="msr">close</span></button>
+    </div>
+    <div style="padding:16px 18px;display:flex;flex-direction:column;gap:12px;">
+      <div class="insp-row">
+        <div class="insp-field">
+          <label>Role</label>
+          <select id="ac-role">
+            <option value="vo">vo (voice line — plays once, never restarts)</option>
+            <option value="music">music (bed — loops through holds)</option>
+            <option value="ambience">ambience (bed — loops through holds)</option>
+            <option value="sfx">sfx (one-shot)</option>
+          </select>
+        </div>
+        <div class="insp-field" style="max-width:130px;">
+          <label>Gain <span id="ac-gain-val" style="color:var(--text-mute);"></span></label>
+          <input type="range" id="ac-gain" min="0" max="1.5" step="0.01" style="width:100%;">
+        </div>
+      </div>
+      <div class="insp-row">
+        <div class="insp-field">
+          <label>Starts at</label>
+          <input type="text" id="ac-at" spellcheck="false">
+        </div>
+        <div class="insp-field">
+          <label>Duration (s)</label>
+          <input type="text" id="ac-dur" spellcheck="false">
+        </div>
+        <div class="insp-field">
+          <label>Source offset (s)</label>
+          <input type="text" id="ac-offset" spellcheck="false">
+        </div>
+      </div>
+      <div class="insp-row">
+        <div class="insp-field">
+          <label>Fade in (ms)</label>
+          <input type="text" id="ac-fadein" spellcheck="false">
+        </div>
+        <div class="insp-field">
+          <label>Fade out (ms)</label>
+          <input type="text" id="ac-fadeout" spellcheck="false">
+        </div>
+      </div>
+      <label style="display:flex;align-items:center;gap:8px;font:500 12.5px 'IBM Plex Sans',sans-serif;color:var(--text-dim);cursor:pointer;">
+        <input type="checkbox" id="ac-continues"> Continues the same bed from the previous block (hand over without restarting)
+      </label>
+      <label style="display:flex;align-items:center;gap:8px;font:500 12.5px 'IBM Plex Sans',sans-serif;color:var(--text-dim);cursor:pointer;">
+        <input type="checkbox" id="ac-muted"> Mute in preview
+      </label>
+    </div>
+    <div class="modal-foot">
+      <button class="tb-btn" id="ac-delete" style="color:var(--red);border-color:rgba(248,113,113,.4);"><span class="msr" style="font-size:16px;">delete</span>Delete</button>
+      <span class="spacer"></span>
+      <button class="tb-btn primary" id="ac-save">Done</button>
+    </div>
+  </div>
+</div>
+
 <!-- ═══ EXPORT MODAL ═══ -->
 <div class="modal-scrim" id="export-modal">
   <div class="modal">
@@ -268,14 +342,21 @@
 
 <!-- hidden file inputs (fallback when File System Access API is unavailable) -->
 <input type="file" id="file-video" accept="video/mp4,video/webm,video/*" style="display:none">
-<input type="file" id="file-sound" accept="audio/*" style="display:none">
+<input type="file" id="file-sound" accept="audio/*" multiple style="display:none">
 <input type="file" id="file-project" accept=".json,.bhrx" style="display:none">
 
+<!-- Optional bundled project (generated by scripts/bundle_builder_project.py).
+     file:// pages cannot fetch local JSON, but they CAN load a script — this
+     is how the merged .bhrx.json shows up without a manual Open. A missing
+     file is harmless (404 in the console, window.BHR_BUNDLED_PROJECT unset). -->
+<script src="js/project_data.js"></script>
 <script src="js/detectors.js"></script>
 <script src="js/state.js"></script>
 <script src="js/library.js"></script>
 <script src="js/graph.js"></script>
 <script src="js/timeline.js"></script>
+<script src="js/audio_lanes.js"></script>
+<script src="js/pv_audio.js"></script>
 <script src="js/interaction.js"></script>
 <script src="js/inspector.js"></script>
 <script src="js/preview.js"></script>

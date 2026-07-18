@@ -116,6 +116,32 @@
       html += `</div>`;
     }
 
+    if (b.type !== "merge") {
+      const roleIcon = { vo: "record_voice_over", music: "music_note", ambience: "waves", sfx: "graphic_eq" };
+      html += `<div class="insp-sec">
+        <div class="insp-sec-head"><span>Audio clips · ${(b.audio || []).length}</span></div>`;
+      if (b.master_audio) {
+        html += `<div style="font-size:11px;color:var(--green);line-height:1.5;">
+          <span class="msr" style="font-size:13px;vertical-align:-2px;">volume_up</span>
+          MASTER MIX — this block plays the source video's own baked audio
+          (builder player, preview and export). Lane clips are ignored.</div>`;
+      } else if (!(b.audio || []).length) {
+        html += `<div style="font-size:11px;color:var(--text-mute);line-height:1.5;">
+          Drag a sound from the Sounds tab onto a timeline audio lane (VO / MUSIC / AMB / SFX).
+          Music and ambience beds keep looping through interaction holds in the runtime.</div>`;
+      }
+      for (const c of (b.audio || [])) {
+        const snd = EB.getSound(c.sound);
+        const end = c.duration_s == null ? "end" : EB.fmtTime((c.at_s || 0) + c.duration_s);
+        html += `<div class="insp-list-item" data-aclip="${c.id}"${c.muted ? ' style="opacity:.45;"' : ""}>
+          <span class="msr kind" style="color:var(--sky);">${roleIcon[c.role] || "graphic_eq"}</span>
+          <span class="w-label" title="${esc(c.role || "sfx")}">${esc(snd ? snd.name : "(missing)")}${c.continues ? " →" : ""}</span>
+          <span class="w-time">${EB.fmtTime(c.at_s || 0, false)}→${end}</span>
+        </div>`;
+      }
+      html += `</div>`;
+    }
+
     if (b.type === "merge") {
       html += `<div class="insp-sec"><div style="font-size:11.5px;color:var(--text-mute);line-height:1.6;">
         A merge is a join point: connect several branches into it, then drag from its output port
@@ -152,6 +178,12 @@
       item.addEventListener("click", (e) => {
         if (e.target.closest("[data-eye]")) return;
         EB.emit("edit-window", { blockId: b.id, winId: item.dataset.win });
+      });
+    });
+    box.querySelectorAll("[data-aclip]").forEach(item => {
+      item.addEventListener("click", () => {
+        // the lane module owns the clip editor — route through its dblclick path
+        EB.emit("edit-audio-clip", { blockId: b.id, clipId: item.dataset.aclip });
       });
     });
     box.querySelectorAll("[data-eye]").forEach(btn => {

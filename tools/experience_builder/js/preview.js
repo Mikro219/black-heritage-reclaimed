@@ -42,6 +42,7 @@
     cancelAnimationFrame(raf);
     clearTimeout(timeoutTimer);
     clearInterval(timeoutTick);
+    if (EB.pvAudio) EB.pvAudio.stop(0);
     const v = video();
     v.pause();
     v.removeAttribute("src"); v.load();
@@ -90,6 +91,7 @@
 
     const url = b.media ? EB.runtime.mediaURLs[b.media] : null;
     crumb(b, b.type === "choice" ? "choice — plays, then waits for a decision" : "playback");
+    if (EB.pvAudio) EB.pvAudio.enterBlock(b);
     if (!url || !b.range_s) {
       // no media: playback skips after a beat; choice waits for a click on pills
       if (b.type === "choice") { armWindows(b, true); armTimeout(b); }
@@ -99,6 +101,9 @@
 
     const v = video();
     const src = url;
+    // master_audio: the block plays the source video's own baked mix; other
+    // blocks stay muted (their sound is the WebAudio lane clips)
+    v.muted = !b.master_audio;
     const begin = () => {
       v.currentTime = b.range_s[0];
       v.play().catch(() => {});
@@ -159,6 +164,7 @@
   }
 
   function endScreen() {
+    if (EB.pvAudio) EB.pvAudio.stop(800);   // let beds fade out musically
     $("pv-ended").classList.add("on");
     $("pv-crumb").innerHTML = "<b>End</b>";
   }

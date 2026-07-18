@@ -52,6 +52,7 @@
       if (existing) relinkId = existing.id;
     }
     if (relinkId) {
+      if (EB.runtime.mediaURLs[relinkId]) URL.revokeObjectURL(EB.runtime.mediaURLs[relinkId]);
       EB.runtime.mediaURLs[relinkId] = url;
       delete EB.runtime.missing[relinkId];
       if (handle) { EB.runtime.fileHandles[relinkId] = handle; EB.storeHandle(relinkId, handle); }
@@ -70,14 +71,18 @@
     EB.toast(`Imported ${file.name} · ${EB.fmtTime(dur, false)}`);
   }
 
-  /* ── import: sound ── */
+  /* ── import: sound (multi-select for bulk stem drops) ── */
   async function pickSound(relinkId) {
     if (window.showOpenFilePicker) {
       try {
-        const [handle] = await window.showOpenFilePicker({
+        const handles = await window.showOpenFilePicker({
+          multiple: !relinkId,
           types: [{ description: "Audio", accept: { "audio/*": [".mp3", ".wav", ".ogg", ".m4a"] } }],
         });
-        importSoundFile(await handle.getFile(), handle, relinkId);
+        for (const handle of handles) {
+          importSoundFile(await handle.getFile(), handle, relinkId);
+          relinkId = null;   // only the first file can be a relink target
+        }
       } catch (e) { /* cancelled */ }
     } else {
       $("file-sound").dataset.relink = relinkId || "";
@@ -86,10 +91,43 @@
   }
 
   $("file-sound").addEventListener("change", (e) => {
-    const f = e.target.files[0];
-    if (f) importSoundFile(f, null, e.target.dataset.relink || null);
+    const relink = e.target.dataset.relink || null;
+    [...e.target.files].forEach((f, i) => importSoundFile(f, null, i === 0 ? relink : null));
     e.target.value = "";
+    e.target.dataset.relink = "";
   });
+
+  /* Link a whole folder of audio files: every project sound whose name matches
+   * a file in the folder (recursively) gets re-linked — the one-click path for
+   * the 199-file stem delivery after a capcut_audio.py --to-builder import. */
+  async function linkSoundFolder() {
+    if (!window.showDirectoryPicker) {
+      return EB.toast("Folder linking needs Chrome/Edge (File System Access API)", true);
+    }
+    let dir;
+    try { dir = await window.showDirectoryPicker(); } catch (e) { return; }
+    const wanted = new Map(EB.project.sounds.map(s => [s.name.toLowerCase(), s]));
+    let linked = 0, seen = 0;
+    async function walk(d) {
+      for await (const entry of d.values()) {
+        if (entry.kind === "directory") { await walk(entry); continue; }
+        seen += 1;
+        const s = wanted.get(entry.name.toLowerCase());
+        if (!s || EB.runtime.soundURLs[s.id]) continue;
+        try {
+          const file = await entry.getFile();
+          EB.runtime.soundURLs[s.id] = URL.createObjectURL(file);
+          EB.runtime.fileHandles[s.id] = entry;
+          EB.storeHandle(s.id, entry);
+          delete EB.runtime.missing[s.id];
+          linked += 1;
+        } catch (e) { /* skip unreadable */ }
+      }
+    }
+    await walk(dir);
+    EB.emit("assets-changed");
+    EB.toast(`Linked ${linked} of ${EB.project.sounds.length} sounds (${seen} files scanned)`);
+  }
 
   function importSoundFile(file, handle, relinkId) {
     const url = URL.createObjectURL(file);
@@ -98,6 +136,7 @@
       if (existing) relinkId = existing.id;
     }
     if (relinkId) {
+      if (EB.runtime.soundURLs[relinkId]) URL.revokeObjectURL(EB.runtime.soundURLs[relinkId]);
       EB.runtime.soundURLs[relinkId] = url;
       delete EB.runtime.missing[relinkId];
       if (handle) { EB.runtime.fileHandles[relinkId] = handle; EB.storeHandle(relinkId, handle); }
@@ -169,6 +208,7 @@
         EB.change("remove media", () => {
           EB.project.media = EB.project.media.filter(x => x.id !== m.id);
         });
+        if (EB.runtime.mediaURLs[m.id]) URL.revokeObjectURL(EB.runtime.mediaURLs[m.id]);
         delete EB.runtime.mediaURLs[m.id];
         delete EB.runtime.missing[m.id];
         EB.emit("assets-changed");
@@ -219,11 +259,19 @@
     list.innerHTML = "";
     $("lib-sound-count").textContent = EB.project.sounds.length;
     const detectId = EB.project.settings.global_detect_sound;
+    const filter = ($("lib-sound-filter") ? $("lib-sound-filter").value : "").trim().toLowerCase();
     for (const s of EB.project.sounds) {
+      if (filter && !s.name.toLowerCase().includes(filter)) continue;
       const missing = EB.runtime.missing[s.id];
       const isDetect = s.id === detectId;
       const el = document.createElement("div");
       el.className = "lib-item sound" + (missing ? " missing" : "");
+      el.draggable = true;
+      el.title = "Drag onto a timeline audio lane to place this sound on the selected block";
+      el.addEventListener("dragstart", (e) => {
+        e.dataTransfer.setData("application/x-bhr-sound", s.id);
+        e.dataTransfer.effectAllowed = "copy";
+      });
       el.innerHTML = `
         <span class="li-icon"><span class="msr">music_note</span></span>
         <span class="li-meta">
@@ -313,5 +361,11 @@
   /* ── wire up ── */
   EB.on("project-changed", () => { renderMedia(); renderSounds(); });
   EB.on("assets-changed", () => { renderMedia(); renderSounds(); });
-  document.addEventListener("DOMContentLoaded", () => { renderMedia(); renderSounds(); renderActions(); });
+  document.addEventListener("DOMContentLoaded", () => {
+    renderMedia(); renderSounds(); renderActions();
+    const filter = $("lib-sound-filter");
+    if (filter) filter.addEventListener("input", renderSounds);
+    const linkBtn = $("lib-link-folder");
+    if (linkBtn) linkBtn.addEventListener("click", linkSoundFolder);
+  });
 })();

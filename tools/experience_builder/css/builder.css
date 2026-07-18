@@ -58,7 +58,8 @@ input, select, textarea { font-family: inherit; }
 #app {
   height: 100%;
   display: grid;
-  grid-template-rows: 54px 1fr 178px;
+  /* timeline strip height is user-resizable (drag its top edge) */
+  grid-template-rows: 54px 1fr var(--tl-h, 232px);
   grid-template-columns: 256px 1fr 302px;
   grid-template-areas:
     "toolbar toolbar toolbar"
@@ -449,7 +450,14 @@ input, select, textarea { font-family: inherit; }
   display: flex; flex-direction: column;
   min-width: 0;
   z-index: 20;
+  position: relative;
 }
+/* drag the strip's top edge to resize it (see timeline.js) */
+#tl-resizer {
+  position: absolute; top: -3px; left: 0; right: 0; height: 7px;
+  cursor: ns-resize; z-index: 40;
+}
+#tl-resizer:hover, #tl-resizer.dragging { background: rgba(56,189,248,.25); }
 #tl-empty {
   flex: 1; display: flex; align-items: center; justify-content: center;
   color: var(--text-mute); font-size: 12.5px; gap: 8px;
@@ -503,10 +511,10 @@ input, select, textarea { font-family: inherit; }
 #tl-ruler .tick { position: absolute; bottom: 0; width: 1px; height: 5px; background: var(--border-2); }
 #tl-ruler .tick-label { position: absolute; bottom: 4px; transform: translateX(3px); }
 #tl-track {
-  position: relative; flex: 1;
+  position: relative; flex: none; height: 46px;
   background: var(--panel-2); border: 1px solid var(--border); border-top: none;
   border-radius: 0 0 7px 7px;
-  cursor: pointer; overflow: hidden; min-height: 44px;
+  cursor: pointer; overflow: hidden;
 }
 .tl-win {
   position: absolute; top: 7px; height: calc(100% - 14px);
@@ -713,3 +721,52 @@ input, select, textarea { font-family: inherit; }
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb { background: #2a323e; border-radius: 6px; border: 2px solid var(--panel); }
 ::-webkit-scrollbar-track { background: transparent; }
+
+/* ── Timeline audio lanes (layered stem audio, July 2026) ─────────────── */
+#tl-audio-lanes {
+  /* lanes soak up extra height when the strip is dragged taller; scroll
+     rather than clip when squeezed */
+  flex: 1; display: flex; flex-direction: column; gap: 2px; margin-top: 4px;
+  min-height: 94px; overflow-y: auto; overflow-x: hidden;
+}
+.tl-alane { display: flex; align-items: stretch; flex: 1 1 22px; min-height: 22px; position: relative; }
+/* the label OVERLAYS the lane so the track spans the full width and lines up
+   1:1 with the ruler and window track above */
+.tl-alane .alane-label {
+  position: absolute; left: 5px; top: 50%; transform: translateY(-50%);
+  z-index: 3; padding: 1px 5px; border-radius: 4px;
+  background: rgba(13,17,23,.78);
+  font: 600 9px var(--mono); letter-spacing: .08em; color: var(--text-faint);
+}
+.tl-alane .alane-track {
+  position: relative; flex: 1; overflow: hidden;
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 5px;
+}
+.tl-alane .alane-track.dragover { border-color: var(--sky); background: rgba(56,189,248,.06); }
+.tl-alane[data-role="vo"]       .alane-label { color: #4ade80; }
+.tl-alane[data-role="music"]    .alane-label { color: #c084fc; }
+.tl-alane[data-role="ambience"] .alane-label { color: var(--sky); }
+.tl-alane[data-role="sfx"]      .alane-label { color: var(--amber); }
+.tl-alane .alane-label:hover { filter: brightness(1.4); }
+.tl-alane.muted .alane-label { color: var(--text-mute); text-decoration: line-through; }
+.tl-alane.muted .alane-track { opacity: .38; }
+.tl-aclip {
+  position: absolute; top: 2px; bottom: 2px; border-radius: 4px;
+  display: flex; align-items: center; gap: 4px; padding: 0 5px;
+  cursor: grab; min-width: 14px; overflow: hidden;
+  font: 600 9.5px 'IBM Plex Sans', sans-serif; color: var(--text);
+  white-space: nowrap; text-overflow: ellipsis;
+}
+.tl-aclip.vo       { background: rgba(74,222,128,.18);  border: 1px solid rgba(74,222,128,.6); }
+.tl-aclip.music    { background: rgba(192,132,252,.20); border: 1px solid rgba(192,132,252,.6); }
+.tl-aclip.ambience { background: rgba(56,189,248,.18);  border: 1px solid rgba(56,189,248,.6); }
+.tl-aclip.sfx      { background: rgba(245,165,36,.18);  border: 1px solid rgba(245,165,36,.6); }
+.tl-aclip:hover { filter: brightness(1.25); }
+.tl-aclip.muted { opacity: .38; }
+.tl-aclip .a-cont { flex: none; font-size: 10px; color: var(--text-mute); }
+.tl-aclip .a-name { overflow: hidden; text-overflow: ellipsis; }
+.tl-aclip .a-resize { position: absolute; right: 0; top: 0; bottom: 0; width: 7px; cursor: ew-resize; }
+.tl-aclip .a-resize::after {
+  content: ''; position: absolute; right: 2px; top: 25%; bottom: 25%; width: 2px;
+  background: rgba(231,235,242,.4); border-radius: 2px;
+}

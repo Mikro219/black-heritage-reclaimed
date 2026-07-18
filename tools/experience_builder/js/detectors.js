@@ -12,11 +12,11 @@ window.EB = window.EB || {};
 
 EB.DETECTORS = [
   { type: "point_region", label: "Point at region (L/R)", icon: "point_scan", region: "required",
-    hint: "Arm raised toward the left or right half; open palms rejected; low side-reach accepted for low targets.",
+    hint: "Arm raised toward the left or right half (pose wrist vs body midline); low side-reach accepted for low targets.",
     params: { hold_ms: 600, reject_open_palm: true, allow_low_reach: true } },
 
   { type: "point_target_held", label: "Point at target + hold", icon: "ads_click", region: "required",
-    hint: "Pointing finger (index out, others curled) held inside the drawn region.",
+    hint: "Extended arm with the hand point held inside the drawn region (pose-based).",
     params: { hold_ms: 700 } },
 
   { type: "forward_point", label: "Point into screen", icon: "touch_app", region: "required",
@@ -24,11 +24,11 @@ EB.DETECTORS = [
     params: { hold_ms: 500 } },
 
   { type: "forward_reach", label: "Reach toward screen", icon: "front_hand", region: "optional",
-    hint: "Hand approaches the camera (real depth on the Gemini 335, hand-growth on webcam). Any hand pose counts.",
+    hint: "Wrist approaches the camera (real depth on the Gemini 335, pose-z fallback). Any hand pose counts.",
     params: { area_growth_threshold: 0.30, min_depth_delta_mm: 180 } },
 
   { type: "reach_and_close", label: "Reach + grab (fist)", icon: "back_hand", region: "optional",
-    hint: "Hand extends forward then closes to a fist — the tool-grab gesture.",
+    hint: "Hand reaches toward the screen then settles — the take-hold gesture (pose-based).",
     params: {} },
 
   { type: "presence_bilateral", label: "Raise both hands", icon: "waving_hand", region: "optional",
@@ -40,7 +40,7 @@ EB.DETECTORS = [
     params: { hold_ms: 1000 } },
 
   { type: "directional_point", label: "Directional point", icon: "arrow_selector_tool", region: "optional",
-    hint: "Single hand pointing left / right / up / down.",
+    hint: "One extended arm pointing left / right / up / down (wrist→index vector).",
     params: { direction: "left", hold_ms: 500 } },
 
   { type: "directional_draw", label: "Draw stroke (direction)", icon: "gesture", region: "optional",
@@ -48,11 +48,11 @@ EB.DETECTORS = [
     params: { direction: "left", tolerance_deg: 30 } },
 
   { type: "rhythm_bilateral", label: "Knock (two pushes)", icon: "door_front", region: "optional",
-    hint: "Two pushes toward the camera — the hand visibly lunges (or real depth drop) twice.",
+    hint: "Two pushes toward the camera — real depth drop on the Gemini 335, pose-z fallback.",
     params: { knock_count: 2, knock_window_ms: 2500, min_growth_pct: 30 } },
 
   { type: "push_out", label: "Push forward (both hands)", icon: "open_with", region: "optional",
-    hint: "Both hands thrust toward the screen together.",
+    hint: "Both wrists thrust toward the screen together (depth / pose-z).",
     params: { min_growth_pct: 50, window_ms: 250, min_depth_delta_mm: 200 } },
 
   { type: "throw", label: "Throw (overhand)", icon: "sports_handball", region: "optional",
@@ -112,7 +112,7 @@ EB.DETECTORS = [
     params: { hold_ms: 500 } },
 
   { type: "mouth_proximity_tip", label: "Drink (hand to mouth)", icon: "local_drink", region: "optional",
-    hint: "Hand tips near the mouth — wrist at/below the fingertips, the natural drinking pose.",
+    hint: "Hand raised to the mouth with the wrist at/below the hand point — the natural drinking pose.",
     params: {} },
 
   { type: "directional_head_or_hand", label: "Look / scan direction", icon: "frame_person", region: "optional",

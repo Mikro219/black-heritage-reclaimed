@@ -77,6 +77,10 @@
     if (blockId) renderAll();
   });
   EB.on("assets-changed", () => { if (blockId) openFor(blockId); });
+  EB.on("lane-mutes-changed", () => {
+    // re-schedule the live mix so a lane mute applies immediately
+    if (playing && EB.pvAudio) EB.pvAudio.playBlockAt(block(), localTime());
+  });
 
   /* ── time mapping ── */
   function localTime() {
@@ -112,14 +116,21 @@
       return;
     }
     if (localTime() >= EB.blockLen(b) - 0.02) seekLocal(0);
+    // master_audio blocks play the source video's own baked mix; everything
+    // else stays muted and gets the lane clips instead
+    video.muted = !b.master_audio;
     video.play().catch((e) => EB.toast("Playback failed: " + e.message, true));
     playing = true;
+    // schedule the block's audio clips against the local playhead
+    if (EB.pvAudio) EB.pvAudio.playBlockAt(b, localTime());
     $("tl-play").innerHTML = '<span class="msr">pause</span>';
     tick();
   }
   function stop() {
     video.pause();
+    video.muted = true;
     playing = false;
+    if (EB.pvAudio) EB.pvAudio.stopBlock();
     cancelAnimationFrame(rafId);
     const btn = $("tl-play");
     if (btn) btn.innerHTML = '<span class="msr">play_arrow</span>';
@@ -169,6 +180,7 @@
     renderWindows();
     updatePlayhead(localTime());
     updateTimecode(localTime());
+    EB.emit("tl-rendered", b.id);
   }
 
   /* source brush */
@@ -335,6 +347,36 @@
 
   /* ── wiring ── */
   function wire() {
+    // drag the strip's top edge to resize it (persisted across sessions)
+    const LS_H = "bhr_tl_height";
+    const app = $("app");
+    const savedH = parseInt(localStorage.getItem(LS_H), 10);
+    if (savedH) app.style.setProperty("--tl-h", savedH + "px");
+    const resizer = $("tl-resizer");
+    if (resizer) resizer.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      resizer.classList.add("dragging");
+      const startY = e.clientY;
+      const startH = $("timeline").getBoundingClientRect().height;
+      const onMove = (mv) => {
+        const h = Math.max(150, Math.min(window.innerHeight * 0.7,
+                                         startH + (startY - mv.clientY)));
+        app.style.setProperty("--tl-h", Math.round(h) + "px");
+      };
+      const onUp = (mv) => {
+        resizer.classList.remove("dragging");
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+        try {
+          localStorage.setItem(LS_H,
+            String(Math.round($("timeline").getBoundingClientRect().height)));
+        } catch (err) { /* private mode */ }
+        if (blockId) renderAll();   // lane/track heights changed
+      };
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+    });
+
     $("tl-play").addEventListener("click", () => EB.tlTogglePlay());
     $("tl-prev-frame").addEventListener("click", () => EB.tlStepFrame(-1));
     $("tl-next-frame").addEventListener("click", () => EB.tlStepFrame(1));

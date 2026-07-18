@@ -31,10 +31,29 @@ install). Everything runs locally; the MP4 never leaves your machine.
    creates a branch. The block plays its clip, pauses on the last frame, and
    waits; the timeout auto-advances (the runtime always falls into the FIRST
    branch on timeout).
-6. **Preview flow** — plays the experience from Start. Clicking a window's
+6. **Audio lanes** — under the block timeline sit four lanes: **VO**,
+   **MUSIC**, **AMB** and **SFX**. Drag a sound from the Sounds tab onto a
+   lane to place it (the lane sets its role); drag a bar to move it, drag its
+   right edge to resize, double-click for the clip editor (gain, fades,
+   source offset, "continues previous block's bed", preview mute). Music and
+   ambience are *beds*: in the runtime they loop through interaction holds
+   and hand over seamlessly to the next shot when it has a matching
+   "continues" clip. SFX are one-shots fired at their timeline position. VO
+   is Auntie Liza's voice: it plays once on the runtime's dedicated voice
+   channel and a "continues" VO clip never restarts a line. **Click a lane's
+   label to mute/unmute that whole lane** (strikethrough = muted; applies to
+   the block player and the preview flow — monitoring only, never exported).
+   The Sounds tab supports multi-file import, a filter box, a ▶ play button
+   per sound, and 📁 **link folder** — point it at `assets/audio/` once and
+   every sound (stems + voice lines) re-links by name, recursively.
+7. **Block player with sound** — the bottom timeline's ▶ plays the scrub
+   video *and* the block's audio clips in sync from the playhead (respecting
+   clip mutes and lane mutes). Scrubbing or pausing stops the audio.
+8. **Preview flow** — plays the experience from Start. Clicking a window's
    region simulates the gesture: green flash + detect sound, branches follow
-   your choice. Esc exits.
-7. **Save / Export** — Ctrl+S saves the `.bhrx.json` project (autosaves a
+   your choice. Audio lanes play through WebAudio with the same bed-handover
+   semantics as the runtime. Esc exits.
+9. **Save / Export** — Ctrl+S saves the `.bhrx.json` project (autosaves a
    draft to the browser as you work; media files re-link on reopen). Export
    shows the command that generates the runtime tree:
 
@@ -82,9 +101,30 @@ converted into an editable project:
 py -3.12 scripts/scenes_to_builder.py        # writes BHR_Experience.bhrx.json
 ```
 
-Open that file in the editor (Open button), then re-link `BHR Draft 1.mp4`
-(click it in the Media tab) and `detect.mp3` (any copy works, e.g.
-`scenes/act_01_quilt_awakens/shot_02/detect.mp3`).
+The CapCut master-timeline audio (music/ambience/SFX placements from
+`assets/audio/draft_content.json`, plus Auntie Liza's VO slices) can be
+merged into that project as lane clips:
+
+```
+py -3.12 scripts/capcut_audio.py assets/audio/draft_content.json --to-builder BHR_Experience.bhrx.json
+```
+
+(The same script's `--apply-scenes` writes the events straight into the live
+`scenes/` tree for the runtime — see the top-level CLAUDE.md.)
+
+The project then **loads automatically** when you open `index.html`: the
+importer regenerates `js/project_data.js` (a script-tag bundle of the
+`.bhrx.json` — `file://` pages can't fetch JSON, but they can load scripts;
+regenerate by hand with `py -3.12 scripts/bundle_builder_project.py`). A
+fresh bundle wins over the browser's autosave draft (the draft is backed up
+in localStorage); an unchanged bundle keeps your in-browser edits.
+
+Media/sound *files* can't be bundled — browsers can't open local files by
+path — so on first load re-link `BHR Draft 1.mp4` (click it in the Media
+tab) and use 📁 link-folder on the Sounds tab pointed at `assets/audio/`
+(recursive — covers `stems/` and `voice_lines/` in one go). The links
+persist across sessions via stored file handles (Chrome may show a one-click
+permission prompt per session).
 
 > **Play button does nothing?** The clip isn't linked yet — a project file
 > stores only the video's *name* (browsers can't reopen local files by
