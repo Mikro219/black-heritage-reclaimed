@@ -1,11 +1,23 @@
-﻿__pycache__/
+__pycache__/
 CLAUDE.md
 *.pyc
 .venv/
 .DS_Store
 Thumbs.db
+
+# Frame images are huge and delivered/regenerated outside git
+# (scenes/*/frames/, assets/storyboard/ pages, export frames).
+# Exception: the runtime hand-cursor icons + their source art are tiny
+# and required at runtime (render_engine reads assets/hand_icons/).
 *.png
 *.jpg
+!assets/hand_icons/*.png
+!assets/source/**/*.png
+!assets/source/**/*.jpg
+
+# Runtime logs (repo-local; production logs go to %LOCALAPPDATA%/BHR/logs)
+Log/
+*.log
 
 # Disk-backed frame packs (huge, regenerated from frames/ on first run)
 framecache.npy
@@ -15,3 +27,22 @@ framecache.npy
 build/
 dist/
 *.spec
+
+# Generated experience export — rebuild with:
+#   py -3.12 scripts/export_experience.py BHR_Experience.bhrx.json
+export/
+
+# Delivered media too large for git (kept locally / delivered via drive):
+#   _archive/  — original delivery zips (contents already extracted)
+#   video/     — master draft + comped scene renders (~2.1 GB)
+#   audio/stems/, audio/voice_lines/ — delivered stems + extracted comp VO
+# assets/audio/draft_content.json (the CapCut timeline source of truth) and
+# assets/docs/ (storyboard PDFs) stay tracked.
+assets/_archive/
+assets/video/
+assets/audio/stems/
+assets/audio/voice_lines/
+
+# Local backups of the Experience Builder project
+*.pre_simplify.json
+*.bhrx.backup.json
