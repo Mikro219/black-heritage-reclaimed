@@ -324,7 +324,7 @@
     },
     {
       "id": "s98",
-      "name": "DSGNBass-“Slow,_deep_heartbea-Elevenlabs.mp3"
+      "name": "DSGNBass-\u201cSlow,_deep_heartbea-Elevenlabs.mp3"
     },
     {
       "id": "s96",
@@ -707,7 +707,7 @@
     {
       "id": "b_stretch_1",
       "type": "playback",
-      "name": "01–08 · Prologue → Crossroads",
+      "name": "01\u201308 \u00b7 Prologue \u2192 Crossroads",
       "media": "m1",
       "range_s": [
         0,
@@ -739,8 +739,7 @@
           "detector": "presence_bilateral",
           "params": {
             "y_threshold": "shoulder",
-            "hold_ms": 500,
-            "voice_alternative": "freedom"
+            "hold_ms": 500
           },
           "region": null,
           "appears_s": 224,
@@ -751,8 +750,7 @@
           "label": "point_quilt_block",
           "detector": "point_target_held",
           "params": {
-            "hold_ms": 600,
-            "cursor": "dots"
+            "hold_ms": 600
           },
           "region": {
             "shape": "rect",
@@ -773,7 +771,7 @@
     {
       "id": "b_09",
       "type": "choice",
-      "name": "09 · Crossroads",
+      "name": "09 \u00b7 Crossroads",
       "media": "m1",
       "range_s": [
         304.933,
@@ -928,7 +926,7 @@
     {
       "id": "b_09_left",
       "type": "playback",
-      "name": "09L · confirm_left",
+      "name": "09L \u00b7 confirm_left",
       "media": "m1",
       "range_s": [
         336.033,
@@ -997,7 +995,7 @@
     {
       "id": "b_09_right",
       "type": "playback",
-      "name": "09R · confirm_right",
+      "name": "09R \u00b7 confirm_right",
       "media": "m1",
       "range_s": [
         352.033,
@@ -1066,7 +1064,7 @@
     {
       "id": "b_stretch_2",
       "type": "playback",
-      "name": "10–18 · Flying Geese → North Star",
+      "name": "10\u201318 \u00b7 Flying Geese \u2192 North Star",
       "media": "m1",
       "range_s": [
         359,
@@ -1080,8 +1078,7 @@
           "detector": "point_target_held",
           "params": {
             "hold_ms": 500,
-            "directions": "[\\\\\\\"down\\\\\\\",\\\\\\\"down_left\\\\\\\",\\\\\\\"down_right\\\\\\\"]",
-            "cursor": "dots"
+            "directions": "[\\\"down\\\",\\\"down_left\\\",\\\"down_right\\\"]"
           },
           "region": {
             "shape": "circle",
@@ -1102,7 +1099,7 @@
     {
       "id": "b_19",
       "type": "playback",
-      "name": "19 · North Star (draw chain)",
+      "name": "19 \u00b7 North Star (draw chain)",
       "media": "m1",
       "range_s": [
         489.167,
@@ -1123,121 +1120,79 @@
           },
           "region": {
             "shape": "rect",
-            "x": 0.4734762644377675,
-            "y": 0.2583395884035224,
-            "w": 0.18623024189244247,
-            "h": 0.24680210684725362
+            "x": 0.725733592092076,
+            "y": 0.6586405665826044,
+            "w": 0.274266407907924,
+            "h": 0.3413594334173956
           },
-          "appears_s": 15.12,
-          "duration_s": 1.6
+          "appears_s": 15.47,
+          "duration_s": 1.4
         },
         {
           "id": "w_19_s1",
           "label": "Draw down",
           "detector": "directional_draw",
           "params": {
-            "direction": "down",
-            "tolerance_deg": 30
+            "direction": "down"
           },
-          "region": {
-            "shape": "rect",
-            "x": 0.47178326223874534,
-            "y": 0.26435915198516274,
-            "w": 0.2116252748777756,
-            "h": 0.2558314522197141
-          },
-          "appears_s": 18.85,
-          "duration_s": 1.75
+          "region": null,
+          "appears_s": 19.3,
+          "duration_s": 1.35
         },
         {
           "id": "w_19_s2",
           "label": "Draw right",
           "detector": "directional_draw",
           "params": {
-            "direction": "right",
-            "tolerance_deg": 30
+            "direction": "right"
           },
-          "region": {
-            "shape": "rect",
-            "x": 0.47686226883581195,
-            "y": 0.2493102430310619,
-            "w": 0.21331827707679774,
-            "h": 0.2768999247554552
-          },
-          "appears_s": 22.12,
-          "duration_s": 1.85
+          "region": null,
+          "appears_s": 22.82,
+          "duration_s": 1.4
         },
         {
           "id": "w_19_s3",
           "label": "Draw up",
           "detector": "directional_draw",
           "params": {
-            "direction": "up",
-            "tolerance_deg": 30
+            "direction": "up"
           },
-          "region": {
-            "shape": "rect",
-            "x": 0.47686226883581195,
-            "y": 0.2553298066127022,
-            "w": 0.2031602638826645,
-            "h": 0.2859292701279157
-          },
-          "appears_s": 25.73,
-          "duration_s": 1.95
+          "region": null,
+          "appears_s": 26.68,
+          "duration_s": 1.4
         },
         {
           "id": "w_19_s4",
           "label": "Draw up_left",
           "detector": "directional_draw",
           "params": {
-            "direction": "up_left",
-            "tolerance_deg": 30
+            "direction": "up_left"
           },
-          "region": {
-            "shape": "rect",
-            "x": 0.47686226883581195,
-            "y": 0.26736893377598286,
-            "w": 0.21331827707679774,
-            "h": 0.2799097065462754
-          },
-          "appears_s": 39.32,
-          "duration_s": 1.8
+          "region": null,
+          "appears_s": 39.82,
+          "duration_s": 1.4
         },
         {
           "id": "w_19_s5",
           "label": "Draw up_left",
           "detector": "directional_draw",
           "params": {
-            "direction": "up_left",
-            "tolerance_deg": 30
+            "direction": "up_left"
           },
-          "region": {
-            "shape": "rect",
-            "x": 0.48363427763190076,
-            "y": 0.25232002482188204,
-            "w": 0.18792324409146471,
-            "h": 0.28893905191873587
-          },
-          "appears_s": 42.8,
-          "duration_s": 1.7
+          "region": null,
+          "appears_s": 43.1,
+          "duration_s": 1.5
         },
         {
           "id": "w_19_s6",
           "label": "Draw left",
           "detector": "directional_draw",
           "params": {
-            "direction": "left",
-            "tolerance_deg": 30
+            "direction": "left"
           },
-          "region": {
-            "shape": "rect",
-            "x": 0.47009026003972315,
-            "y": 0.20717329795957956,
-            "w": 0.25056432545528623,
-            "h": 0.3160270880361174
-          },
-          "appears_s": 46.6,
-          "duration_s": 1.85
+          "region": null,
+          "appears_s": 47.15,
+          "duration_s": 1.55
         }
       ],
       "audio": [
@@ -1467,13 +1422,39 @@
           "continues": false,
           "role": "sfx",
           "speed": 0.57
+        },
+        {
+          "id": "a301",
+          "sound": "s172",
+          "role": "sfx",
+          "at_s": 6.23,
+          "duration_s": 7.567,
+          "source_offset_s": 0,
+          "gain": 1.0,
+          "fade_in_ms": 0,
+          "fade_out_ms": 0,
+          "sustain": false,
+          "continues": false
+        },
+        {
+          "id": "a302",
+          "sound": "s172",
+          "role": "sfx",
+          "at_s": 30.5,
+          "duration_s": 7.567,
+          "source_offset_s": 0,
+          "gain": 1.0,
+          "fade_in_ms": 0,
+          "fade_out_ms": 0,
+          "sustain": false,
+          "continues": false
         }
       ]
     },
     {
       "id": "b_20",
       "type": "playback",
-      "name": "20 · North Star (draw chain)",
+      "name": "20 \u00b7 North Star (draw chain)",
       "media": "m1",
       "range_s": [
         545.333,
@@ -1489,16 +1470,9 @@
           "label": "Draw up_left",
           "detector": "directional_draw",
           "params": {
-            "direction": "up_left",
-            "tolerance_deg": 30
+            "direction": "up_left"
           },
-          "region": {
-            "shape": "rect",
-            "x": 0.5598193765878999,
-            "y": 0.16202657109727708,
-            "w": 0.15067719571297622,
-            "h": 0.3521444695259594
-          },
+          "region": null,
           "appears_s": 13.97,
           "duration_s": 2
         },
@@ -1507,16 +1481,9 @@
           "label": "Draw down_left",
           "detector": "directional_draw",
           "params": {
-            "direction": "down_left",
-            "tolerance_deg": 30
+            "direction": "down_left"
           },
-          "region": {
-            "shape": "rect",
-            "x": 0.3041760445355471,
-            "y": 0.18008526184219809,
-            "w": 0.12866816712568757,
-            "h": 0.33107599699021817
-          },
+          "region": null,
           "appears_s": 18.23,
           "duration_s": 2
         },
@@ -1525,16 +1492,9 @@
           "label": "Draw down_right",
           "detector": "directional_draw",
           "params": {
-            "direction": "down_right",
-            "tolerance_deg": 30
+            "direction": "down_right"
           },
-          "region": {
-            "shape": "rect",
-            "x": 0.3346500841179468,
-            "y": 0.5171808224140566,
-            "w": 0.12528216272764314,
-            "h": 0.32806621519939805
-          },
+          "region": null,
           "appears_s": 22.1,
           "duration_s": 2
         },
@@ -1543,16 +1503,9 @@
           "label": "Draw up_right",
           "detector": "directional_draw",
           "params": {
-            "direction": "up_right",
-            "tolerance_deg": 30
+            "direction": "up_right"
           },
-          "region": {
-            "shape": "rect",
-            "x": 0.5344243436025669,
-            "y": 0.5141710406232365,
-            "w": 0.1455981891159096,
-            "h": 0.32806621519939805
-          },
+          "region": null,
           "appears_s": 25.9,
           "duration_s": 2
         },
@@ -1839,13 +1792,26 @@
           "role": "vo"
         },
         {
+          "id": "a303",
+          "sound": "s172",
+          "role": "sfx",
+          "at_s": 5.0,
+          "duration_s": 7.567,
+          "source_offset_s": 0,
+          "gain": 1.0,
+          "fade_in_ms": 0,
+          "fade_out_ms": 0,
+          "sustain": false,
+          "continues": false
+        },
+        {
           "id": "a304",
           "sound": "s172",
           "role": "sfx",
           "at_s": 31.8,
           "duration_s": 7.567,
           "source_offset_s": 0,
-          "gain": 1,
+          "gain": 1.0,
           "fade_in_ms": 0,
           "fade_out_ms": 0,
           "sustain": false,
@@ -1858,7 +1824,7 @@
           "at_s": 50.43,
           "duration_s": 7.567,
           "source_offset_s": 0,
-          "gain": 1,
+          "gain": 1.0,
           "fade_in_ms": 0,
           "fade_out_ms": 0,
           "sustain": false,
@@ -1869,7 +1835,7 @@
     {
       "id": "b_stretch_3",
       "type": "playback",
-      "name": "21–36 · North Star → Bear Paw",
+      "name": "21\u201336 \u00b7 North Star \u2192 Bear Paw",
       "media": "m1",
       "range_s": [
         616.4,
@@ -1932,12 +1898,10 @@
           "label": "scan_survey",
           "detector": "survey",
           "params": {
-            "salute_hold_ms": 500,
             "brow_y": 0.45,
             "scan_window_ms": 2000,
             "min_x_delta": 0.06,
-            "hold_ms": 200,
-            "cursor": "dots"
+            "hold_ms": 200
           },
           "region": null,
           "appears_s": 184.2,
@@ -1980,12 +1944,10 @@
           "label": "scan_survey",
           "detector": "survey",
           "params": {
-            "salute_hold_ms": 500,
             "brow_y": 0.45,
             "scan_window_ms": 2000,
             "min_x_delta": 0.06,
-            "hold_ms": 200,
-            "cursor": "dots"
+            "hold_ms": 200
           },
           "region": null,
           "appears_s": 308.29,
@@ -2000,7 +1962,7 @@
     {
       "id": "b_37",
       "type": "choice",
-      "name": "37 · Bear Paw",
+      "name": "37 \u00b7 Bear Paw",
       "media": "m1",
       "range_s": [
         935.167,
@@ -2151,7 +2113,7 @@
     {
       "id": "b_37_left",
       "type": "playback",
-      "name": "37L · wrong_path",
+      "name": "37L \u00b7 wrong_path",
       "media": "m1",
       "range_s": [
         952.5,
@@ -2233,7 +2195,7 @@
     {
       "id": "b_37_right",
       "type": "playback",
-      "name": "37R · correct_path",
+      "name": "37R \u00b7 correct_path",
       "media": "m1",
       "range_s": [
         957.6,
@@ -2302,7 +2264,7 @@
     {
       "id": "b_stretch_4",
       "type": "playback",
-      "name": "38–49 · Bear Paw → Wagon Wheel",
+      "name": "38\u201349 \u00b7 Bear Paw \u2192 Wagon Wheel",
       "media": "m1",
       "range_s": [
         961.433,
@@ -2346,7 +2308,7 @@
     {
       "id": "b_50",
       "type": "choice",
-      "name": "50 · Wagon Wheel",
+      "name": "50 \u00b7 Wagon Wheel",
       "media": "m1",
       "range_s": [
         1079.3,
@@ -2534,7 +2496,7 @@
     {
       "id": "b_50_left",
       "type": "playback",
-      "name": "50L · path_a",
+      "name": "50L \u00b7 path_a",
       "media": "m1",
       "range_s": [
         1121.567,
@@ -2629,7 +2591,7 @@
     {
       "id": "b_50_right",
       "type": "playback",
-      "name": "50R · path_b",
+      "name": "50R \u00b7 path_b",
       "media": "m1",
       "range_s": [
         1143.467,
@@ -2725,7 +2687,7 @@
     {
       "id": "b_57_l",
       "type": "playback",
-      "name": "57 · Tumbling Blocks (L)",
+      "name": "57 \u00b7 Tumbling Blocks (L)",
       "media": "m1",
       "range_s": [
         1166.567,
@@ -2794,7 +2756,7 @@
     {
       "id": "b_58",
       "type": "playback",
-      "name": "58 · Tumbling Blocks",
+      "name": "58 \u00b7 Tumbling Blocks",
       "media": "m1",
       "range_s": [
         1174.433,
@@ -2954,7 +2916,7 @@
     {
       "id": "b_57_r",
       "type": "playback",
-      "name": "57 · Tumbling Blocks (R)",
+      "name": "57 \u00b7 Tumbling Blocks (R)",
       "media": "m1",
       "range_s": [
         1166.567,
@@ -3023,7 +2985,7 @@
     {
       "id": "b_59",
       "type": "playback",
-      "name": "59 · Tumbling Blocks",
+      "name": "59 \u00b7 Tumbling Blocks",
       "media": "m1",
       "range_s": [
         1198.1,
@@ -3171,7 +3133,7 @@
     {
       "id": "b_stretch_5",
       "type": "playback",
-      "name": "60–79 · Tumbling Blocks → Epilogue",
+      "name": "60\u201379 \u00b7 Tumbling Blocks \u2192 Epilogue",
       "media": "m1",
       "range_s": [
         1217.633,
@@ -3199,8 +3161,7 @@
           "detector": "run_arms",
           "params": {
             "min_cycles": 3,
-            "window_ms": 2000,
-            "cursor": "fist"
+            "window_ms": 2000
           },
           "region": null,
           "appears_s": 24.93,
@@ -3222,9 +3183,8 @@
           "label": "throw_rope",
           "detector": "throw",
           "params": {
-            "max_stroke_ms": 600,
             "min_growth_pct": 40,
-            "cursor": "dots"
+            "max_stroke_ms": 600
           },
           "region": null,
           "appears_s": 140.84,
@@ -3247,9 +3207,7 @@
           "label": "paddle",
           "detector": "paddle",
           "params": {
-            "stroke_count": 4,
-            "min_strokes": 2,
-            "cursor": "fist"
+            "min_strokes": 2
           },
           "region": null,
           "appears_s": 173.83,

@@ -18,8 +18,10 @@ Mapping into editor blocks:
   region-fork FSM (shots 09/37/50)     -> choice block trimmed to the hold
                                           frame + branch playback blocks cut
                                           from the shot's own confirm/path
-                                          segments (37's wrong-path loops back
-                                          to the choice)
+                                          segments; a wrong-way retry (shot 37
+                                          left) marks its branch "retry": true
+                                          and authors hold_segments so the
+                                          exporter rebuilds the redirect loop
   draw-chain FSM (shots 19/20)         -> playback block + one directional_draw
                                           window per stroke (the blocking
                                           stroke-chain semantics stay in
@@ -78,10 +80,18 @@ def window_from_params(shot: str, suffix: str, label: str, detector: str,
                        duration_s: float | None) -> dict:
     params = dict(params or {})
     region = None
+    # Live region_rects are RAW (unmirrored) camera space; Builder regions are
+    # SCREEN space — mirror x on import (the exporter mirrors back).
+    # indicator_rect (directional_draw placement) is already screen space.
     rect = params.pop("region_rect", None)
     if isinstance(rect, dict):
-        region = {"shape": "rect", "x": rect.get("x", 0.4), "y": rect.get("y", 0.3),
-                  "w": rect.get("w", 0.2), "h": rect.get("h", 0.3)}
+        w_ = rect.get("w", 0.2)
+        region = {"shape": "rect", "x": round(1.0 - rect.get("x", 0.4) - w_, 3),
+                  "y": rect.get("y", 0.3), "w": w_, "h": rect.get("h", 0.3)}
+    ind = params.pop("indicator_rect", None)
+    if region is None and isinstance(ind, dict):
+        region = {"shape": "rect", "x": ind.get("x", 0.4), "y": ind.get("y", 0.3),
+                  "w": ind.get("w", 0.2), "h": ind.get("h", 0.3)}
     return {"id": win_id(shot, suffix), "label": label, "detector": detector,
             "params": params, "region": region,
             "appears_s": round(appears_s, 2),
@@ -207,6 +217,21 @@ def main() -> int:
                 # does this resolution loop back to waiting (37 wrong-way)?
                 loops = any(tr["from"] == res and tr["to"] == "waiting"
                             for tr in fsm["transitions"])
+                if loops:
+                    # Wrong-way retry: mark the branch so the exporter folds
+                    # its clip back into the choice shot and rebuilds the
+                    # redirect loop; extend the choice to cover the redirect
+                    # frames and author the exporter's hold_segments.
+                    choice["branches"][-1]["retry"] = True
+                    choice["range_s"] = rng(g_a, 1, max(hold_end, b_l))
+                    choice["hold_segments"] = {
+                        "intro": list(segments.get("intro", [1, hold_end])),
+                        "idle_loop": list(segments[waiting["segment"]]),
+                        "wrong_path": [a_l, b_l],
+                    }
+                    notes.append(f"shot {shot}: '{side}' is the wrong-way "
+                                 f"retry — branch marked retry; the redirect "
+                                 f"folds into the choice block on export")
                 branch_infos.append((sub_id, side, loops))
 
             # voice confirm (shot 09) — reaction window for reference
@@ -234,12 +259,6 @@ def main() -> int:
 
             next_tails = []
             for sub_id, side, loops in branch_infos:
-                if loops:
-                    # In the runtime this path loops back to the hold (retry).
-                    # play_if can't express a retry, so in the editor graph the
-                    # wrong-way clip just converges forward like a branch.
-                    notes.append(f"shot {shot}: '{side}' is the wrong-way path "
-                                 f"(runtime retries; imported as a plain branch)")
                 lane = "up" if side == "left" else "down"
                 side_tail = sub_id
                 side_col = col

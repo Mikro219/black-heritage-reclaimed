@@ -21,8 +21,18 @@ Params:
                          box aims the arm at the camera, and arm_reach_frac is
                          a 2-D projection — a foreshortened arm reads as
                          folded, so demanding min_reach_frac there rejected
-                         every legitimate hover (July 2026 fix). Default 0.25.
+                         every legitimate hover (July 2026 fix). Default 0.10:
+                         playtesting showed 0.25 still forced a stretched arm
+                         (hand pushed to the box edge); a relaxed arm holding
+                         box-center must pass — hold_ms is the deliberateness
+                         gate.
   min_visibility (float): Pose wrist visibility gate. Default 0.5.
+
+A side whose WRIST fails the gate is still evaluated when its INDEX landmark
+(19/20) passes visibility + the depth phantom veto — the cursor layer tracks
+the index, and an arm pointed at the camera routinely loses the wrist while
+the index stays visible (the "cursor inside the box but nothing fires"
+dead zone).
 
 If neither region_rect nor directions is given, fires on any extended arm with
 its hand point in the lower half (legacy fallback).
@@ -56,14 +66,22 @@ def detect(landmarks, params: dict, context: dict) -> bool:
     directions = params.get("directions")
     rect = _resolve_rect(params, context)
     min_reach = params.get("min_reach_frac", 0.55)
-    hover_reach = params.get("hover_reach_frac", 0.25)
+    hover_reach = params.get("hover_reach_frac", 0.10)
     min_visibility = params.get("min_visibility", 0.5)
 
     pose_lm = context.get("_pose_lm")
     wrists = pose_helpers.trusted_wrists(pose_lm, context, min_visibility)
+    sides = list(wrists)
+    for side, idxs in pose_helpers.SIDES.items():
+        if side in sides:
+            continue
+        tip = pose_helpers.lm(pose_lm, idxs["index"])
+        if tip is not None and pose_helpers.trusted_landmark(
+                context, idxs["index"], tip, min_visibility):
+            sides.append(side)
 
     on_target = False
-    for side in wrists:
+    for side in sides:
         reach = pose_helpers.arm_reach_frac(pose_lm, side)
         tip = pose_helpers.hand_point(pose_lm, side, min_visibility)
         if tip is None:

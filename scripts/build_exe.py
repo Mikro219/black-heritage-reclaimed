@@ -34,6 +34,7 @@ See docs/packaging.md for install + GitHub release instructions.
 """
 
 import argparse
+import os
 import shutil
 import subprocess
 import sys
@@ -45,7 +46,9 @@ BUILD = ROOT / "build"
 APP_NAME = "BHR"
 
 # Packages whose data files (models, DLLs, graph binaries) must be bundled.
-COLLECT_ALL = ["mediapipe", "vosk", "sounddevice"]
+# pyorbbecsdk ships the Gemini 335 native DLLs; harmless if absent on target
+# hardware (try_open_orbbec probes and falls back to the webcam).
+COLLECT_ALL = ["mediapipe", "vosk", "sounddevice", "pyorbbecsdk"]
 
 
 def pyinstaller_cmd() -> list[str]:
@@ -73,9 +76,12 @@ SKIP_FILENAMES = {"framecache.npy"}
 SKIP_SUFFIXES = {".building"}   # *.npy.building — half-written packs
 
 
-def _copy_tree(src: Path, dst: Path, skip_dirnames: set[str] = frozenset()) -> int:
+def _copy_tree(src: Path, dst: Path, skip_dirnames: set[str] = frozenset(),
+               link: bool = False) -> int:
     """Copy a tree, skipping skip_dirnames directories and derived cache files.
-    Returns number of files copied."""
+    With link=True, files are NTFS-hardlinked instead of copied (zero extra
+    disk on the same volume; they materialize as real files when the dist
+    folder is copied to another drive). Returns number of files staged."""
     count = 0
     for path in src.rglob("*"):
         rel = path.relative_to(src)
@@ -88,12 +94,21 @@ def _copy_tree(src: Path, dst: Path, skip_dirnames: set[str] = frozenset()) -> i
             target.mkdir(parents=True, exist_ok=True)
         else:
             target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(path, target)
+            if target.exists():
+                target.unlink()
+            if link:
+                try:
+                    os.link(path, target)
+                except OSError:          # cross-volume / FS without hardlinks
+                    shutil.copy2(path, target)
+            else:
+                shutil.copy2(path, target)
             count += 1
     return count
 
 
-def stage_content(app_dir: Path, with_frames: bool, with_assets: bool) -> None:
+def stage_content(app_dir: Path, with_frames: bool, with_assets: bool,
+                  scenes_root: Path, link_frames: bool) -> None:
     print("\n-- staging runtime content next to the exe --")
 
     shutil.copy2(ROOT / "config.json", app_dir / "config.json")
@@ -103,12 +118,15 @@ def stage_content(app_dir: Path, with_frames: bool, with_assets: bool) -> None:
     print(f"  config/  ({n} files)")
 
     skip = set() if with_frames else {"frames"}
-    n = _copy_tree(ROOT / "scenes", app_dir / "scenes", skip_dirnames=skip)
-    label = "with frames" if with_frames else "metadata/audio only, frames SKIPPED"
-    print(f"  scenes/  ({n} files, {label})")
+    n = _copy_tree(scenes_root, app_dir / "scenes", skip_dirnames=skip,
+                   link=link_frames)
+    label = ("frames HARDLINKED (no extra disk on this volume)" if
+             (with_frames and link_frames) else
+             "with frames" if with_frames else
+             "metadata/audio only, frames SKIPPED")
+    print(f"  scenes/  <- {scenes_root}  ({n} files, {label})")
     if not with_frames:
-        print("           deploy frames separately: copy the full scenes/ tree over this one,")
-        print("           or run copy_frames.py on the target against final_frames/")
+        print("           deploy frames separately: copy the full scenes tree over this one")
 
     models = ROOT / "models"
     if models.is_dir():
@@ -118,13 +136,20 @@ def stage_content(app_dir: Path, with_frames: bool, with_assets: bool) -> None:
         print("  models/  NOT FOUND locally — voice engine will run without Vosk until")
         print("           you place models/vosk-model-small-en-us-0.15 next to the exe")
 
+    # Hand-icon cursors are a runtime asset (render_engine loads them from
+    # assets/hand_icons next to the exe) — always staged, they are tiny.
+    icons = ROOT / "assets" / "hand_icons"
+    if icons.is_dir():
+        n = _copy_tree(icons, app_dir / "assets" / "hand_icons")
+        print(f"  assets/hand_icons/  ({n} files)")
+
     if with_assets:
         assets = ROOT / "assets"
         if assets.is_dir():
             n = _copy_tree(assets, app_dir / "assets")
             print(f"  assets/  ({n} files)")
     else:
-        print("  assets/  skipped (dev storyboard fallback; use --with-assets to include)")
+        print("  assets/  skipped beyond hand_icons (use --with-assets for the rest)")
 
 
 def make_zip(app_dir: Path, version: str) -> Path:
@@ -139,6 +164,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Build BHR.exe with PyInstaller.")
     parser.add_argument("--with-frames", action="store_true",
                         help="Stage scene frame folders into dist (multi-GB).")
+    parser.add_argument("--link-frames", action="store_true",
+                        help="Hardlink staged scene files instead of copying "
+                             "(zero extra disk on the same NTFS volume).")
+    parser.add_argument("--scenes-root", type=Path, default=ROOT / "scenes",
+                        help="Scenes tree to stage as the packaged scenes/ "
+                             "(e.g. export/scenes_generated).")
     parser.add_argument("--with-assets", action="store_true",
                         help="Stage assets/ (storyboard pages, reference video).")
     parser.add_argument("--zip", action="store_true",
@@ -174,7 +205,13 @@ def main() -> int:
         print(f"ERROR: {app_dir / (APP_NAME + '.exe')} not found — build first.")
         return 1
 
-    stage_content(app_dir, args.with_frames, args.with_assets)
+    scenes_root = args.scenes_root if args.scenes_root.is_absolute() \
+        else ROOT / args.scenes_root
+    if not (scenes_root / "sequence.json").exists():
+        print(f"ERROR: {scenes_root} has no sequence.json — not a scenes tree.")
+        return 1
+    stage_content(app_dir, args.with_frames, args.with_assets,
+                  scenes_root, args.link_frames)
 
     if args.zip:
         archive = make_zip(app_dir, args.version)

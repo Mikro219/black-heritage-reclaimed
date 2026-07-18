@@ -160,6 +160,109 @@ class TestRenderEngine(unittest.TestCase):
         self.assertLess(time.monotonic() - r._seg_anchor, 0.05)  # loops start clean
         self.assertEqual(r._seg_overshoot, 0.0)
 
+    def test_cursor_param_override_beats_detector_type(self):
+        """A window can force its icon via params {"cursor": ...} — reach_star
+        is detected as point_target_held but should show the open hand."""
+        r = self.r
+        r._cursor_fade_alpha = 1.0
+        r._cursor_fade_t = time.monotonic() - 0.2
+        r._draw_hand_cursors(pose_data=self.pose, gesture_debug={
+            "active_type": "point_target_held",
+            "active_params": {"cursor": "open", "hold_ms": 400}})
+        self.assertEqual(r._cursor_fade_mode, "open")
+        r._cursor_fade_t = time.monotonic() - 0.2
+        r._draw_hand_cursors(pose_data=self.pose, gesture_debug={
+            "active_type": "point_target_held", "active_params": {}})
+        self.assertEqual(r._cursor_fade_mode, "point")
+
+    def test_star_trail_spawns_on_draw_movement_and_expires(self):
+        r = self.r
+        r._trail_particles = []
+        r._trail_last_pos = {"L": None, "R": None}
+        gd = {"active_type": "directional_draw",
+              "active_params": {"direction": "left"}}
+        still = [LM(0.5, 0.5, visibility=0.9) for _ in range(33)]
+        moved = [LM(0.4, 0.45, visibility=0.9) for _ in range(33)]
+        r._draw_star_trail(pose_data=still, gesture_debug=gd)  # primes last pos
+        self.assertEqual(len(r._trail_particles), 0)
+        r._draw_star_trail(pose_data=moved, gesture_debug=gd)  # big move spawns
+        self.assertGreater(len(r._trail_particles), 0)
+        n = len(r._trail_particles)
+        r._draw_star_trail(pose_data=moved, gesture_debug=gd)  # still: no growth
+        self.assertEqual(len(r._trail_particles), n)
+        for p in r._trail_particles:                            # age out
+            p["born"] -= 5.0
+        r._draw_star_trail(pose_data=moved, gesture_debug=gd)
+        self.assertEqual(len(r._trail_particles), 0)
+        # outside a draw window nothing spawns and the anchor resets
+        r._draw_star_trail(pose_data=still, gesture_debug={"active_type": None})
+        self.assertEqual(r._trail_last_pos, {"L": None, "R": None})
+
+    def test_draw_indicator_comet_smoke(self):
+        for direction in ("right", "up_left", "down"):
+            self.r._draw_interaction_indicator({
+                "active_type": "directional_draw",
+                "active_params": {"direction": direction}})
+
+    def test_cursor_dots_and_hidden_modes(self):
+        """params.cursor "dots" shows plain tracking dots; "hidden" suppresses
+        the cursor entirely (fades out like a closed window)."""
+        r = self.r
+        r._cursor_fade_alpha = 1.0
+        r._cursor_fade_t = time.monotonic() - 0.2
+        r._draw_hand_cursors(pose_data=self.pose, gesture_debug={
+            "active_type": "point_target_held",
+            "active_params": {"cursor": "dots"}})
+        self.assertEqual(r._cursor_fade_mode, "dots")
+        self.assertEqual(r._cursor_fade_alpha, 1.0)
+        r._cursor_fade_t = time.monotonic() - 0.2
+        r._draw_hand_cursors(pose_data=self.pose, gesture_debug={
+            "active_type": "point_target_held",
+            "active_params": {"cursor": "hidden"}})
+        self.assertLess(r._cursor_fade_alpha, 1.0)
+
+    def test_arrow_wings_point_backward(self):
+        """Arrowhead wings must land BEHIND the tip along the heading — the
+        arrow points away from the line (the old math put them beyond it)."""
+        import math
+        for ang in (0.0, math.pi / 2, -math.pi / 4, 2.5):
+            ex, ey = 100.0, 100.0
+            dx, dy = math.cos(ang), math.sin(ang)
+            for hx, hy in RenderEngine._arrow_wings(ex, ey, ang, 24):
+                proj = (hx - ex) * dx + (hy - ey) * dy
+                self.assertLess(proj, 0.0,
+                                f"wing ahead of the tip at ang={ang}")
+
+    def test_indicator_span_from_rect(self):
+        """An authored indicator_rect anchors the stroke at its centre with
+        the length fitted to its extent along the direction."""
+        params = {"direction": "right",
+                  "indicator_rect": {"x": 0.2, "y": 0.4, "w": 0.4, "h": 0.2}}
+        sx, sy, ex, ey = RenderEngine._indicator_span(params, 1000, 1000)
+        self.assertAlmostEqual((sx + ex) / 2, 400.0)   # rect centre x
+        self.assertAlmostEqual(sy, ey)
+        self.assertAlmostEqual(sy, 500.0)              # rect centre y
+        self.assertAlmostEqual(ex - sx, 2 * 200.0 * 0.9)   # fitted, inset
+        # no rect -> legacy fixed anchor
+        sx, sy, ex, ey = RenderEngine._indicator_span(
+            {"direction": "right"}, 1000, 1000)
+        self.assertAlmostEqual((sx + ex) / 2, 500.0)
+        self.assertAlmostEqual(sy, 420.0)
+
+    def test_star_trail_hand_glow_on_still_hand(self):
+        """The 'pen' dot marks each tracked hand even when it is not moving
+        (the trail only spawns on movement)."""
+        r = self.r
+        self.assertIsNotNone(r._hand_glow)
+        r._trail_particles = []
+        r._trail_last_pos = {"L": None, "R": None}
+        gd = {"active_type": "directional_draw",
+              "active_params": {"direction": "left"}}
+        still = [LM(0.5, 0.5, visibility=0.9) for _ in range(33)]
+        r._draw_star_trail(pose_data=still, gesture_debug=gd)
+        r._draw_star_trail(pose_data=still, gesture_debug=gd)  # smoke: dot path
+        self.assertEqual(len(r._trail_particles), 0)           # no build-up
+
 
 if __name__ == "__main__":
     unittest.main()

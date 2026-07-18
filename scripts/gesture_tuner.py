@@ -1867,12 +1867,14 @@ def main():
             state_lines.append(("cycle progress:", (200, 200, 200)))
 
         elif gtype == "unravel":
-            history = context.get("unravel_diff_history", [])
-            diffs = [d for _, d in history]
-            crossings = sum(1 for i in range(1, len(diffs)) if (diffs[i-1] > 0) != (diffs[i] > 0))
+            # Elbow-line model: the detector fires on per-wrist crossings in
+            # unravel_crossings (the legacy unravel_diff_history key is dead —
+            # it made this counter sit at 0 while the detector fired).
+            xing = context.get("unravel_crossings", {}) or {}
+            crossings = min(len(xing.get("L", [])), len(xing.get("R", [])))
             min_cycles = live_params.get("min_cycles", 2)
             pct = min(crossings / max(min_cycles * 2, 1), 1.0)
-            state_lines.append((f"zero-crossings: {crossings}/{min_cycles*2}",
+            state_lines.append((f"elbow-line crossings (min L/R): {crossings}/{min_cycles*2}",
                                  accent if crossings >= min_cycles * 2 else (200, 200, 200)))
             if pose_lm:
                 sh_l, sh_r = pose_lm[11], pose_lm[12]

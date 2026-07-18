@@ -275,6 +275,33 @@ class TestCutAgainstSpans(unittest.TestCase):
         self.assertTrue(by_span["03"][0]["continues"])
 
 
+class TestToBuilderSpeed(unittest.TestCase):
+    def test_speed_carried_onto_clips(self):
+        """A speed-shifted placement (the draw-stroke beep pitch ramp) writes
+        clip.speed into the builder project; speed-1 clips omit the key."""
+        import unittest.mock as mock
+        with tempfile.TemporaryDirectory() as tmp:
+            proj_path = Path(tmp) / "p.bhrx.json"
+            proj_path.write_text(json.dumps({
+                "sounds": [],
+                "blocks": [{"id": "b1", "type": "playback", "media": "m1",
+                            "range_s": [0.0, 10.0]}]}), encoding="utf-8")
+            beep = Path(tmp) / "beep.mp3"
+            base = {"name": "beep.mp3", "path": beep, "role": "sfx",
+                    "track": 0, "dur": 0.933, "src_off": 0.0, "gain": 1.0,
+                    "fade_in_ms": 0, "fade_out_ms": 0, "natural_s": 1.033}
+            placements = [dict(base, t0=2.0, speed=1.107),
+                          dict(base, t0=5.0, speed=1.0)]
+            # keep the test from clobbering the real builder bundle
+            with mock.patch.dict(sys.modules,
+                                 {"bundle_builder_project": mock.Mock()}):
+                ca.to_builder(placements, proj_path)
+            out = json.loads(proj_path.read_text(encoding="utf-8"))
+            clips = sorted(out["blocks"][0]["audio"], key=lambda c: c["at_s"])
+            self.assertAlmostEqual(clips[0]["speed"], 1.107)
+            self.assertNotIn("speed", clips[1])
+
+
 class TestApplyScenes(unittest.TestCase):
     def _mini_tree(self, tmp):
         root = Path(tmp) / "scenes"

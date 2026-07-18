@@ -119,6 +119,15 @@ class ShotSequencePlayer:
         self._paused: bool = False
         self._pause_started: float = 0.0
 
+        # One-shot seek: local frame to jump to when the next shot's frames are
+        # ready (start-at-shot / skip-prologue on trees where many original
+        # shots are merged into one exported shot). Consumed on first use.
+        self._pending_seek: Optional[int] = None
+        self._intro_base_frame: int = 1   # frame PLAY_INTRO last (re)started at
+        # (index, frame) marking the first post-prologue moment — set by main.py
+        # from shot_map.json when the tree has no act "00" (exported trees).
+        self._prologue_end: Optional[tuple[int, int]] = None
+
         event_bus.subscribe("cg_detected",          self._on_cg_detected)
         event_bus.subscribe("oi_detected",           self._on_oi_detected)
         event_bus.subscribe("vi_detected",           self._on_vi_detected)
@@ -142,7 +151,7 @@ class ShotSequencePlayer:
         end-of-experience loop watches this."""
         return self._player_state
 
-    def start(self, start_index: int = 0) -> None:
+    def start(self, start_index: int = 0, start_frame: Optional[int] = None) -> None:
         if not self.shots:
             self._player_state = PLAYER_FINISHED
             self.event_bus.emit("sequence_finished", {})
@@ -152,23 +161,84 @@ class ShotSequencePlayer:
         self._fork_choices.clear()
         self._fsm = None
         self._player_state = PLAYER_RUNNING
+        self._pending_seek = start_frame
         self._enter_shot(max(0, min(start_index, len(self.shots) - 1)))
 
-    def skip_prologue(self) -> bool:
-        """Jump to the first shot that is not in the prologue (act "00").
+    def set_prologue_end(self, index: int, frame: int) -> None:
+        """Mark the first post-prologue moment for trees without an act "00"
+        (exported trees bake the prologue into their first stretch shot).
+        Enables skip_prologue()/in_prologue() there."""
+        self._prologue_end = (index, max(1, int(frame)))
 
-        Returns True if a jump happened. Reuses the normal advance path so input
-        lock, prefetch and shot entry all fire as usual. No-op once past the prologue.
+    def in_prologue(self) -> bool:
+        """True while the current playback position is inside the prologue —
+        either an act "00" shot (live tree) or before the set_prologue_end
+        point (exported tree). main.py keeps the meta "skip" voice window
+        open while this holds."""
+        shot = self.current_shot
+        if shot is not None and shot.act == "00":
+            return True
+        if self._prologue_end is None or self._player_state != PLAYER_RUNNING:
+            return False
+        p_idx, p_frame = self._prologue_end
+        if self._index < p_idx:
+            return True
+        if self._index > p_idx:
+            return False
+        if self._shot_state == STATE_PRELOADING:
+            return True
+        return (self._shot_state == STATE_PLAY_INTRO
+                and shot is not None
+                and self._intro_playhead_frame(shot) < p_frame)
+
+    def skip_prologue(self) -> bool:
+        """Jump to the first moment that is not in the prologue.
+
+        Live tree: the first shot whose act isn't "00" (reuses the normal
+        advance path so input lock, prefetch and shot entry all fire as usual).
+        Exported tree: the set_prologue_end (index, frame) point — seeks within
+        the stretch shot that bakes the prologue into its intro.
+        Returns True if a jump happened; no-op once past the prologue.
         """
         target = next((i for i, s in enumerate(self.shots) if s.act != "00"), None)
-        if target is None or target <= self._index:
+        if target is not None and target > self._index:
+            dest = self.shots[target]
+            print(f"[ShotPlayer] skip prologue -> shot {dest.shot} (act {dest.act})")
+            self._fsm = None
+            self._index = target - 1   # _advance() steps to `target`
+            self._advance()
+            return True
+
+        if self._prologue_end is None:
             return False
-        dest = self.shots[target]
-        print(f"[ShotPlayer] skip prologue -> shot {dest.shot} (act {dest.act})")
-        self._fsm = None
-        self._index = target - 1   # _advance() steps to `target`
-        self._advance()
+        p_idx, p_frame = self._prologue_end
+        shot = self.current_shot
+        if self._index > p_idx or shot is None:
+            return False
+        if self._index < p_idx:
+            print(f"[ShotPlayer] skip prologue -> shot "
+                  f"{self.shots[p_idx].shot} frame {p_frame}")
+            self._fsm = None
+            self._pending_seek = p_frame
+            self._index = p_idx - 1
+            self._advance()
+            return True
+        if self._shot_state == STATE_PRELOADING:
+            self._pending_seek = p_frame   # applied when frames are ready
+            print(f"[ShotPlayer] skip prologue queued (preloading) -> frame {p_frame}")
+            return True
+        if (self._shot_state != STATE_PLAY_INTRO
+                or self._intro_playhead_frame(shot) >= p_frame):
+            return False
+        print(f"[ShotPlayer] skip prologue -> frame {p_frame} (in-shot)")
+        self._seek_intro(shot, p_frame)
         return True
+
+    def _intro_playhead_frame(self, shot: Shot) -> int:
+        """Estimated current frame while STATE_PLAY_INTRO plays (wall clock,
+        from the frame the intro segment last (re)started at)."""
+        return self._intro_base_frame + int((time.monotonic() - self._segment_start)
+                                            * max(1, shot.fps))
 
     EPILOGUE_ACTS = ("12", "13")
 
@@ -292,6 +362,7 @@ class ShotSequencePlayer:
 
         if shot.assets_pending:
             # No frames on disk yet — skip straight to playback (placeholder/TODO shot)
+            self._pending_seek = None   # nothing to seek within
             if shot.kind == "playback":
                 self._enter_segment(STATE_PLAY, shot)
             else:
@@ -310,6 +381,9 @@ class ShotSequencePlayer:
         self._segment_start   = time.monotonic()
         self._segment_done    = False
         self._segment_duration = _estimate_duration(shot, state)
+        if state == STATE_PLAY_INTRO:
+            rng = _get_segment_range(shot, state)
+            self._intro_base_frame = rng[0] if rng else 1
 
         label_map = {
             STATE_PLAY:       "playback",
@@ -752,6 +826,21 @@ class ShotSequencePlayer:
                     "interaction": oi_interaction,
                     "window_ms":   window_ms,
                 })
+                # A gesture OI can declare a spoken alternative (Scene 1
+                # raise-hands / "freedom"): open a parallel VI window; the
+                # keyword fires the same reaction and FSM event as the
+                # gesture (see _handle_vi_detected).
+                voice_alt = oi.get("voice_alternative") or {}
+                if voice_alt.get("keywords"):
+                    vi_config = dict(voice_alt)
+                    vi_config.setdefault("mode", "keyword")
+                    vi_config.setdefault("tier", "cg_alternative")
+                    vi_config.setdefault("window_ms", window_ms)
+                    print(f"[ShotPlayer] FSM OI voice-alt window "
+                          f"{vi_config.get('id')!r} "
+                          f"keywords={vi_config.get('keywords')}")
+                    self.event_bus.emit("vi_window_open",
+                                        {"vi_config": vi_config})
             # Only pausing (loop) OI states use a hold deadline; play-through OI
             # states advance on segment_end like any other playback segment.
             self._fsm_state_deadline = (time.monotonic() + window_ms / 1000.0) if is_loop else None
@@ -810,6 +899,81 @@ class ShotSequencePlayer:
             self._enter_segment(STATE_PLAY, shot)
         else:
             self._enter_segment(STATE_PLAY_INTRO, shot)
+        if self._pending_seek is not None:
+            self._apply_pending_seek(shot)
+
+    def _apply_pending_seek(self, shot: Shot) -> None:
+        """Jump the just-started shot to a local frame (start-at-shot /
+        skip-prologue). Lands in the intro, an FSM state's segment, or a plain
+        playback span; the render engine re-syncs the shot's baked audio.mp3
+        off the emitted play_segment."""
+        frame = self._pending_seek
+        self._pending_seek = None
+        if not frame or frame <= 1:
+            return
+        fps  = max(1, shot.fps)
+        segs = shot.segments if (shot.segments and not shot.segments_todo) else None
+        intro = (segs or {}).get("intro")
+
+        if self._shot_state == STATE_PLAY:
+            total = int(round(_estimate_duration(shot, STATE_PLAY) * fps))
+            if total <= 0 or frame >= total:
+                return   # unknown length or past the end — play normally
+            print(f"[ShotPlayer] seek shot {shot.shot} -> frame {frame}/{total}")
+            self.event_bus.emit("play_segment",
+                                {"start": frame, "end": total, "loop": False})
+            self._segment_start    = time.monotonic()
+            self._segment_duration = (total - frame) / fps + 0.5
+            return
+
+        if self._shot_state != STATE_PLAY_INTRO:
+            return
+        if intro and frame <= intro[1]:
+            print(f"[ShotPlayer] seek shot {shot.shot} -> intro frame {frame}")
+            self._seek_intro(shot, max(frame, intro[0]))
+            return
+
+        # Past the intro: enter HOLD and fast-forward the FSM to the state
+        # whose segment contains the frame, then play that segment from there.
+        fsm_spec = (shot.interaction or {}).get("interaction_fsm")
+        if not fsm_spec or not segs:
+            return
+        self._enter_hold(shot)
+        if not self._fsm:
+            return
+        target = None
+        for sid, st in self._fsm.states.items():
+            rng = segs.get(st.get("segment"))
+            if rng and rng[0] <= frame <= rng[1]:
+                target = sid
+                break
+        if target is None:
+            return   # frame in no state's segment — stay at the FSM initial
+        if target != self._fsm.current:
+            self._fsm.current = target
+            self._fsm_enter_state()
+        seg = self._fsm.segment_range()
+        if seg and seg[0] < frame <= seg[1]:
+            print(f"[ShotPlayer] seek shot {shot.shot} -> FSM {target} frame {frame}")
+            self.event_bus.emit("play_segment", {
+                "start": frame, "end": seg[1], "loop": self._fsm.is_loop(),
+            })
+
+    def _seek_intro(self, shot: Shot, frame: int) -> None:
+        """Jump the currently playing intro to a later frame, keeping the
+        wall-clock segment timer in step so HOLD entry doesn't fire late."""
+        intro = _get_segment_range(shot, STATE_PLAY_INTRO)
+        fps = max(1, shot.fps)
+        end = intro[1] if intro else int(round(
+            _estimate_duration(shot, STATE_PLAY_INTRO) * fps))
+        if end <= 0:
+            return
+        frame = min(frame, end)
+        self.event_bus.emit("play_segment",
+                            {"start": frame, "end": end, "loop": False})
+        self._segment_start    = time.monotonic()
+        self._segment_duration = max(0.0, (end - frame) / fps) + 0.5
+        self._intro_base_frame = frame
 
     def _prefetch_next(self, current_index: int) -> None:
         """Tell the render engine to start preloading the next shot in background."""
@@ -926,6 +1090,13 @@ class ShotSequencePlayer:
                 # transition for early advance.
                 self._fire_oi_feedback(shot, oi.get("sfx"), oi.get("feedback"))
                 self._fsm_fire(f"oi_{voice_id}")
+                return
+            voice_alt = (oi or {}).get("voice_alternative") or {}
+            if voice_id == voice_alt.get("id") and voice_alt.get("keywords"):
+                # Spoken alternative to a gesture OI: same reaction and same
+                # early-advance event as performing the gesture.
+                self._fire_oi_feedback(shot, oi.get("sfx"), oi.get("feedback"))
+                self._fsm_fire(f"oi_{oi.get('id')}")
                 return
             # Otherwise voice_id is the transition event directly (e.g. "voice_go").
             self._fsm_fire(voice_id)

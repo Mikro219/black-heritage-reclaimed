@@ -187,6 +187,32 @@ class TestPointTargetHeld(unittest.TestCase):
         time.sleep(0.08)
         self.assertFalse(point_target_held.detect([], params, ctx))
 
+    def test_relaxed_arm_at_box_center_fires(self):
+        # July 2026 dead-zone fix: holding a RELAXED arm at box-center
+        # (reach ~0.19 — the old 0.25 hover gate rejected this, forcing the
+        # visitor to stretch until the hand hit the box edge) must fire.
+        pose = pose33({13: LM(0.62, 0.60),
+                       15: LM(0.55, 0.45, visibility=0.9),
+                       19: LM(0.30, 0.32, visibility=0.9)})
+        ctx = ctx_for(pose)
+        params = {"region_rect": self.RECT, "hold_ms": 60}
+        point_target_held.detect([], params, ctx)
+        time.sleep(0.08)
+        self.assertTrue(point_target_held.detect([], params, ctx))
+
+    def test_wrist_dropout_with_visible_index_still_fires(self):
+        # Arm pointed at the camera routinely drops the WRIST below the
+        # visibility gate while the INDEX (which the cursor tracks) stays
+        # visible — the side must stay live via the index fallback.
+        pose = pose33({13: LM(0.62, 0.60),
+                       15: LM(0.32, 0.34, visibility=0.1),
+                       19: LM(0.30, 0.30, visibility=0.9)})
+        ctx = ctx_for(pose)
+        params = {"region_rect": self.RECT, "hold_ms": 60}
+        point_target_held.detect([], params, ctx)
+        time.sleep(0.08)
+        self.assertTrue(point_target_held.detect([], params, ctx))
+
 
 class TestKnockApproach(unittest.TestCase):
     """A knock is a push toward the camera — depth drop (Gemini) or pose-z drop."""

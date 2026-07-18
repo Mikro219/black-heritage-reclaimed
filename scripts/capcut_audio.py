@@ -348,15 +348,28 @@ def trim_name(src: Path, offset_s: float, dur_s: float, speed: float) -> str:
     return f"{src.stem}{tag}.ogg"
 
 
+RESAMPLE_HZ = 48000
+
+
 def render_trim(ffmpeg: str, src: Path, offset_s: float, dur_s: float,
                 speed: float, out_path: Path) -> bool:
-    """Pre-render a trimmed (and optionally tempo-shifted) clip as OGG."""
+    """Pre-render a trimmed (and optionally speed-shifted) clip as OGG.
+
+    ``dur_s`` is the OUTPUT (timeline) duration — a speeded clip reads
+    ``dur_s * speed`` seconds of source. Speed shifts pitch WITH tempo
+    (asetrate, CapCut's audible speed-change behaviour — the draft's
+    stroke-beep ramp is a pitch ramp), not tempo-only atempo."""
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    speed = min(4.0, max(0.25, speed))
+    read_s = max(0.05, dur_s) * speed
     cmd = [ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
-           "-ss", f"{max(0.0, offset_s):.3f}", "-t", f"{max(0.05, dur_s):.3f}",
+           "-ss", f"{max(0.0, offset_s):.3f}", "-t", f"{read_s:.3f}",
            "-i", str(src)]
     if speed != 1.0:
-        cmd += ["-filter:a", f"atempo={min(2.0, max(0.5, speed)):.4f}"]
+        cmd += ["-filter:a",
+                f"aresample={RESAMPLE_HZ},"
+                f"asetrate={int(round(RESAMPLE_HZ * speed))},"
+                f"aresample={RESAMPLE_HZ}"]
     cmd += ["-c:a", "libvorbis", "-q:a", "4", str(out_path)]
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
@@ -379,7 +392,10 @@ def pieces_to_events(pieces: list[dict], pool: Path,
             # One render per PLACEMENT (placement-level offset/duration), so
             # all pieces of a split bed reference the same file — that shared
             # name is what the mixer's continuity handover matches on.
-            dur = min(pc["dur"], max(0.05, pc["natural_s"] - pc["src_off"])) \
+            # dur is the OUTPUT duration; a speeded clip consumes speed×dur of
+            # source, so the availability clamp converts to the output domain.
+            dur = min(pc["dur"],
+                      max(0.05, (pc["natural_s"] - pc["src_off"]) / pc["speed"])) \
                   if pc["natural_s"] > 0 else pc["dur"]
             name = trim_name(src, pc["src_off"], dur, pc["speed"])
             out = pool / name
@@ -533,7 +549,7 @@ def to_builder(placements: list[dict], project_path: Path) -> None:
                 sounds[key] = {"id": f"s{next_id}", "name": pc["path"].name}
                 next_id += 1
             clip_n += 1
-            clips.append({
+            clip = {
                 "id":              f"a{clip_n}",
                 "sound":           sounds[key]["id"],
                 "at_s":            round(pc["at_s"], 3),
@@ -545,7 +561,12 @@ def to_builder(placements: list[dict], project_path: Path) -> None:
                 "sustain":         pc["role"] in BED_ROLES,
                 "continues":       pc["continues"],
                 "role":            pc["role"],
-            })
+            }
+            # CapCut clip speed shifts pitch with tempo (the draw-stroke beep
+            # ramp); carry it so the export can reproduce the shift.
+            if abs(pc["speed"] - 1.0) > 1e-3:
+                clip["speed"] = round(pc["speed"], 4)
+            clips.append(clip)
         if clips:
             b["audio"] = clips
         else:

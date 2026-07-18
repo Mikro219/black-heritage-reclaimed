@@ -165,13 +165,23 @@ def linearize(project: dict) -> list[dict]:
                     warn(f"choice {node.get('name')!r} has {len(branches)} gesture "
                          f"branches; the runtime forks two ways — extra branches dropped")
                     branches = branches[:2]
+                emitted_branches = [br for br in branches
+                                    if not br.get("retry")]
                 tt_to = (node.get("timeout") or {}).get("to")
-                if tt_to and branches and tt_to != branches[0]["to"]:
+                if tt_to and emitted_branches and tt_to != emitted_branches[0]["to"]:
                     warn(f"choice {node.get('name')!r}: the runtime's timeout "
-                         f"auto-advance always falls into the FIRST branch — the "
-                         f"timeout target set in the editor can't override that")
+                         f"auto-advance always falls into the FIRST emitted "
+                         f"branch — the timeout target set in the editor can't "
+                         f"override that")
                 convergences = []
                 for i, br in enumerate(branches):
+                    if br.get("retry"):
+                        # Wrong-way retry: the chain is folded into the choice
+                        # shot (frames via hold_segments, audio via the export
+                        # fold) — its blocks emit no shots of their own.
+                        for fb in branch_chain(project, blocks, deg, br["to"]):
+                            emitted.add(fb["id"])
+                        continue
                     c = walk(br["to"], {"fork_block": node_id,
                                         "branch": "left" if i == 0 else "right"},
                              stop_at_boundary=True)
@@ -218,16 +228,45 @@ def slug(text: str, fallback: str) -> str:
 
 def oi_dict(win: dict, idx: int) -> dict:
     params = dict(win.get("params") or {})
+    # A gesture window may declare a spoken alternative (params.voice_alternative
+    # = keyword string): the runtime opens a parallel VI window whose keyword
+    # fires the same reaction as the gesture (Scene 1 raise-hands / "freedom").
+    voice_alt = params.pop("voice_alternative", None)
     rect = region_rect(win)
     if rect:
-        params["region_rect"] = rect
-    return {
+        if win["detector"] == "directional_draw":
+            # Pure display: positions/sizes the on-screen stroke indicator.
+            # Stays in the Builder's SCREEN space (the camera isn't involved).
+            params["indicator_rect"] = rect
+        else:
+            # Detection region. The Builder authors regions in SCREEN space
+            # (drawn on the video frame); detectors test the RAW (unmirrored)
+            # camera coords — flip x so the visitor points where the box IS,
+            # not at its mirror image. Display paths mirror back, so the
+            # indicator ring still lands on the authored box.
+            params["region_rect"] = {**rect,
+                                     "x": round(1.0 - rect["x"] - rect["w"], 3)}
+    out = {
         "id": slug(win.get("label"), f"oi_{idx}"),
         "type": win["detector"],
         "params": params,
-        "sfx": "detect.mp3",
-        "feedback": "green_flash",
     }
+    # Draw strokes complete silently and without the green flash — the comet
+    # indicator / star trail / the stroke animation playing are the feedback;
+    # a detect ping + flash per stroke was noise.
+    if win["detector"] != "directional_draw":
+        out["feedback"] = "green_flash"
+        out["sfx"] = "detect.mp3"
+    if voice_alt:
+        kw = str(voice_alt).strip().lower()
+        warn_if_unknown_keyword(kw, f"window {win.get('label')!r} voice_alternative")
+        out["voice_alternative"] = {
+            "id": slug(kw, f"voice_alt_{idx}"),
+            "keywords": [kw],
+            "mode": "keyword",
+            "tier": "cg_alternative",
+        }
+    return out
 
 
 def window_frames(win: dict, n_frames: int, fps: int) -> tuple[int, int]:
@@ -252,10 +291,42 @@ def is_voice(win: dict) -> bool:
     return win.get("detector") == "voice"
 
 
+def is_draw(win: dict) -> bool:
+    return win.get("detector") == "directional_draw"
+
+
+# A draw window BLOCKS: its span loops until the stroke is detected. This is
+# how long the runtime waits before giving up and moving on (per stroke) —
+# override per window with params.block_timeout_s in the Builder.
+DRAW_BLOCK_TIMEOUT_S = 45.0
+
+
+_grammar_cache: set | None = None
+
+
+def warn_if_unknown_keyword(kw: str, where: str) -> None:
+    """An authored keyword that is not in config.json's Vosk grammar can NEVER
+    fire (the recognizer only emits grammar entries) — surface it at export
+    time instead of failing silently at the exhibition."""
+    global _grammar_cache
+    if _grammar_cache is None:
+        try:
+            with open(ROOT / "config.json", encoding="utf-8") as f:
+                grammar = json.load(f).get("voice", {}).get("grammar") or []
+            _grammar_cache = {str(g).strip().lower() for g in grammar}
+        except OSError:
+            _grammar_cache = set()
+    if _grammar_cache and kw not in _grammar_cache:
+        warn(f"{where}: keyword {kw!r} is not in config.json voice.grammar — "
+             f"Vosk will never emit it; add it to the grammar")
+
+
 def voice_oi_dict(win: dict, idx: int) -> dict:
     """FSM `oi` payload for a voice window: a `keywords` list makes the runtime
     open a VI window (reaction tier) instead of arming a gesture detector."""
     kw = (win.get("params") or {}).get("keyword") or "go"
+    warn_if_unknown_keyword(str(kw).strip().lower(),
+                            f"voice window {win.get('label')!r}")
     return {
         "id": slug(win.get("label"), f"vi_{idx}"),
         "keywords": [kw],
@@ -275,7 +346,9 @@ def playback_metadata(block: dict, shot_id: str, n_frames: int, fps: int) -> dic
     if not wins:
         return meta
 
-    if len(wins) == 1 and not is_voice(wins[0]):
+    # Draw windows block (loop until the stroke lands), which only the FSM
+    # model can express — a lone draw window skips the oi_frame_window path.
+    if len(wins) == 1 and not is_voice(wins[0]) and not is_draw(wins[0]):
         a, b = window_frames(wins[0], n_frames, fps)
         inter = oi_dict(wins[0], 1)
         inter["tier"] = "OI"
@@ -283,7 +356,7 @@ def playback_metadata(block: dict, shot_id: str, n_frames: int, fps: int) -> dic
         meta["interaction"] = inter
         return meta
 
-    # 2+ windows (or any voice window): play-through FSM with oi states
+    # 2+ windows (or any voice/draw window): play-through FSM with oi states
     # (shot 24 pattern; voice windows become keyword VI states)
     meta["kind"] = "interactive"
     segments: dict = {}
@@ -318,20 +391,56 @@ def playback_metadata(block: dict, shot_id: str, n_frames: int, fps: int) -> dic
             states[gap] = {"segment": gap, "loop": False}
             order.append(gap)
         name = f"oi_{i + 1}"
-        segments[name] = [a, b]
         payload = voice_oi_dict(w, i + 1) if is_voice(w) else oi_dict(w, i + 1)
-        states[name] = {"segment": name, "loop": False, "oi": payload}
-        order.append(name)
+        if is_draw(w):
+            # FREEZE-AND-HOLD stroke (the live shot-20 idle_N/play_to_N
+            # model): freeze on the window's FIRST frame with the detector
+            # armed; the window's own animation plays only after the stroke
+            # lands (oi_<id>) or the give-up window expires (oi_done) — the
+            # video stays continuous either way. window_ms doubles as the
+            # armed-detector duration AND the oi_done deadline.
+            wait_s = float((w.get("params") or {}).get(
+                "block_timeout_s", DRAW_BLOCK_TIMEOUT_S))
+            payload.get("params", {}).pop("block_timeout_s", None)
+            hold_seg = f"{name}_hold"
+            segments[hold_seg] = [a, a]
+            segments[name] = [a, b]
+            states[name] = {"segment": hold_seg, "loop": True, "oi": payload,
+                            "window_ms": int(wait_s * 1000)}
+            states[f"{name}_play"] = {"segment": name, "loop": False}
+            order += [name, f"{name}_play"]
+        else:
+            segments[name] = [a, b]
+            states[name] = {"segment": name, "loop": False, "oi": payload}
+            order.append(name)
         cursor = b + 1
     if cursor <= n_frames:
         segments["outro"] = [cursor, n_frames]
         states["outro"] = {"segment": "outro", "loop": False}
         order.append("outro")
 
-    transitions = [{"from": a, "on": "segment_end", "to": b}
-                   for a, b in zip(order, order[1:])]
-    transitions.append({"from": order[-1], "on": "segment_end", "to": "__advance__"})
+    # Blocking (loop) states never fire segment_end — they leave on the
+    # stroke's oi_<id> detection or the oi_done window expiry.
+    def _exit_events(state_id: str) -> list[str]:
+        st = states[state_id]
+        if st.get("loop") and st.get("oi"):
+            return [f"oi_{st['oi']['id']}", "oi_done"]
+        return ["segment_end"]
 
+    transitions = [{"from": frm, "on": ev, "to": to}
+                   for frm, to in zip(order, order[1:] + ["__advance__"])
+                   for ev in _exit_events(frm)]
+
+    # The runtime's HOLD timeout reads the TOP-LEVEL fallback (shot.fallback),
+    # not the one nested in interaction_fsm. Without it the standard profile's
+    # 30s auto_advance cuts any play-through FSM longer than 30s mid-shot, so
+    # size the timeout to the full FSM content (everything after the intro)
+    # plus every blocking window's worst-case wait, plus slack — it should
+    # only ever fire if playback stalls.
+    hold_s = (n_frames - spans[0][0] + 1) / max(1, fps)
+    block_s = sum(st.get("window_ms", 0) for st in states.values()
+                  if st.get("loop")) / 1000.0
+    timeout_s = max(120, int(hold_s + block_s) + 60)
     meta["segments"] = segments
     meta["interaction"] = {
         "tier": "OI",
@@ -339,9 +448,11 @@ def playback_metadata(block: dict, shot_id: str, n_frames: int, fps: int) -> dic
             "initial": order[0],
             "states": states,
             "transitions": transitions,
-            "fallback": {"timeout_s": 120, "on_timeout": "auto_advance"},
+            "fallback": {"timeout_s": timeout_s, "on_timeout": "auto_advance"},
         },
     }
+    meta["fallback"] = {"timeout_s": timeout_s, "reprompt_s": [],
+                        "on_timeout": "auto_advance"}
     return meta
 
 
@@ -356,6 +467,162 @@ def split_choice_branches(block: dict) -> tuple[list[dict], list[dict]]:
         w = wins.get(br.get("window"))
         (voice if (w and is_voice(w)) else fork).append(br)
     return fork, voice
+
+
+# Pick/switch sound for voice-confirmed choice holds (same file for both —
+# the UIAlert already used by the crossroads cluster's confirm clip).
+CHOICE_HOLD_SFX = "UIAlert-Hybrid_Apple_Pay_+_T-Elevenlabs.mp3"
+
+# Selected/switch animation segments a choice block may carry in its optional
+# "hold_segments" field (block-local frames, e.g. authored from live shot 09).
+_HOLD_ANIM_KEYS = ("left_selected", "right_selected", "left_to_right",
+                   "right_to_left", "left_switch_hold", "right_switch_hold")
+
+
+def hold_choice_fsm(block: dict, n_frames: int, confirm_kw: str,
+                    segments: dict) -> dict:
+    """The shot-09 hold model: point a side -> `<side>_selected` (pick SFX,
+    waits for the confirm keyword); point the other side -> switch animation
+    (switch SFX, input locked) -> `<side>_switch_hold` (can flip again); only
+    `voice_<kw>` advances — the confirm animation is the branch block itself.
+    Fork-choice recording still happens on every gesture pick, so
+    `__advance__` branch-gates correctly.
+
+    With the block's "hold_segments" (clamped to the block), the selected and
+    switch states play their real animation frames; without it they hold on
+    the idle frame (sound-only)."""
+    hs = {k: [max(1, min(n_frames, int(v[0]))), max(1, min(n_frames, int(v[1])))]
+          for k, v in (block.get("hold_segments") or {}).items()
+          if isinstance(v, (list, tuple)) and len(v) == 2}
+    animated = all(k in hs for k in _HOLD_ANIM_KEYS)
+    if hs and not animated:
+        warn(f"choice {block.get('name')!r}: hold_segments is missing "
+             f"{sorted(set(_HOLD_ANIM_KEYS) - set(hs))} — falling back to "
+             f"sound-only holds on the idle frame")
+
+    if "intro" in hs or "idle_loop" in hs:
+        segments["intro"]     = hs.get("intro", segments["intro"])
+        segments["idle_loop"] = hs.get("idle_loop", segments["idle_loop"])
+    if animated:
+        for k in _HOLD_ANIM_KEYS:
+            segments[k] = hs[k]
+
+    def seg(name):
+        return name if animated else "idle_loop"
+
+    states = {
+        "waiting": {"segment": "idle_loop", "loop": True,
+                    "directions": ["left", "right"]},
+        "left_selected":  {"segment": seg("left_selected"), "loop": not animated,
+                           "on_enter_sfx": CHOICE_HOLD_SFX, "voice": confirm_kw},
+        "right_selected": {"segment": seg("right_selected"), "loop": not animated,
+                           "on_enter_sfx": CHOICE_HOLD_SFX, "voice": confirm_kw},
+        "left_switch_hold":  {"segment": seg("left_switch_hold"), "loop": True,
+                              "voice": confirm_kw},
+        "right_switch_hold": {"segment": seg("right_switch_hold"), "loop": True,
+                              "voice": confirm_kw},
+    }
+    transitions = [
+        {"from": "waiting", "on": "point_left",  "to": "left_selected"},
+        {"from": "waiting", "on": "point_right", "to": "right_selected"},
+    ]
+    if animated:
+        # Switch plays its transition animation (input locked), then holds.
+        states["left_to_right"] = {"segment": "left_to_right", "loop": False,
+                                   "on_enter_sfx": CHOICE_HOLD_SFX}
+        states["right_to_left"] = {"segment": "right_to_left", "loop": False,
+                                   "on_enter_sfx": CHOICE_HOLD_SFX}
+        transitions += [
+            {"from": "left_selected",     "on": "point_right", "to": "left_to_right"},
+            {"from": "right_selected",    "on": "point_left",  "to": "right_to_left"},
+            {"from": "left_to_right",     "on": "segment_end", "to": "right_switch_hold"},
+            {"from": "right_to_left",     "on": "segment_end", "to": "left_switch_hold"},
+            {"from": "right_switch_hold", "on": "point_left",  "to": "right_to_left"},
+            {"from": "left_switch_hold",  "on": "point_right", "to": "left_to_right"},
+        ]
+    else:
+        # Sound-only: flips land directly on the other side's switch hold.
+        states["left_switch_hold"]["on_enter_sfx"] = CHOICE_HOLD_SFX
+        states["right_switch_hold"]["on_enter_sfx"] = CHOICE_HOLD_SFX
+        transitions += [
+            {"from": "left_selected",     "on": "point_right", "to": "right_switch_hold"},
+            {"from": "right_selected",    "on": "point_left",  "to": "left_switch_hold"},
+            {"from": "right_switch_hold", "on": "point_left",  "to": "left_switch_hold"},
+            {"from": "left_switch_hold",  "on": "point_right", "to": "right_switch_hold"},
+        ]
+    for st in ("left_selected", "right_selected",
+               "left_switch_hold", "right_switch_hold"):
+        transitions.append({"from": st, "on": f"voice_{confirm_kw}",
+                            "to": "__advance__"})
+    return {"states": states, "transitions": transitions}
+
+
+# Wrong-pick sound for retry choices exported WITHOUT an authored wrong_path
+# animation (the sound-only bounce).
+RETRY_WRONG_SFX = "UIAlert-wrong_button_sound,_-Elevenlabs.mp3"
+
+
+def retry_choice_fsm(block: dict, n_frames: int, retry_side: str,
+                     segments: dict) -> dict:
+    """The live shot-37 wrong-way model: picking the retry side plays a
+    redirect and RETURNS to waiting — only the other (correct) side advances.
+    The correct side's confirm animation stays a separate play_if-gated branch
+    shot; the retry side's chain is folded into this shot (frames via the
+    block's extended range + "hold_segments", audio via the export fold).
+
+    With hold_segments["wrong_path"] the redirect plays its real animation
+    frames (its folded audio clips carry the SFX/VO); without it the wrong
+    pick is a sound-only bounce on the idle frame (RETRY_WRONG_SFX)."""
+    hs = {k: [max(1, min(n_frames, int(v[0]))), max(1, min(n_frames, int(v[1])))]
+          for k, v in (block.get("hold_segments") or {}).items()
+          if isinstance(v, (list, tuple)) and len(v) == 2}
+    if "intro" in hs or "idle_loop" in hs:
+        segments["intro"]     = hs.get("intro", segments["intro"])
+        segments["idle_loop"] = hs.get("idle_loop", segments["idle_loop"])
+    animated = "wrong_path" in hs
+    if animated:
+        segments["wrong_path"] = hs["wrong_path"]
+    correct = "right" if retry_side == "left" else "left"
+
+    states = {
+        "waiting": {"segment": "idle_loop", "loop": True,
+                    "directions": ["left", "right"]},
+        "wrong_path": {"segment": "wrong_path" if animated else "idle_loop",
+                       "loop": False},
+        f"confirm_{correct}": {"segment": "idle_loop", "loop": False},
+    }
+    if not animated:
+        states["wrong_path"]["on_enter_sfx"] = RETRY_WRONG_SFX
+    transitions = [
+        {"from": "waiting", "on": f"point_{retry_side}", "to": "wrong_path"},
+        {"from": "waiting", "on": f"point_{correct}", "to": f"confirm_{correct}"},
+        {"from": "wrong_path", "on": "segment_end", "to": "waiting"},
+        {"from": f"confirm_{correct}", "on": "segment_end", "to": "__advance__"},
+    ]
+    return {"states": states, "transitions": transitions}
+
+
+def retry_branch_side(fork_branches: list[dict]) -> str | None:
+    """"left"/"right" of the branch marked retry (the wrong-way path), or None."""
+    for i, br in enumerate(fork_branches[:2]):
+        if br.get("retry"):
+            return "left" if i == 0 else "right"
+    return None
+
+
+def branch_chain(project: dict, blocks: dict, deg: dict,
+                 start_id: str | None) -> list[dict]:
+    """The blocks of a branch chain, following edges until a merge block or a
+    fan-in (indegree > 1) convergence — the same boundary rule linearize uses."""
+    out: list[dict] = []
+    node_id = start_id
+    while node_id:
+        node = blocks.get(node_id)
+        if node is None or node.get("type") == "merge" or deg.get(node_id, 0) > 1:
+            break
+        out.append(node)
+        node_id = flow_next(project, node_id)
+    return out
 
 
 def choice_metadata(block: dict, shot_id: str, n_frames: int, fps: int) -> dict:
@@ -375,35 +642,66 @@ def choice_metadata(block: dict, shot_id: str, n_frames: int, fps: int) -> dict:
              f"point-left/right region model; window detector(s) "
              f"{sorted({w['detector'] for w in non_point})} are advisory only")
 
+    # A voice window referenced by NO branch is the CONFIRM keyword: picks hold
+    # until the visitor says it (the shot 09 "say go" pattern).
+    all_branch_windows = {br.get("window") for br in (block.get("branches") or [])}
+    confirm_kw = next(
+        (((w.get("params") or {}).get("keyword") or "go")
+         for w in wins if is_voice(w) and w["id"] not in all_branch_windows),
+        None)
+
     intro_end = max(1, n_frames - 1)
     segments = {"intro": [1, intro_end], "idle_loop": [n_frames, n_frames]}
-    waiting = {"segment": "idle_loop", "loop": True,
-               "directions": ["left", "right"]}
+
+    fallback = {
+        "timeout_s": int((block.get("timeout") or {}).get("seconds") or 30),
+        "on_timeout": "auto_advance",
+    }
+    retry_side = retry_branch_side(fork_branches)
+    if confirm_kw and retry_side:
+        warn(f"choice {block.get('name')!r}: a retry branch and a confirm "
+             f"keyword can't combine — retry ignored, hold model exported")
+        retry_side = None
+
+    if confirm_kw:
+        print(f"  choice {block.get('name')!r}: '{confirm_kw}' confirms the "
+              f"picked side (voice-confirmed hold model)")
+        body = hold_choice_fsm(block, n_frames, confirm_kw, segments)
+    elif retry_side:
+        correct = "right" if retry_side == "left" else "left"
+        print(f"  choice {block.get('name')!r}: '{retry_side}' is the "
+              f"wrong-way retry — only '{correct}' advances")
+        body = retry_choice_fsm(block, n_frames, retry_side, segments)
+    else:
+        # Flat immediate-confirm: the pick advances silently into its gated
+        # branch shot (which carries its own audio) — no detect ping.
+        body = {
+            "states": {
+                "waiting":       {"segment": "idle_loop", "loop": True,
+                                  "directions": ["left", "right"]},
+                "confirm_left":  {"segment": "idle_loop", "loop": False},
+                "confirm_right": {"segment": "idle_loop", "loop": False},
+            },
+            "transitions": [
+                {"from": "waiting",       "on": "point_left",  "to": "confirm_left"},
+                {"from": "waiting",       "on": "point_right", "to": "confirm_right"},
+                {"from": "confirm_left",  "on": "segment_end", "to": "__advance__"},
+                {"from": "confirm_right", "on": "segment_end", "to": "__advance__"},
+            ],
+        }
+    waiting = body["states"]["waiting"]
     fsm = {
         "gesture_type": "region",
         "initial": "waiting",
-        "states": {
-            "waiting":       waiting,
-            "confirm_left":  {"segment": "idle_loop", "loop": False,
-                              "on_enter_sfx": "detect.mp3"},
-            "confirm_right": {"segment": "idle_loop", "loop": False,
-                              "on_enter_sfx": "detect.mp3"},
-        },
-        "transitions": [
-            {"from": "waiting",       "on": "point_left",  "to": "confirm_left"},
-            {"from": "waiting",       "on": "point_right", "to": "confirm_right"},
-            {"from": "confirm_left",  "on": "segment_end", "to": "__advance__"},
-            {"from": "confirm_right", "on": "segment_end", "to": "__advance__"},
-        ],
-        "fallback": {
-            "timeout_s": int((block.get("timeout") or {}).get("seconds") or 30),
-            "on_timeout": "auto_advance",
-        },
+        "states": body["states"],
+        "transitions": body["transitions"],
+        "fallback": fallback,
     }
 
     # Spoken branch picks: a voice window whose branch targets the same block
     # as a fork side becomes "say the keyword to pick that side". The runtime
-    # holds ONE voice keyword per state, so only the first is wired.
+    # holds ONE voice keyword per state, so only the first is wired — and only
+    # in the flat model (a voice-confirmed hold already owns the keyword slot).
     side_by_target = {}
     for idx, br in enumerate(fork_branches[:2]):
         side_by_target[br["to"]] = "left" if idx == 0 else "right"
@@ -415,6 +713,15 @@ def choice_metadata(block: dict, shot_id: str, n_frames: int, fps: int) -> dict:
         if side is None:
             warn(f"choice {block.get('name')!r}: voice branch {br.get('label')!r} "
                  f"targets a block that is not one of the two fork sides — skipped")
+            continue
+        if confirm_kw:
+            warn(f"choice {block.get('name')!r}: voice branch {br.get('label')!r} "
+                 f"skipped — the hold model's confirm keyword "
+                 f"'{confirm_kw}' owns the voice slot")
+            continue
+        if retry_side:
+            warn(f"choice {block.get('name')!r}: voice branch {br.get('label')!r} "
+                 f"skipped — the retry model wires gesture picks only")
             continue
         if voice_wired:
             warn(f"choice {block.get('name')!r}: the runtime supports one voice "
@@ -428,11 +735,6 @@ def choice_metadata(block: dict, shot_id: str, n_frames: int, fps: int) -> dict:
              f"voice — note the runtime records fork choices from GESTURE picks "
              f"only, so branch-gated shots after a voice pick fall back to the "
              f"first branch")
-    for w in wins:
-        if is_voice(w) and not any(br.get("window") == w["id"] for br in voice_branches):
-            warn(f"choice {block.get('name')!r}: voice window {w.get('label')!r} "
-                 f"has no 'go to block' target — give it one to make it a spoken "
-                 f"branch pick (left out of the export)")
     return {
         "shot": shot_id,
         "kind": "interactive",
@@ -472,8 +774,26 @@ def resolve_video(project: dict, media_id: str | None,
 
 
 def extract_frames(ffmpeg: str, video: Path, start_s: float, n_frames: int,
-                   fps: int, out_dir: Path) -> bool:
+                   fps: int, out_dir: Path, force: bool = False) -> bool:
     out_dir.mkdir(parents=True, exist_ok=True)
+    # Re-exports reuse frames: skip when the dir already holds exactly the
+    # expected count; any mismatch (block range changed) clears stale files
+    # first so the count stays authoritative for duration estimates.
+    # --force-frames re-extracts regardless — needed when the SOURCE VIDEO was
+    # replaced in place (same timeline, new content), which the count can't see.
+    existing = list(out_dir.glob("*.jpg"))
+    if not force and len(existing) == n_frames:
+        return True
+    for f in existing:
+        f.unlink()
+    # Invalidate the runtime's frame pack: its validity check is frame count +
+    # dimensions only, so a content swap would keep serving the OLD art.
+    pack = out_dir.parent / "framecache.npy"
+    if pack.exists():
+        try:
+            pack.unlink()
+        except OSError as exc:
+            warn(f"could not remove stale {pack}: {exc}")
     cmd = [
         ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
         "-ss", f"{max(0.0, start_s):.3f}",
@@ -508,6 +828,41 @@ def resolve_detect_sound(project: dict, project_path: Path,
     # interactive shot, so the first hit is as good as any).
     hits = sorted((ROOT / "scenes").glob(f"*/*/{name}")) + \
            sorted((ROOT / "scenes").glob(f"*/*/audio/{name}"))
+    return hits[0] if hits else None
+
+
+def collect_sfx_names(meta: dict) -> set[str]:
+    """Every SFX file name the shot metadata references (FSM on_enter_sfx and
+    OI/voice feedback sfx) — each must be shipped into the shot's audio/ dir."""
+    names: set[str] = set()
+
+    def walk(obj):
+        if isinstance(obj, dict):
+            for k, v in obj.items():
+                if k in ("sfx", "on_enter_sfx") and isinstance(v, str) and v:
+                    names.add(v)
+                else:
+                    walk(v)
+        elif isinstance(obj, list):
+            for v in obj:
+                walk(v)
+
+    walk(meta)
+    return names
+
+
+def resolve_sfx_file(name: str, project_path: Path,
+                     detect_sound: Path | None) -> Path | None:
+    """Locate an on_enter_sfx/feedback sound: the global detect sound for
+    detect.mp3, else next to the project -> assets/audio/stems/ -> anywhere in
+    the live scenes tree."""
+    if name == "detect.mp3":
+        return detect_sound
+    for candidate in (project_path.parent / name,
+                      ROOT / "assets" / "audio" / "stems" / name):
+        if candidate.exists():
+            return candidate
+    hits = sorted((ROOT / "scenes").rglob(name))
     return hits[0] if hits else None
 
 
@@ -554,16 +909,87 @@ def probe_duration(path: Path) -> float | None:
     return dur
 
 
+def _is_bed(clip: dict) -> bool:
+    role = clip.get("role", "sfx")
+    return (role in ("music", "ambience")
+            and bool(clip.get("sustain", True)))
+
+
+def plan_bed_chains(project: dict) -> dict:
+    """Chain-link sustain beds across blocks so every piece shares ONE render.
+
+    The runtime mixer's bed handover matches on the FILE NAME: a shot entered
+    with a `continues` bed event adopts the still-playing bed only if the
+    names are equal. Per-clip trims (each block's own offset + duration) would
+    give every piece of a chain a different render name — the bed would
+    restart at every block boundary. Instead, pieces linked by `continues`
+    through a direct block edge/branch inherit the chain head's plan: one
+    render cut at the head's source offset and running to the end of the
+    file (the loop then wraps the whole remaining file, not a block-length
+    slice; the mixer never reads duration_s for beds).
+
+    Returns {(block_id, clip_id): plan}; chain members share the plan dict
+    ({"offset": head_source_offset_s}).
+    """
+    preds: dict[str, set] = {}
+
+    def link(a, b):
+        if a and b:
+            preds.setdefault(b, set()).add(a)
+
+    for e in project.get("edges", []):
+        link(e.get("from"), e.get("to"))
+    for b in project.get("blocks", []):
+        for br in (b.get("branches") or []):
+            link(b["id"], br.get("to"))
+        link(b["id"], (b.get("timeout") or {}).get("to"))
+
+    # process blocks after their predecessors (Kahn; cycles fall out as-is)
+    blocks = {b["id"]: b for b in project.get("blocks", [])}
+    remaining = dict(blocks)
+    order: list = []
+    while remaining:
+        ready = [bid for bid in remaining
+                 if not (preds.get(bid, set()) & remaining.keys())]
+        if not ready:
+            ready = list(remaining)      # cycle — take the rest unordered
+        for bid in ready:
+            order.append(bid)
+            del remaining[bid]
+
+    plans: dict = {}
+    by_block_sound: dict = {}
+    for bid in order:
+        for clip in blocks[bid].get("audio") or []:
+            if not _is_bed(clip):
+                continue
+            plan = None
+            if clip.get("continues"):
+                # a handover only ever happens shot -> next shot, so only
+                # DIRECT predecessors can hand this bed over
+                for pred in preds.get(bid, set()):
+                    plan = by_block_sound.get((pred, clip.get("sound")))
+                    if plan is not None:
+                        break
+            if plan is None:
+                plan = {"offset": float(clip.get("source_offset_s") or 0.0)}
+            plans[(bid, clip.get("id"))] = plan
+            by_block_sound[(bid, clip.get("sound"))] = plan
+    return plans
+
+
 def block_audio_events(block: dict, sounds_by_id: dict, project_path: Path,
                        pool: Path, ffmpeg: str | None,
-                       rendered: dict[str, Path]) -> list[dict]:
+                       rendered: dict[str, Path],
+                       bed_plan: dict | None = None) -> list[dict]:
     """Convert a block's builder audio clips into runtime audio_events, copying
     or pre-rendering the referenced files into the tree's _audio/ pool.
 
     Builder clips reference the ORIGINAL file + source_offset_s (the browser
     preview seeks natively); the runtime plays files whole, so offset/cut clips
-    are trimmed here with ffmpeg — split beds keep one shared render so the
-    mixer's continuity handover can match on the file name."""
+    are trimmed here with ffmpeg — beds chained by `continues` keep one shared
+    render (see plan_bed_chains) so the mixer's continuity handover can match
+    on the file name."""
     events = []
     for clip in block.get("audio", []):
         sound = sounds_by_id.get(clip.get("sound"))
@@ -579,26 +1005,46 @@ def block_audio_events(block: dict, sounds_by_id: dict, project_path: Path,
 
         offset = float(clip.get("source_offset_s") or 0.0)
         dur    = clip.get("duration_s")
+        speed  = float(clip.get("speed") or 1.0)
         natural = probe_duration(src)
-        cut = (dur is not None and natural is not None
-               and float(dur) < natural - TRIM_TAIL_S)
-        file_name = src.name
-        if ffmpeg and (offset > TRIM_OFFSET_S or cut):
+        plan = (bed_plan or {}).get((block.get("id"), clip.get("id")))
+        if plan is not None:
+            # chained sustain bed: shared render, head offset -> end of file.
+            # Beds ignore speed — the continuity handover shares one render
+            # whose seek offsets are in source time.
+            if abs(speed - 1.0) > 1e-3:
+                warn(f"block {block.get('name')!r}: chained bed "
+                     f"{sound['name']!r} declares speed {speed:g} — ignored")
+                speed = 1.0
+            render_offset = plan["offset"]
+            render_dur = max(0.05, natural - render_offset) if natural else 1.0
+            need_render = render_offset > TRIM_OFFSET_S
+        else:
+            render_offset = offset
+            # dur is the clip's TIMELINE duration; a speeded clip consumes
+            # speed×dur seconds of source.
+            cut = (dur is not None and natural is not None
+                   and float(dur) * speed < natural - TRIM_TAIL_S)
             render_dur = float(dur) if dur is not None else \
-                (max(0.05, natural - offset) if natural else 1.0)
-            name = trim_name(src, offset, render_dur, 1.0)
+                (max(0.05, (natural - offset) / speed) if natural else 1.0)
+            need_render = (offset > TRIM_OFFSET_S or cut
+                           or abs(speed - 1.0) > 1e-3)
+        file_name = src.name
+        if ffmpeg and need_render:
+            name = trim_name(src, render_offset, render_dur, speed)
             out = pool / name
             if name not in rendered:
-                if out.exists() or render_trim(ffmpeg, src, offset, render_dur,
-                                               1.0, out):
+                if out.exists() or render_trim(ffmpeg, src, render_offset,
+                                               render_dur, speed, out):
                     rendered[name] = out
             if name in rendered:
                 file_name = name
             else:
                 _pool_copy(src, pool)
-        elif offset > TRIM_OFFSET_S:
-            warn(f"block {block.get('name')!r}: {sound['name']!r} has a source "
-                 f"offset but ffmpeg is missing — plays from the file start")
+        elif render_offset > TRIM_OFFSET_S or abs(speed - 1.0) > 1e-3:
+            warn(f"block {block.get('name')!r}: {sound['name']!r} needs a "
+                 f"pre-render (offset/speed) but ffmpeg is missing — plays "
+                 f"untrimmed at normal speed")
             _pool_copy(src, pool)
         else:
             _pool_copy(src, pool)
@@ -609,7 +1055,11 @@ def block_audio_events(block: dict, sounds_by_id: dict, project_path: Path,
             "role":            role,
             "at_s":            round(float(clip.get("at_s") or 0.0), 3),
             "duration_s":      (None if dur is None else round(float(dur), 3)),
-            "source_offset_s": round(offset, 3),
+            # offset into the file the runtime actually plays: chained bed
+            # pieces reference the shared render, so their offset is relative
+            # to the chain head's cut point
+            "source_offset_s": round(offset - plan["offset"], 3)
+                               if plan is not None else round(offset, 3),
             "gain":            round(float(clip.get("gain", 1.0)), 4),
             "fade_in_ms":      int(clip.get("fade_in_ms") or 0),
             "fade_out_ms":     int(clip.get("fade_out_ms") or 0),
@@ -619,6 +1069,41 @@ def block_audio_events(block: dict, sounds_by_id: dict, project_path: Path,
         })
     events.sort(key=lambda e: e["at_s"])
     return events
+
+
+def fold_retry_audio(project: dict, block: dict, blocks: dict, deg: dict,
+                     sounds_by_id: dict, project_path: Path, pool: Path,
+                     ffmpeg: str | None, rendered: dict[str, Path],
+                     bed_plan: dict) -> list[dict]:
+    """Audio of a choice block's folded retry chain, rebased into the choice
+    shot's timeline (the chain's blocks emit no shots — see retry_choice_fsm).
+
+    Sustain beds are dropped: the redirect never crosses a shot boundary, so
+    the choice shot's own bed keeps looping through it. SFX/VO keep their
+    master-timeline anchors (at_s += branch_start - choice_start)."""
+    fork_branches, _ = split_choice_branches(block)
+    rng = block.get("range_s") or [0, 0]
+    out: list[dict] = []
+    for br in fork_branches[:2]:
+        if not br.get("retry"):
+            continue
+        for fb in branch_chain(project, blocks, deg, br.get("to")):
+            if not fb.get("audio") or fb.get("master_audio"):
+                continue
+            fb_rng = fb.get("range_s") or rng
+            if fb_rng[1] > rng[1] + 0.5:
+                warn(f"choice {block.get('name')!r}: folded retry block "
+                     f"{fb.get('name')!r} runs past the choice block's range — "
+                     f"extend the choice range or late audio anchors never fire")
+            base = float(fb_rng[0]) - float(rng[0])
+            for ev in block_audio_events(fb, sounds_by_id, project_path,
+                                         pool, ffmpeg, rendered, bed_plan):
+                if ev["sustain"] and ev["role"] in ("music", "ambience"):
+                    continue
+                ev["at_s"] = round(ev["at_s"] + base, 3)
+                ev["continues"] = False
+                out.append(ev)
+    return out
 
 
 def _pool_copy(src: Path, pool: Path) -> None:
@@ -633,10 +1118,70 @@ def _pool_copy(src: Path, pool: Path) -> None:
 # Main
 # ---------------------------------------------------------------------------
 
+def write_shot_map(out_root: Path, ordered: list, shot_ids: dict, fps: int) -> None:
+    """shot_map.json: ORIGINAL master-timeline shot numbers (copy_frames.SHOT_FRAMES,
+    the asset tracker's 01–79) -> exported shot id + local frame. The export merges
+    many original shots into one stretch block, so this map is what lets the runtime
+    start at any original shot (--start-shot) and skip the prologue.
+
+    An original shot whose start time falls inside no exported block (a choice
+    pick/switch animation region cut from the export) snaps to the next block's
+    first frame and is marked "snapped"."""
+    try:
+        from copy_frames import SHOT_FRAMES
+    except ImportError:
+        warn("copy_frames.SHOT_FRAMES not importable — shot_map.json not written")
+        return
+    master_fps = 30.0   # the master draft's rate; SHOT_FRAMES frames are 1-based
+
+    with_range = [(e["block"], shot_ids[e["block"]["id"]]) for e in ordered
+                  if e["block"].get("range_s")]
+    entries: dict[str, dict] = {}
+    for act_dir, shot_no, f0, _f1 in SHOT_FRAMES:
+        t = (int(f0) - 1) / master_fps
+        # Adjacent blocks overlap by ~one master frame; a shot starting exactly
+        # at a block boundary must map to the LATER block's frame 1, not the
+        # last frame of the earlier one — prefer the latest containing start.
+        containing = [(b, sid) for b, sid in with_range
+                      if b["range_s"][0] - 1e-3 <= t < b["range_s"][1]]
+        hit = (max(containing, key=lambda x: x[0]["range_s"][0])
+               if containing else None)
+        snapped = False
+        if hit is None:
+            following = [(b, sid) for b, sid in with_range if b["range_s"][0] >= t]
+            if not following:
+                continue   # past the end of the exported flow
+            hit = min(following, key=lambda x: x[0]["range_s"][0])
+            snapped = True
+        block, sid = hit
+        a, z = block["range_s"]
+        n_frames = max(1, int(round((z - a) * fps)))
+        frame = 1 if snapped else max(1, min(n_frames, int(round((t - a) * fps)) + 1))
+        entry = {"master_s": round(t, 3), "shot": sid, "frame": frame,
+                 "act": act_dir, "block": block.get("name")}
+        if snapped:
+            entry["snapped"] = True
+        entries[str(shot_no)] = entry
+
+    shot_map = {
+        "_comment": "Original shot number (copy_frames.SHOT_FRAMES) -> exported "
+                    "shot id + local frame. Read by main.py for --start-shot and "
+                    "skip-prologue. Regenerated on every export.",
+        "fps": fps,
+        "shots": entries,
+    }
+    with open(out_root / "shot_map.json", "w", encoding="utf-8") as f:
+        json.dump(shot_map, f, indent=1)
+    print(f"[export] shot_map.json: {len(entries)} original shots mapped")
+
+
 def export(project_path: Path, out_root: Path, do_frames: bool,
-           video_override: Path | None, sound_override: Path | None) -> int:
+           video_override: Path | None, sound_override: Path | None,
+           force_frames: bool = False) -> int:
     project = load_project(project_path)
     fps = int(project.get("fps") or 30)
+    blocks = block_map(project)
+    deg = indegree(project)
     ordered = linearize(project)
     if not ordered:
         sys.exit("[export] nothing reachable from the start block")
@@ -665,6 +1210,7 @@ def export(project_path: Path, out_root: Path, do_frames: bool,
     sounds_by_id = {s["id"]: s for s in project.get("sounds", [])}
     audio_pool   = out_root / "_audio"
     rendered: dict[str, Path] = {}
+    bed_plan = plan_bed_chains(project)
 
     seq_shots = []
     for entry in ordered:
@@ -686,9 +1232,19 @@ def export(project_path: Path, out_root: Path, do_frames: bool,
 
         if block.get("audio") and not block.get("master_audio"):
             events = block_audio_events(block, sounds_by_id, project_path,
-                                        audio_pool, audio_ffmpeg, rendered)
+                                        audio_pool, audio_ffmpeg, rendered,
+                                        bed_plan)
             if events:
                 meta["audio_events"] = events
+
+        if block.get("type") == "choice":
+            folded = fold_retry_audio(project, block, blocks, deg,
+                                      sounds_by_id, project_path, audio_pool,
+                                      audio_ffmpeg, rendered, bed_plan)
+            if folded:
+                merged = (meta.get("audio_events") or []) + folded
+                merged.sort(key=lambda e: e["at_s"])
+                meta["audio_events"] = merged
 
         shot_dir = act_dir / f"shot_{shot_id}"
         shot_dir.mkdir(parents=True, exist_ok=True)
@@ -721,11 +1277,17 @@ def export(project_path: Path, out_root: Path, do_frames: bool,
         with open(shot_dir / "metadata.json", "w", encoding="utf-8") as f:
             json.dump(meta, f, indent=2)
 
-        needs_sfx = "detect.mp3" in json.dumps(meta)
-        if detect_sound is not None and needs_sfx:
+        for sfx_name in sorted(collect_sfx_names(meta)):
+            src = resolve_sfx_file(sfx_name, project_path, detect_sound)
+            if src is None:
+                if sfx_name != "detect.mp3":   # missing detect already warned
+                    warn(f"shot {shot_id}: sfx {sfx_name!r} not found next to "
+                         f"the project, in assets/audio/stems/, or in scenes/ "
+                         f"— not copied")
+                continue
             audio_dir = shot_dir / "audio"
             audio_dir.mkdir(exist_ok=True)
-            shutil.copyfile(detect_sound, audio_dir / "detect.mp3")
+            shutil.copyfile(src, audio_dir / sfx_name)
 
         if do_frames and block.get("type") != "merge":
             video = resolve_video(project, block.get("media"), project_path, video_override)
@@ -735,7 +1297,8 @@ def export(project_path: Path, out_root: Path, do_frames: bool,
             else:
                 print(f"  shot {shot_id}: extracting {n_frames} frames "
                       f"from {video.name} @ {rng[0]:.2f}s ...")
-                extract_frames(ffmpeg, video, rng[0], n_frames, fps, shot_dir / "frames")
+                extract_frames(ffmpeg, video, rng[0], n_frames, fps,
+                               shot_dir / "frames", force=force_frames)
 
         seq_entry = {"shot": shot_id, "act": ACT_ID, "kind": meta["kind"],
                      "reuse_of": None, "audio_lines": []}
@@ -750,6 +1313,8 @@ def export(project_path: Path, out_root: Path, do_frames: bool,
     }
     with open(out_root / "sequence.json", "w", encoding="utf-8") as f:
         json.dump(sequence, f, indent=2)
+
+    write_shot_map(out_root, ordered, shot_ids, fps)
 
     print(f"\n[export] {len(seq_shots)} shots -> {out_root}")
     if warnings:
@@ -766,6 +1331,11 @@ def main() -> int:
                         help="output scenes root (default export/scenes_generated)")
     parser.add_argument("--no-frames", action="store_true",
                         help="write metadata/sequence only; skip ffmpeg extraction")
+    parser.add_argument("--force-frames", action="store_true",
+                        help="re-extract every shot's frames even when the "
+                             "count already matches (use after replacing the "
+                             "source video in place); also clears stale "
+                             "framecache.npy packs")
     parser.add_argument("--video", type=Path, default=None,
                         help="override the source video path for every block")
     parser.add_argument("--detect-sound", type=Path, default=None,
@@ -775,7 +1345,8 @@ def main() -> int:
     if not args.project.exists():
         sys.exit(f"[export] project file not found: {args.project}")
     return export(args.project.resolve(), args.out.resolve(),
-                  not args.no_frames, args.video, args.detect_sound)
+                  not args.no_frames, args.video, args.detect_sound,
+                  force_frames=args.force_frames)
 
 
 if __name__ == "__main__":

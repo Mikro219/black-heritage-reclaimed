@@ -97,6 +97,11 @@ class ShotAudioMixer:
 
         # Playback frame at the previous update() — the jump-guard reference.
         self._last_frame: Optional[int] = None
+        # Seek priming: a play_segment that arrives before this shot's
+        # frames_ready (the player seeking a just-started shot) carries the
+        # landing frame; without it the first update() would fire every
+        # earlier anchor at once.
+        self._prime_frame: Optional[int] = None
 
         # channel index -> {"event": dict, "channel": Channel, "since": float}
         self._beds: dict[int, dict] = {}
@@ -116,6 +121,7 @@ class ShotAudioMixer:
         event_bus.subscribe("shot_load",         self._on_shot_load)
         event_bus.subscribe("shot_frames_ready", self._on_shot_frames_ready)
         event_bus.subscribe("master_volume",     self._on_master_volume)
+        event_bus.subscribe("play_segment",      self._on_play_segment)
 
     # ------------------------------------------------------------------
     # Public
@@ -141,7 +147,13 @@ class ShotAudioMixer:
             if frame >= at:
                 self._fired.add(i)
                 if last is not None and at < frame - grace:
-                    continue   # jumped over — consume without playing
+                    # Jumped over. One-shots (sfx/vo) stay silent, but a
+                    # sustain bed anchored earlier would still be looping at
+                    # the landing frame — start it so a seek keeps its music.
+                    if ev.get("sustain") and ev.get("role") in ("music",
+                                                               "ambience"):
+                        self._start_event(ev)
+                    continue
                 self._start_event(ev)
         self._last_frame = frame
 
@@ -230,7 +242,50 @@ class ShotAudioMixer:
 
         self._events = events
         self._fired  = set(claimed)   # handed-over beds/VO are already "started"
-        self._last_frame = None       # fresh shot: no jump reference yet
+        # Fresh shot: no jump reference yet — unless the player already seeked
+        # this shot (its play_segment arrives before our shot_frames_ready when
+        # the player is constructed first), in which case the landing frame is
+        # the reference so update()'s guard applies from the seek point.
+        self._last_frame = self._prime_frame
+        self._prime_frame = None
+
+    def _on_play_segment(self, data: dict) -> None:
+        """Prime the jump-guard reference when a shot starts at a seek point,
+        and re-arm one-shot anchors when a segment is RE-entered mid-shot.
+
+        A play_segment naming a start frame means playback is AT that frame;
+        anchors earlier than it were jumped over, not reached. Mid-shot, a
+        play_segment whose span covers already-fired one-shot anchors means
+        that span is REPLAYING (an FSM revisiting a segment — e.g. the Bear
+        Paw wrong-way redirect): its sfx/vo must fire again on each pass.
+        Anchors ahead of the playhead in normal forward flow haven't fired
+        yet, so forward transitions re-arm nothing; beds and `continues`
+        pieces are never re-armed."""
+        try:
+            start = int(data.get("start") or 1) - 1
+        except (TypeError, ValueError):
+            return
+        if self._pending is not None:
+            self._prime_frame = start      # our shot_frames_ready hasn't run yet
+        elif self._last_frame is None:
+            self._last_frame = start
+        else:
+            try:
+                end = int(data["end"]) - 1
+            except (KeyError, TypeError, ValueError):
+                end = None
+            for i, ev in enumerate(self._events):
+                if i not in self._fired:
+                    continue
+                if ev.get("sustain") or ev.get("continues"):
+                    continue
+                at = self._at_frame(ev)
+                if at >= start and (end is None or at <= end):
+                    self._fired.discard(i)
+            # Reset the jump reference to the span start so the re-armed
+            # anchors fire as frames advance instead of being treated as
+            # jumped-over by update()'s forward-skip guard.
+            self._last_frame = start
 
     def _on_master_volume(self, data: dict) -> None:
         self._master = max(0.0, min(1.0, float(data.get("volume", 1.0))))

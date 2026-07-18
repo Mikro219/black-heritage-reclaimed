@@ -117,6 +117,11 @@
 
         const role = c.role || "sfx";
         const isBed = role !== "sfx" && role !== "vo" && c.sustain !== false;
+        // Speed shifts pitch WITH tempo (matches the runtime's asetrate
+        // render); duration_s is TIMELINE seconds, start()'s third arg is
+        // buffer-content seconds — a speeded clip consumes speed× content.
+        const spd = (!isBed && c.speed > 0) ? c.speed : 1;
+        if (spd !== 1) src.playbackRate.value = spd;
         if (isBed) {
           src.loop = true;
           if (c.duration_s != null && offset + c.duration_s < buf.duration - 0.05) {
@@ -130,14 +135,14 @@
           // previous one.
           if (engine.vo) stopNode(engine.vo, 0);
           const voDur = c.duration_s != null
-            ? Math.max(0.05, Math.min(c.duration_s, buf.duration - offset))
+            ? Math.max(0.05, Math.min(c.duration_s * spd, buf.duration - offset))
             : undefined;
           src.start(when, offset, voDur);
           src.onended = () => { src.__alive = false; };
           engine.vo = { soundId: c.sound, clip: c, src, gain };
         } else {
           const dur = c.duration_s != null
-            ? Math.max(0.05, Math.min(c.duration_s, buf.duration - offset))
+            ? Math.max(0.05, Math.min(c.duration_s * spd, buf.duration - offset))
             : undefined;
           src.start(when, offset, dur);
           src.onended = () => { src.__alive = false; };
@@ -175,17 +180,21 @@
         src.buffer = buf;
         src.connect(gain).connect(ac.destination);
 
+        const role = c.role || "sfx";
+        const isBed = role !== "sfx" && role !== "vo" && c.sustain !== false;
+        const spd = (!isBed && c.speed > 0) ? c.speed : 1;
+        if (spd !== 1) src.playbackRate.value = spd;
+
         const g = c.gain != null ? c.gain : 1;
         const into = Math.max(0, tLocal - clipStart);   // playhead inside clip
         const when = t0 + Math.max(0, clipStart - tLocal);
+        // into is timeline seconds; the source consumed so far is speed×into
         const offset = Math.max(0, Math.min(buf.duration - 0.01,
-                                            (c.source_offset_s || 0) + into));
+                                            (c.source_offset_s || 0) + into * spd));
         const fadeIn = into > 0 ? 0 : Math.max(0, (c.fade_in_ms || 0) / 1000);
         gain.gain.setValueAtTime(fadeIn > 0 ? 0 : g, when);
         if (fadeIn > 0) gain.gain.linearRampToValueAtTime(g, when + fadeIn);
 
-        const role = c.role || "sfx";
-        const isBed = role !== "sfx" && role !== "vo" && c.sustain !== false;
         if (isBed) {
           src.loop = true;
           if (c.duration_s != null &&
@@ -196,7 +205,7 @@
           src.start(when, offset);
         } else {
           const remain = clipEnd - Math.max(tLocal, clipStart);
-          src.start(when, offset, Math.max(0.05, remain));
+          src.start(when, offset, Math.max(0.05, remain * spd));
         }
         src.onended = () => { src.__alive = false; };
         engine.blockNodes.push({ src, gain });

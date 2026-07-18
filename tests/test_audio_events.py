@@ -313,6 +313,35 @@ class TestSegmentJumpGuard(unittest.TestCase):
         mixer.update()
         self.assertEqual(len(fake.channels[am.VO_CHANNEL].plays), 1)
 
+    def test_seek_entry_consumes_oneshots_but_starts_beds(self):
+        """A play_segment arriving before the shot's frames_ready (the player
+        seeking a just-started shot — start-at-shot / skip-prologue) primes
+        the jump reference: skipped sfx/vo stay silent, a near anchor fires,
+        and a jumped-over sustain bed still starts (it would be looping at
+        the landing frame)."""
+        bed  = ev("bed.mp3", role="music", at_s=0.0, gain=0.5)
+        sfx  = ev("old_hit.mp3", role="sfx", at_s=10.0)
+        vo   = ev("old_line.mp3", role="vo", at_s=20.0)
+        near = ev("near_hit.mp3", role="sfx", at_s=99.0)   # within 3s grace
+        mixer, fake, bus, frame = make_mixer(None)
+        from types import SimpleNamespace as NS
+        bus.emit("shot_load", {"shot": NS(audio_events=[bed, sfx, vo, near],
+                                          fps=30)})
+        bus.emit("play_segment", {"start": 3000, "end": 4000, "loop": False})
+        bus.emit("shot_frames_ready", {})
+        frame["v"] = 3000
+        mixer.update()
+        bed_plays = sum(len(fake.channels[c].plays)
+                        for c in am.BED_CHANNELS if c in fake.channels)
+        oneshots  = sum(len(fake.channels[c].plays)
+                        for c in am.ONESHOT_CHANNELS if c in fake.channels)
+        vo_plays  = len(fake.channels[am.VO_CHANNEL].plays) \
+            if am.VO_CHANNEL in fake.channels else 0
+        self.assertEqual(bed_plays, 1)       # bed caught up
+        self.assertEqual(oneshots, 1)        # only the near anchor
+        self.assertEqual(vo_plays, 0)        # old line stays silent
+        self.assertEqual(len(mixer._fired), 4)
+
     def test_continuous_playback_unaffected(self):
         e = ev("crinkle.mp3", role="sfx", at_s=1.0)
         mixer, fake, bus, frame = make_mixer([e], fps=30)
@@ -401,6 +430,54 @@ class TestVoEvents(unittest.TestCase):
         mixer.update()
         mixer.stop()
         self.assertTrue(fake.channels[am.VO_CHANNEL].stopped)
+
+
+class TestSegmentReentryReplaysOneShots(unittest.TestCase):
+    """An FSM revisiting a segment (Bear Paw wrong-way redirect) re-emits
+    play_segment for the same span: one-shot sfx/vo anchors inside that span
+    must RE-fire on each pass, while beds and `continues` pieces stay put.
+    Forward transitions (span ahead of the playhead) re-arm nothing."""
+
+    def _plays(self, fake, ch):
+        return len(fake.channels[ch].plays) if ch in fake.channels else 0
+
+    def test_reentered_span_refires_sfx_and_vo(self):
+        events = [ev("bed.mp3", role="music", at_s=0.0),          # sustain bed
+                  ev("hit.mp3", role="sfx", at_s=2.0),
+                  ev("line.ogg", role="vo", at_s=2.0)]
+        mixer, fake, bus, frame = make_mixer(events)
+        frame["v"] = 0
+        mixer.update()                       # bed starts
+        frame["v"] = 60
+        mixer.update()                       # sfx + vo fire (within grace)
+        oneshot0 = self._plays(fake, am.ONESHOT_CHANNELS[0])
+        vo0 = self._plays(fake, am.VO_CHANNEL)
+        bed0 = self._plays(fake, am.BED_CHANNELS[0])
+        self.assertEqual((oneshot0, vo0, bed0), (1, 1, 1))
+
+        # wrong pick again: the redirect segment [frames 31..90] replays
+        bus.emit("play_segment", {"start": 31, "end": 90, "loop": False})
+        frame["v"] = 60
+        mixer.update()
+        self.assertEqual(self._plays(fake, am.ONESHOT_CHANNELS[1]), 1,
+                         "sfx anchor inside the replayed span must re-fire")
+        self.assertEqual(self._plays(fake, am.VO_CHANNEL), vo0 + 1,
+                         "vo anchor inside the replayed span must re-fire")
+        self.assertEqual(self._plays(fake, am.BED_CHANNELS[0]), bed0,
+                         "sustain bed must NOT restart on segment re-entry")
+
+    def test_forward_transition_rearms_nothing(self):
+        events = [ev("hit.mp3", role="sfx", at_s=2.0)]
+        mixer, fake, bus, frame = make_mixer(events)
+        frame["v"] = 60
+        mixer.update()                       # fires once
+        total = sum(len(c.plays) for c in fake.channels.values())
+        # normal forward flow into the NEXT segment (span ahead of anchor)
+        bus.emit("play_segment", {"start": 91, "end": 150, "loop": False})
+        frame["v"] = 100
+        mixer.update()
+        self.assertEqual(sum(len(c.plays) for c in fake.channels.values()),
+                         total, "forward transition must not re-fire anchors")
 
 
 if __name__ == "__main__":

@@ -375,7 +375,10 @@ def main():
     parser = argparse.ArgumentParser(description="Black Heritage Reclaimed")
     parser.add_argument("--profile", metavar="NAME", help="Host profile name")
     parser.add_argument("--start-shot", metavar="SHOT", default=None,
-                        help="Shot number to start at (e.g. 09). Skips all earlier shots.")
+                        help="Shot number to start at (e.g. 09). Skips all earlier shots. "
+                             "On an exported tree with a shot_map.json, this is the "
+                             "ORIGINAL master-timeline shot number (tracker 01-79) and "
+                             "seeks into the exported shot that contains it.")
     parser.add_argument("--scenes", metavar="DIR", default=None,
                         help="Alternate scenes root (a folder containing sequence.json), "
                              "e.g. export/scenes_generated from the Experience Builder. "
@@ -439,17 +442,45 @@ def main():
     # the background (forward from the current shot) so future shots are fully ready.
     render.attach_cache(shots)
 
+    # Exported trees carry a shot_map.json: original master-timeline shot
+    # numbers -> exported shot id + local frame (many original shots share one
+    # exported stretch shot). Enables --start-shot by original number and
+    # skip-prologue even though the prologue is baked into the first shot.
+    shot_map = {}
+    map_path = scenes_root / "shot_map.json"
+    if map_path.exists():
+        try:
+            with open(map_path, encoding="utf-8") as f:
+                shot_map = json.load(f).get("shots", {})
+        except (OSError, json.JSONDecodeError) as exc:
+            print(f"[main] shot_map.json unreadable ({exc}) — ignored", file=sys.stderr)
+
+    ids = [s.shot for s in shots]
+    if shot_map:
+        prologue_end = next(
+            (e for _, e in sorted(shot_map.items())
+             if e.get("act") != "act_00_prologue" and e.get("shot") in ids), None)
+        if prologue_end:
+            player.set_prologue_end(ids.index(prologue_end["shot"]),
+                                    int(prologue_end.get("frame") or 1))
+
     start_index = 0
+    start_frame = None
     if args.start_shot:
         target = args.start_shot.zfill(2)
-        ids = [s.shot for s in shots]
-        if target in ids:
+        entry = shot_map.get(target)
+        if entry and entry.get("shot") in ids:
+            start_index = ids.index(entry["shot"])
+            start_frame = int(entry.get("frame") or 1)
+            print(f"[main] Starting at original shot {target} -> exported shot "
+                  f"{entry['shot']} frame {start_frame}", file=sys.stderr)
+        elif target in ids:
             start_index = ids.index(target)
             print(f"[main] Starting at shot {target} (index {start_index})", file=sys.stderr)
         else:
             print(f"[main] --start-shot {target!r} not found in sequence; starting from shot 01",
                   file=sys.stderr)
-    player.start(start_index)
+    player.start(start_index, start_frame)
 
     voice.start()
 
@@ -551,7 +582,8 @@ def main():
         else:
             shot = player.current_shot
             act = shot.act if shot else None
-            if not paused and (act == "00" or act in ShotSequencePlayer.EPILOGUE_ACTS):
+            if not paused and (player.in_prologue()
+                               or act in ShotSequencePlayer.EPILOGUE_ACTS):
                 meta_desired = ("meta_skip", ["skip"])
             else:
                 meta_desired = None

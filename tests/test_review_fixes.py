@@ -234,7 +234,21 @@ class TestUnravelElbowLine(unittest.TestCase):
         self.assertFalse(fired)
         self.assertEqual(ctx.get("unravel_crossings"), {})
 
+    def test_hands_apart_outward_rotation_fires_by_default(self):
+        """The scripted gesture holds the hands APART (rotating outward).
+        The old default prox_frac 0.25 required near-touching wrists and
+        silently blocked the experience (the tuner's laptop_dev override
+        masked it); the relaxed 1.75 default must let a hands-apart
+        oscillation (~1.2 shoulder-widths) fire."""
+        ctx = {}
+        fired = False
+        for y in (0.58, 0.66, 0.58, 0.66, 0.58):
+            ctx["_pose_lm"] = _unravel_pose(y, x_l=0.62, x_r=0.38)
+            fired = unravel.detect([], self.PARAMS, ctx) or fired
+        self.assertTrue(fired)
+
     def test_wrists_apart_resets(self):
+        """Beyond even the relaxed gate (2× shoulder width) state clears."""
         ctx, _ = self._run([0.58, 0.66, 0.58])
         self.assertTrue(any(ctx.get("unravel_crossings", {}).values()))
         ctx["_pose_lm"] = pose33({15: LM(0.70, 0.58, visibility=0.9),

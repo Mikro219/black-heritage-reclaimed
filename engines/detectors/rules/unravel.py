@@ -27,7 +27,12 @@ Params:
                     PER WRIST. Default 2.
   window_ms (float): sliding window for crossing accumulation. Default 3000.
   prox_frac (float): max wrist-to-wrist distance as fraction of
-                     shoulder_width. Default 0.25.
+                     shoulder_width. Default 1.75 — the scripted "both hands
+                     rotating outward" holds the hands APART, so the gate is
+                     permissive by default (the old 0.25 hands-touching gate
+                     silently blocked the experience while the tuner's
+                     laptop_dev profile override masked it). Tighten per shot
+                     if a winding-in-place variant is ever needed.
   band_frac (float): hysteresis half-band around the elbow line as a
                      fraction of shoulder width — a wrist must clear it on
                      BOTH sides for a crossing to count. Default 0.08.
@@ -61,7 +66,7 @@ def detect(landmarks, params: dict, context: dict) -> bool:
 
     min_cycles = params.get("min_cycles", 2)
     window_s   = params.get("window_ms", 3000) / 1000.0
-    prox_frac  = params.get("prox_frac", 0.25)
+    prox_frac  = params.get("prox_frac", 1.75)
     band_frac  = params.get("band_frac", 0.08)
     min_vis    = params.get("min_visibility", 0.5)
 

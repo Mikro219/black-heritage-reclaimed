@@ -200,6 +200,18 @@
           <select id="ix-detector"></select>
           <div class="detector-hint" id="ix-detector-hint"></div>
         </div>
+        <div class="insp-field" id="ix-cursor-field">
+          <label>Hand cursor icon</label>
+          <select id="ix-cursor">
+            <option value="default">Default (by detector)</option>
+            <option value="open">Open hand</option>
+            <option value="fist">Fist</option>
+            <option value="point">Pointing hand</option>
+            <option value="knock">Knock fist</option>
+            <option value="dots">Dots only</option>
+            <option value="hidden">Hidden</option>
+          </select>
+        </div>
         <div class="insp-field" id="ix-params-field">
           <label>Parameters</label>
           <div id="ix-params"></div>
@@ -276,6 +288,11 @@
         <div class="insp-field">
           <label>Fade out (ms)</label>
           <input type="text" id="ac-fadeout" spellcheck="false">
+        </div>
+        <div class="insp-field">
+          <label>Speed / pitch (&times;)</label>
+          <input type="text" id="ac-speed" spellcheck="false"
+                 title="Playback rate: 1 = normal; higher = faster AND higher-pitched (like CapCut speed). Ignored on continuous beds.">
         </div>
       </div>
       <label style="display:flex;align-items:center;gap:8px;font:500 12.5px 'IBM Plex Sans',sans-serif;color:var(--text-dim);cursor:pointer;">

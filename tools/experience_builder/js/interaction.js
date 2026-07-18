@@ -33,6 +33,7 @@
     updateShapeButtons();
 
     fillDetectorSelect(w ? w.detector : "point_target_held");
+    $("ix-cursor").value = (w && w.params && w.params.cursor) || "default";
     renderParams(w ? { ...(w.params || {}) } : null);
     fillGoto(b, w);
     drawFrame(b, ctx.at);
@@ -171,12 +172,16 @@
     const d = EB.detectorByType($("ix-detector").value);
     $("ix-detector-hint").textContent = d ? d.hint : "";
     const voice = !!(d && d.voice);
+    const draw = !!(d && d.type === "directional_draw");
     // Voice windows need a keyword, not a region — the drawn region (optional)
     // is only the preview click target.
     $("ix-shape-field").style.display = voice ? "none" : "block";
+    $("ix-cursor-field").style.display = voice ? "none" : "block";
     const hint = $("ix-stage-hint");
     hint.innerHTML = voice
       ? '<span class="msr" style="color:var(--violet);">mic</span>Voice window — fires when the player says the keyword (set it under Parameters). No region needed; draw one only if you want a preview click target. On a choice block, set "go to block" to make it a spoken branch pick.'
+      : draw
+      ? '<span class="msr" style="color:var(--amber,#f0b429);">auto_awesome</span>Draw stroke — BLOCKS on export: the window\'s frames loop until the stroke is drawn (45s give-up; param block_timeout_s overrides). The box positions the on-screen stroke indicator (comet + arrow): its centre anchors the stroke, its size sets the length. No box = the default mid-screen spot. Detection itself is anywhere on screen.'
       : '<span class="msr">info</span>Drag on the frame to draw the region the player interacts with. Player view is mirrored — draw where the player sees it.';
   }
 
@@ -186,6 +191,7 @@
     const box = $("ix-params");
     box.innerHTML = "";
     const params = { ...(d ? d.params : {}), ...(existing || {}) };
+    delete params.cursor;   // edited via the dedicated cursor picker, not a row
     const keys = Object.keys(params);
     $("ix-params-field").style.display = keys.length ? "block" : "none";
     for (const k of keys) {
@@ -246,6 +252,8 @@
     const durRaw = $("ix-duration").value.trim();
     const duration = durRaw === "" ? null : EB.parseTime(durRaw);
     const params = collectParams();
+    const cursor = $("ix-cursor").value;
+    if (cursor && cursor !== "default") params.cursor = cursor;
     const gotoId = $("ix-goto-field").style.display !== "none" ? $("ix-goto").value : "";
 
     const d = EB.detectorByType(detector);

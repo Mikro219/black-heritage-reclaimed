@@ -85,6 +85,7 @@
       `<span class="a-name"></span><span class="a-resize"></span>`;
     el.querySelector(".a-name").textContent = snd ? snd.name : "(missing sound)";
     el.title = `${snd ? snd.name : c.sound} · ${c.role} · gain ${c.gain != null ? c.gain : 1}` +
+      (c.speed ? ` · ×${c.speed}` : "") +
       ` · ${EB.fmtTime(s)} → ${c.duration_s == null ? "end" : EB.fmtTime(e)}` +
       (c.continues ? " · continues previous block's bed" : "") +
       "\nDrag to move, edge to resize, double-click to edit";
@@ -201,6 +202,7 @@
     $("ac-offset").value = String(c.source_offset_s || 0);
     $("ac-fadein").value = String(c.fade_in_ms || 0);
     $("ac-fadeout").value = String(c.fade_out_ms || 0);
+    $("ac-speed").value = String(c.speed || 1);
     $("ac-continues").checked = !!c.continues;
     $("ac-muted").checked = !!c.muted;
     $("ac-modal").classList.add("open");
@@ -231,6 +233,13 @@
       c.source_offset_s = Math.max(0, parseFloat($("ac-offset").value) || 0);
       c.fade_in_ms = Math.max(0, parseInt($("ac-fadein").value, 10) || 0);
       c.fade_out_ms = Math.max(0, parseInt($("ac-fadeout").value, 10) || 0);
+      // Speed shifts pitch WITH tempo (CapCut-style); 1 = normal, key omitted.
+      const spd = parseFloat($("ac-speed").value);
+      if (isFinite(spd) && spd > 0 && Math.abs(spd - 1) > 1e-3) {
+        c.speed = Math.min(4, Math.max(0.25, Math.round(spd * 10000) / 10000));
+      } else {
+        delete c.speed;
+      }
       c.continues = $("ac-continues").checked;
       c.muted = $("ac-muted").checked || undefined;
       if (!c.muted) delete c.muted;

@@ -11,6 +11,7 @@ the debug overlay (D) and skeleton mini-panel (K).
 
 import math
 import os
+import random
 import time
 import pygame
 from collections import OrderedDict
@@ -92,6 +93,15 @@ class RenderEngine:
         self._pending_audio: Optional[str] = None
         self._current_frames_dir: Optional[Path] = None
 
+        # Baked whole-file shot audio (audio.mp3) seek support: a play_segment
+        # that lands far from the audio's current position (start-at-shot /
+        # skip-prologue) restarts it at the matching offset via
+        # pygame.mixer.music (Sound objects can't seek; the music stream can).
+        self._audio_path:  Optional[str] = None   # the playing shot audio
+        self._audio_pos0:  float = 0.0            # offset it started at (s)
+        self._audio_epoch: float = 0.0            # monotonic time it started
+        self._music_active: bool = False          # audio runs on mixer.music
+
         # Look-ahead frame cache (continuous background preload of all shots with art)
         self._cache: Optional[FrameCacheManager] = None
         self._loading_dir: Optional[Path] = None   # incoming shot being converted
@@ -150,6 +160,16 @@ class RenderEngine:
         self._cursor_fade_mode: str = "grab"
         self._cursor_fade_t: float = time.monotonic()
 
+        # Star-trail particle layer (July 2026): tiny 4-point stars trail the
+        # visitor's hands while a directional_draw window is armed. Sprites are
+        # pre-rendered in init_display; particles are dicts with position,
+        # velocity, birth time, lifetime and sprite index.
+        self._star_sprites: list = []            # [size][rotation] -> Surface
+        self._hand_glow: Optional[pygame.Surface] = None   # per-hand "pen" dot
+        self._trail_particles: list = []
+        self._trail_last_pos: dict = {"L": None, "R": None}
+        self._fx_overlay: Optional[pygame.Surface] = None
+
         # Play-through segment overshoot carry: when a non-loop FSM segment ends,
         # playback has typically run a fraction of a frame past the boundary by the
         # time the tick notices. The next play_segment subtracts this so chained
@@ -179,12 +199,55 @@ class RenderEngine:
         # Cached fonts for the scene panel (avoids constructing SysFont per frame).
         # Pre-allocate the full-screen OI flash overlay once (reused each flash frame).
         self._flash_overlay = pygame.Surface((w, h), pygame.SRCALPHA)
+        self._fx_overlay = pygame.Surface((w, h), pygame.SRCALPHA)
+        self._build_star_sprites()
         self._load_hand_icons()
+
+    _STAR_COLOR = (255, 210, 90)   # the player-layer amber
+
+    def _build_star_sprites(self) -> None:
+        """Pre-render the 4-point star sprites used by the comet indicator and
+        the hand star-trail: three sizes x two rotations, amber with a white-hot
+        core. Rendered once; per-blit alpha is set with Surface.set_alpha."""
+        self._star_sprites = []
+        for size in (10, 15, 22):
+            rots = []
+            for rot_deg in (0.0, 22.5):
+                pad = 2
+                surf = pygame.Surface((size + pad * 2, size + pad * 2),
+                                      pygame.SRCALPHA)
+                cx = cy = size / 2 + pad
+                r_out = size / 2
+                r_in = r_out * 0.38
+                pts = []
+                for i in range(8):
+                    ang = math.radians(rot_deg) + i * math.pi / 4 - math.pi / 2
+                    r = r_out if i % 2 == 0 else r_in
+                    pts.append((cx + r * math.cos(ang), cy + r * math.sin(ang)))
+                pygame.draw.polygon(surf, self._STAR_COLOR, pts)
+                pygame.draw.circle(surf, (255, 250, 235), (int(cx), int(cy)),
+                                   max(1, int(r_in * 0.7)))
+                rots.append(surf)
+            self._star_sprites.append(rots)
+        # The "pen" dot pinned to each hand while a draw window is armed —
+        # same layered-glow language as the comet head.
+        g = pygame.Surface((36, 36), pygame.SRCALPHA)
+        pygame.draw.circle(g, (*self._STAR_COLOR, 45), (18, 18), 16)
+        pygame.draw.circle(g, (*self._STAR_COLOR, 110), (18, 18), 10)
+        pygame.draw.circle(g, (255, 250, 235, 230), (18, 18), 5)
+        self._hand_glow = g
 
     def _load_hand_icons(self) -> None:
         """Load the illustrated hand cursors produced by scripts/prepare_hand_icons.py.
         Missing files degrade gracefully to the dot cursors."""
-        icons_dir = Path(__file__).resolve().parent.parent / "assets" / "hand_icons"
+        # Frozen (PyInstaller) builds: __file__ lives inside _internal/, so
+        # resolve assets/ next to BHR.exe instead (same pattern as main.py).
+        import sys
+        if getattr(sys, "frozen", False):
+            app_root = Path(sys.executable).parent
+        else:
+            app_root = Path(__file__).resolve().parent.parent
+        icons_dir = app_root / "assets" / "hand_icons"
         target_h = max(60, int(self._display_size[1] * 0.09))
         for shape in ("open", "fist", "point", "knock"):
             for side in ("l", "r"):
@@ -262,6 +325,8 @@ class RenderEngine:
             for i in self._OWNED_CHANNELS:
                 if i < n:
                     pygame.mixer.Channel(i).set_volume(self._volume)
+            if self._music_active:
+                pygame.mixer.music.set_volume(self._volume)
         self.event_bus.emit("master_volume", {"volume": self._volume})
 
     def set_volume(self, v: float) -> None:
@@ -294,6 +359,13 @@ class RenderEngine:
             return
         self._paused = True
         self._pause_started = time.monotonic()
+        # pygame.mixer.pause() (main's pause path) does not touch the music
+        # stream — pause a seek-restarted shot audio explicitly.
+        if self._music_active:
+            try:
+                pygame.mixer.music.pause()
+            except Exception:
+                pass
 
     def resume(self) -> None:
         """Resume playback, shifting every time anchor forward by the paused
@@ -310,6 +382,12 @@ class RenderEngine:
         if self._flash_until > now:
             self._flash_start += delta
             self._flash_until += delta
+        self._audio_epoch += delta   # keep the audio-position estimate honest
+        if self._music_active:
+            try:
+                pygame.mixer.music.unpause()
+            except Exception:
+                pass
         self._paused = False
 
     def _draw_paused_overlay(self) -> None:
@@ -492,8 +570,9 @@ class RenderEngine:
             self._flash_overlay.fill((*self._flash_color, alpha))
             self._screen.blit(self._flash_overlay, (0, 0))
 
-        # Player-facing interaction indicator (target ring / draw arrow) and the
-        # illustrated hand cursors — always on, not debug-gated.
+        # Player-facing layer — always on, not debug-gated: star trail under the
+        # comet indicator, hand cursors on top.
+        self._draw_star_trail(pose_data, gesture_debug)
         self._draw_interaction_indicator(gesture_debug)
         self._draw_hand_cursors(pose_data, gesture_debug)
 
@@ -586,7 +665,37 @@ class RenderEngine:
                 ch = pygame.mixer.Channel(0)
                 ch.set_volume(self._volume)
                 ch.play(sound)
+                self._audio_path  = self._pending_audio
+                self._audio_pos0  = 0.0
+                self._audio_epoch = time.monotonic()
             self._pending_audio = None
+
+    def _stop_music(self) -> None:
+        if self._music_active:
+            try:
+                pygame.mixer.music.stop()
+            except Exception:
+                pass
+            self._music_active = False
+
+    def _seek_shot_audio(self, pos_s: float) -> None:
+        """Restart the shot's baked audio.mp3 at pos_s seconds. Channel 0's
+        Sound copy is stopped (it is our own audio in a master_audio shot) and
+        the file continues on the mixer.music stream, which can start at an
+        offset."""
+        if not self._audio_path:
+            return
+        try:
+            pygame.mixer.Channel(0).stop()
+            pygame.mixer.music.load(self._audio_path)
+            pygame.mixer.music.set_volume(self._volume)
+            pygame.mixer.music.play(start=max(0.0, pos_s))
+            self._music_active = True
+            self._audio_pos0   = pos_s
+            self._audio_epoch  = time.monotonic()
+            print(f"[RenderEngine] shot audio re-synced to {pos_s:.1f}s")
+        except Exception as exc:
+            print(f"[RenderEngine] shot audio seek failed: {exc}")
 
     def _on_shot_load(self, data: dict):
         shot = data.get("shot")
@@ -596,6 +705,8 @@ class RenderEngine:
         self._loading_kind = getattr(shot, "kind", "playback")
         audio_file = getattr(shot, "audio_file", None)
         self._pending_audio = str(audio_file) if audio_file else None
+        self._stop_music()          # a seeked shot's audio must not outlive it
+        self._audio_path = None
 
         # Always reset interaction state regardless of whether frames exist.
         # If a synchronous shot transition fires mid-frame (e.g. confirm segment
@@ -678,6 +789,16 @@ class RenderEngine:
         print(f"[RenderEngine] play_segment [{self._seg_start}-{self._seg_end}]  "
               f"loop={self._seg_loop}" + (f"  carry={carry*1000:.0f}ms" if carry else ""))
 
+        # Baked-audio re-sync: if this segment start is far from where the
+        # shot's audio.mp3 currently is (a seek — start-at-shot / skip-prologue),
+        # restart the audio at the matching offset. Contiguous play-through
+        # transitions land within the tolerance and never restart.
+        if self._audio_path and self._seg_start and not self._seg_loop:
+            expected = max(0.0, (self._seg_start - 1) / max(1, self._fps))
+            playing  = self._audio_pos0 + (time.monotonic() - self._audio_epoch)
+            if abs(expected - playing) > 2.0:
+                self._seek_shot_audio(expected)
+
     # ------------------------------------------------------------------
     # Drawing helpers
     # ------------------------------------------------------------------
@@ -753,13 +874,11 @@ class RenderEngine:
                 dy = int(vec[1] / mag * arrow_len)
                 ex, ey = ax + dx, ay + dy
                 pygame.draw.line(self._screen, COLOR, (ax, ay), (ex, ey), 3)
-                # Arrowhead: two short lines at ~135° from the direction
                 head = 12
                 ang  = _math.atan2(dy, dx)
-                for side in (0.6, -0.6):
-                    hx = int(ex - head * _math.cos(ang + side * _math.pi))
-                    hy = int(ey - head * _math.sin(ang + side * _math.pi))
-                    pygame.draw.line(self._screen, COLOR, (ex, ey), (hx, hy), 2)
+                for hx, hy in self._arrow_wings(ex, ey, ang, head):
+                    pygame.draw.line(self._screen, COLOR, (ex, ey),
+                                     (int(hx), int(hy)), 2)
 
             if self._small_font and directions:
                 label = "OI: " + "/".join(directions)
@@ -801,9 +920,13 @@ class RenderEngine:
             return
         gd = gesture_debug or {}
         active_type = gd.get("active_type")
+        # A window can force its icon via params {"cursor": ...}: an icon name,
+        # "dots" (plain tracking dots) or "hidden" (no cursor at all).
+        override = (gd.get("active_params") or {}).get("cursor")
         window_open = (bool(active_type)
                        and not gd.get("input_locked")
-                       and active_type not in self._NO_CURSOR_TYPES)
+                       and active_type not in self._NO_CURSOR_TYPES
+                       and override != "hidden")
 
         now = time.monotonic()
         dt = max(0.0, min(0.1, now - self._cursor_fade_t))  # clamp pause stalls
@@ -818,7 +941,11 @@ class RenderEngine:
             return
 
         if window_open:
-            if active_type in self._POINT_TYPES:
+            # e.g. reach_star is detected as point_target_held but the player
+            # should reach with an open hand, not point.
+            if override in ("open", "fist", "point", "knock", "dots"):
+                mode = override
+            elif active_type in self._POINT_TYPES:
                 mode = "point"
             elif active_type in self._KNOCK_TYPES:
                 mode = "knock"
@@ -856,12 +983,10 @@ class RenderEngine:
                 continue   # long gone — drop the ghost cursor
             x, y = state["pos"]
 
-            if mode == "knock":
-                icon_shape = "knock"
-            elif mode == "point":
-                icon_shape = "point"
+            if mode in ("knock", "point", "open", "fist"):
+                icon_shape = mode             # explicit (incl. cursor override)
             else:
-                icon_shape = state["shape"]   # "open" | "fist"
+                icon_shape = state["shape"]   # grab: "open" | "fist"
             # Mirror chirality (playtest-verified per art set): the open/fist
             # art is drawn anatomically, so on the mirrored display pose side L
             # needs the *_r art (a mirror flips handedness). The point/knock
@@ -870,7 +995,9 @@ class RenderEngine:
                 art_side = "r" if side == "L" else "l"
             else:
                 art_side = side.lower()
-            icon = self._hand_icons.get(f"{icon_shape}_{art_side}")
+            # "dots" mode draws the plain tracking dots instead of an icon.
+            icon = (None if mode == "dots"
+                    else self._hand_icons.get(f"{icon_shape}_{art_side}"))
             # Stale (pose dropout) dims the cursor; the window fade multiplies.
             alpha = int(255 * fade * (0.47 if age > 0.5 else 1.0))
             if icon is None:
@@ -886,6 +1013,50 @@ class RenderEngine:
             self._screen.blit(icon, (x - icon.get_width() // 2,
                                      y - icon.get_height() // 2))
 
+    # 8-way direction unit-ish vectors (screen space) shared by the draw
+    # indicator and the debug arrows.
+    _DIR_VEC_8 = {
+        "up": (0, -1), "down": (0, 1), "left": (-1, 0), "right": (1, 0),
+        "up_left": (-1, -1), "up_right": (1, -1),
+        "down_left": (-1, 1), "down_right": (1, 1),
+    }
+
+    @staticmethod
+    def _arrow_wings(ex, ey, ang, head):
+        """The two wing endpoints of an arrowhead whose tip is (ex, ey) and
+        heading is `ang`: wings land BEHIND the tip (the V opens backward) so
+        the arrow points along the heading, away from the line."""
+        spread = 0.5   # rad half-opening (~29°)
+        return [(ex - head * math.cos(ang + s), ey - head * math.sin(ang + s))
+                for s in (spread, -spread)]
+
+    @classmethod
+    def _indicator_span(cls, params, sw, sh):
+        """(sx, sy, ex, ey) of the draw-stroke indicator. Placement: the
+        window's authored `indicator_rect` (SCREEN-space {x,y,w,h} drawn in
+        the Experience Builder — centre of the rect, stroke length fitted to
+        its extent along the direction), else `indicator_xy` (normalised
+        centre), else the default mid-screen anchor."""
+        vec = cls._DIR_VEC_8.get(params.get("direction", "right"), (1, 0))
+        mag = math.hypot(*vec)
+        dx, dy = vec[0] / mag, vec[1] / mag
+        rect = params.get("indicator_rect")
+        if rect:
+            cx = (rect["x"] + rect["w"] / 2.0) * sw
+            cy = (rect["y"] + rect["h"] / 2.0) * sh
+            # Half-length of the chord through the rect centre along the
+            # direction (first boundary hit), slightly inset.
+            hw, hh = rect["w"] * sw / 2.0, rect["h"] * sh / 2.0
+            tx = hw / abs(dx) if abs(dx) > 1e-6 else float("inf")
+            ty = hh / abs(dy) if abs(dy) > 1e-6 else float("inf")
+            length = max(30.0, min(tx, ty) * 0.9)
+        else:
+            ind = params.get("indicator_xy") or (0.5, 0.42)
+            cx, cy = ind[0] * sw, ind[1] * sh
+            length = sh * 0.11
+        return (cx - dx * length, cy - dy * length,
+                cx + dx * length, cy + dy * length)
+
     # forward_point's named regions, in PLAYER/screen space (already mirrored).
     _NAMED_REGIONS = {
         "top_left_quadrant":  {"x": 0.0,  "y": 0.0,  "w": 0.5, "h": 0.5},
@@ -894,11 +1065,91 @@ class RenderEngine:
         "center":             {"x": 0.25, "y": 0.25, "w": 0.5, "h": 0.5},
     }
 
+    _TRAIL_MAX_PARTICLES = 200
+    _TRAIL_MIN_MOVE_PX = 4.0
+
+    def _draw_star_trail(self, pose_data=None,
+                         gesture_debug: dict | None = None) -> None:
+        """Hand feedback while a directional_draw window is armed (the tracked
+        cursor is suppressed there): a glowing "pen" dot pinned to each hand
+        with star-trail particles emanating from it. Spawn rate scales with
+        hand movement — a still hand keeps its dot but leaves no build-up;
+        live particles keep fading after the window closes."""
+        if not self._screen or not self._star_sprites:
+            return
+        gd = gesture_debug or {}
+        active = (gd.get("active_type") == "directional_draw"
+                  and not gd.get("input_locked"))
+        now = time.monotonic()
+        hand_pts = []
+
+        if active and pose_data:
+            w, h = self._screen.get_size()
+            for side, (wrist_i, index_i) in self._POSE_SIDE_POINTS.items():
+                lm = None
+                for idx in (index_i, wrist_i):
+                    if idx < len(pose_data):
+                        cand = pose_data[idx]
+                        if getattr(cand, "visibility", 1.0) >= 0.5:
+                            lm = cand
+                            break
+                if lm is None:
+                    self._trail_last_pos[side] = None
+                    continue
+                pos = ((1.0 - lm.x) * w, lm.y * h)
+                hand_pts.append(pos)
+                last = self._trail_last_pos[side]
+                self._trail_last_pos[side] = pos
+                if last is None:
+                    continue
+                dist = math.hypot(pos[0] - last[0], pos[1] - last[1])
+                if dist < self._TRAIL_MIN_MOVE_PX:
+                    continue
+                n = min(4, 1 + int(dist / 30))
+                for _ in range(n):
+                    if len(self._trail_particles) >= self._TRAIL_MAX_PARTICLES:
+                        self._trail_particles.pop(0)
+                    k = random.random()   # sample along last->pos
+                    self._trail_particles.append({
+                        "x": last[0] + (pos[0] - last[0]) * k + random.uniform(-6, 6),
+                        "y": last[1] + (pos[1] - last[1]) * k + random.uniform(-6, 6),
+                        "vx": random.uniform(-14, 14),
+                        "vy": random.uniform(-26, -4),   # gentle upward drift
+                        "born": now,
+                        "life": random.uniform(0.5, 0.9),
+                        "size_i": random.randrange(len(self._star_sprites)),
+                        "rot_i": random.randrange(2),
+                    })
+        elif not active:
+            self._trail_last_pos = {"L": None, "R": None}
+
+        alive = []
+        for p in self._trail_particles:
+            age = now - p["born"]
+            if age >= p["life"]:
+                continue
+            k = 1.0 - age / p["life"]
+            sprite = self._star_sprites[p["size_i"]][p["rot_i"]]
+            sprite.set_alpha(int(250 * k ** 1.5))   # ease-out fade
+            x = p["x"] + p["vx"] * age
+            y = p["y"] + p["vy"] * age
+            self._screen.blit(sprite, (int(x - sprite.get_width() / 2),
+                                       int(y - sprite.get_height() / 2)))
+            alive.append(p)
+        self._trail_particles = alive
+
+        # The pen dot rides on top of its trail.
+        if self._hand_glow is not None:
+            half = self._hand_glow.get_width() // 2
+            for hx, hy in hand_pts:
+                self._screen.blit(self._hand_glow,
+                                  (int(hx - half), int(hy - half)))
+
     def _draw_interaction_indicator(self, gesture_debug: dict | None) -> None:
         """Player-facing hint for the active window (always on, unlike the debug
-        target flag): a pulsing ring around point targets, a big pulsing arrow
-        for draw strokes. Replaces the confusing tracked-hand visuals as the
-        'simple on-screen indication' from the playtest punch list."""
+        target flag): a pulsing ring around point targets, an animated comet
+        sweep for draw strokes. Replaces the confusing tracked-hand visuals as
+        the 'simple on-screen indication' from the playtest punch list."""
         if not self._screen:
             return
         gd = gesture_debug or {}
@@ -911,33 +1162,61 @@ class RenderEngine:
         pulse = 0.5 + 0.5 * math.sin(now * 4.0)   # 0..1
 
         if active_type == "directional_draw":
-            direction = params.get("direction", "right")
-            _DIR_VEC = {
-                "up": (0, -1), "down": (0, 1), "left": (-1, 0), "right": (1, 0),
-                "up_left": (-1, -1), "up_right": (1, -1),
-                "down_left": (-1, 1), "down_right": (1, 1),
-            }
-            vec = _DIR_VEC.get(direction, (1, 0))
-            mag = math.hypot(*vec)
-            ind = params.get("indicator_xy") or (0.5, 0.42)
-            cx, cy = int(ind[0] * sw), int(ind[1] * sh)
-            length = int(sh * (0.10 + 0.02 * pulse))
-            dx, dy = vec[0] / mag, vec[1] / mag
-            sx, sy = int(cx - dx * length), int(cy - dy * length)
-            ex, ey = int(cx + dx * length), int(cy + dy * length)
-            color = (255, 210, 90)
-            # Start dot ("begin your stroke here") + shaft + arrowhead
-            pygame.draw.circle(self._screen, (0, 0, 0), (sx, sy), 14)
-            pygame.draw.circle(self._screen, color, (sx, sy), 10 + int(3 * pulse))
-            pygame.draw.line(self._screen, (0, 0, 0), (sx, sy), (ex, ey), 12)
-            pygame.draw.line(self._screen, color, (sx, sy), (ex, ey), 8)
-            head = 26
+            sx, sy, ex, ey = self._indicator_span(params, sw, sh)
+            color = self._STAR_COLOR
+
+            fx = self._fx_overlay
+            if fx is None:
+                return
+            fx.fill((0, 0, 0, 0))
+
+            # Faint guide line (where the stroke goes) with a dark underlay.
+            pygame.draw.line(fx, (0, 0, 0, 90), (sx, sy), (ex, ey), 7)
+            pygame.draw.line(fx, (*color, 70), (sx, sy), (ex, ey), 3)
+
+            # Start ring ("begin here") — soft pulse.
+            pygame.draw.circle(fx, (0, 0, 0, 150), (int(sx), int(sy)), 13, 5)
+            pygame.draw.circle(fx, (*color, 220), (int(sx), int(sy)),
+                               10 + int(2 * pulse), 3)
+
+            # Arrowhead at the end (outlined, always visible), pointing along
+            # the stroke direction.
+            head = 24
             ang = math.atan2(ey - sy, ex - sx)
-            for side_a in (0.65, -0.65):
-                hx = int(ex - head * math.cos(ang + side_a * math.pi))
-                hy = int(ey - head * math.sin(ang + side_a * math.pi))
-                pygame.draw.line(self._screen, (0, 0, 0), (ex, ey), (hx, hy), 12)
-                pygame.draw.line(self._screen, color, (ex, ey), (hx, hy), 8)
+            for hx, hy in self._arrow_wings(ex, ey, ang, head):
+                pygame.draw.line(fx, (0, 0, 0, 150), (ex, ey), (hx, hy), 9)
+                pygame.draw.line(fx, (*color, 220), (ex, ey), (hx, hy), 5)
+
+            # Comet sweep: a bright dot travels start -> end (~1.4s loop) with a
+            # trail of small stars, fading in/out at the loop seam so the
+            # restart doesn't pop.
+            period = 1.4
+            t = (now % period) / period
+            prog = t ** 0.85                      # slight ease-out
+            seam = min(1.0, t / 0.10, (1.0 - t) / 0.15)   # fade in/out window
+            px = sx + (ex - sx) * prog
+            py = sy + (ey - sy) * prog
+
+            if self._star_sprites:
+                for k in range(1, 6):             # trail behind the comet
+                    tp = prog - k * 0.055
+                    if tp <= 0:
+                        break
+                    tx = sx + (ex - sx) * tp
+                    ty = sy + (ey - sy) * tp
+                    sprite = self._star_sprites[min(1, len(self._star_sprites) - 1)][k % 2]
+                    sprite.set_alpha(int(190 * seam * (1.0 - k / 6.0)))
+                    fx.blit(sprite, (int(tx - sprite.get_width() / 2),
+                                     int(ty - sprite.get_height() / 2)))
+
+            # Comet head: layered glow + white-hot core.
+            a = seam
+            pygame.draw.circle(fx, (*color, int(45 * a)), (int(px), int(py)), 16)
+            pygame.draw.circle(fx, (*color, int(110 * a)), (int(px), int(py)), 10)
+            pygame.draw.circle(fx, (255, 250, 235, int(230 * a)),
+                               (int(px), int(py)), 5)
+
+            self._screen.blit(fx, (0, 0))
             return
 
         if active_type in ("point_target_held", "forward_point"):

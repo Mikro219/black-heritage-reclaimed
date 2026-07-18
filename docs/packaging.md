@@ -33,11 +33,25 @@ Useful flags:
 
 | Flag | Effect |
 |---|---|
+| `--scenes-root PATH` | Stage a different tree as the packaged `scenes/` (e.g. `export/scenes_generated` — the Builder-exported experience) |
 | `--with-frames` | Also stage every shot's `frames/` folder (multi-GB — single-folder deploys) |
-| `--with-assets` | Also stage `assets/` (storyboard pages, reference video) |
+| `--link-frames` | Hardlink staged scene files instead of copying — zero extra disk on the same NTFS volume; they become real files when the folder is copied to another drive |
+| `--with-assets` | Also stage `assets/` (storyboard pages, reference video). `assets/hand_icons/` is always staged regardless — the runtime cursors live there |
 | `--zip --version v1.0.0` | Produce `dist/BHR-v1.0.0-win64.zip` for a release |
 | `--skip-build` | Re-stage content / re-zip without rebuilding the exe |
 | `--dry-run` | Print the PyInstaller command and exit |
+
+The Builder-exported single-folder build used for playtests:
+
+```powershell
+py -3.12 scripts/build_exe.py --scenes-root export/scenes_generated --with-frames --link-frames
+```
+
+Disk note: at runtime the frame cache writes `framecache.npy` packs NEXT TO each
+shot's frames — inside `dist/BHR/scenes/` — and eviction never deletes them
+(CLAUDE.md open consideration). At 1920×1080 a full playthrough can accumulate
+100+ GB of packs, so the target drive needs the staged folder PLUS pack
+headroom (the 1TB mini PC is fine; a small SSD is not).
 
 Design choices baked in (don't change casually):
 - **one-dir, not one-file** — MediaPipe/Vosk make one-file exes slow to start
