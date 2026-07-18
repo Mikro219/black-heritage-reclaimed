@@ -16,6 +16,12 @@ Params:
   directions (list[str]): optional 8-way filter on the hand's point vector.
   hold_ms (int):         ms the point must stay on target. Default 800.
   min_reach_frac (float): arm extension required. Default 0.55.
+  hover_reach_frac (float): the (much lower) extension required when the hand
+                         is INSIDE the target rect. Pointing at an on-screen
+                         box aims the arm at the camera, and arm_reach_frac is
+                         a 2-D projection — a foreshortened arm reads as
+                         folded, so demanding min_reach_frac there rejected
+                         every legitimate hover (July 2026 fix). Default 0.25.
   min_visibility (float): Pose wrist visibility gate. Default 0.5.
 
 If neither region_rect nor directions is given, fires on any extended arm with
@@ -50,6 +56,7 @@ def detect(landmarks, params: dict, context: dict) -> bool:
     directions = params.get("directions")
     rect = _resolve_rect(params, context)
     min_reach = params.get("min_reach_frac", 0.55)
+    hover_reach = params.get("hover_reach_frac", 0.25)
     min_visibility = params.get("min_visibility", 0.5)
 
     pose_lm = context.get("_pose_lm")
@@ -57,20 +64,28 @@ def detect(landmarks, params: dict, context: dict) -> bool:
 
     on_target = False
     for side in wrists:
-        if pose_helpers.arm_reach_frac(pose_lm, side) < min_reach:
-            continue
+        reach = pose_helpers.arm_reach_frac(pose_lm, side)
         tip = pose_helpers.hand_point(pose_lm, side, min_visibility)
         if tip is None:
             continue
 
         if directions:
+            if reach < min_reach:
+                continue
             vec = pose_helpers.point_vector(pose_lm, side)
             if vec is None or pose_helpers.classify_direction(*vec) not in directions:
                 continue
         if rect is not None:
+            # Hand inside the target box: pointing at an on-screen target
+            # aims the arm at the camera, where the 2-D reach projection is
+            # foreshortened — only the light hover gate applies.
             if not _point_in_rect(tip.x, tip.y, rect):
                 continue
+            if reach < hover_reach:
+                continue
         elif not directions:
+            if reach < min_reach:
+                continue
             if tip.y <= 0.4:          # legacy no-filter fallback: lower half
                 continue
         on_target = True

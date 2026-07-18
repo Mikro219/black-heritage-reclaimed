@@ -34,6 +34,8 @@ Context keys: forward_point_since  (reads: _pose_lm, _depth_mm_at)
 
 import time
 
+from ...depth.fusion import trusted_landmark
+
 # (pose wrist index, same-side pose shoulder index)
 _ARMS = [(15, 11), (16, 12)]
 
@@ -78,7 +80,9 @@ def detect(landmarks, params: dict, context: dict) -> bool:
                 wrist, shoulder = pose_lm[wrist_i], pose_lm[shoulder_i]
             except (IndexError, TypeError):
                 continue
-            if getattr(wrist, "visibility", 1.0) < min_visibility:
+            # Visibility + depth phantom veto (same gate as push_out / throw):
+            # a back-wall phantom wrist inside the region must not count.
+            if not trusted_landmark(context, wrist_i, wrist, min_visibility):
                 continue
 
             # Reach check: real depth when both samples are valid, else Pose z.

@@ -59,6 +59,15 @@ class FrameCacheManager:
     def start(self, ordered_dirs) -> None:
         with self._lock:
             self._order = [Path(d) for d in ordered_dirs]
+        # Sweep temp packs orphaned by a previous unclean exit (the worker was
+        # mid-build when the process died, so os.replace never ran).
+        for d in self._order:
+            for stale in d.glob(f"{PACK_NAME}.building*"):
+                try:
+                    stale.unlink()
+                    print(f"[FrameCache] removed stale temp pack: {stale}")
+                except OSError:
+                    pass
         self._thread = threading.Thread(target=self._worker, daemon=True, name="FrameCache")
         self._thread.start()
         print(f"[FrameCache] started: {len(self._order)} shots with art queued")

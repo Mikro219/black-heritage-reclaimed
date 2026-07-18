@@ -18,11 +18,23 @@ Semantics (the behaviour contract — see tests/test_audio_events.py):
   event's gain is adopted). Unclaimed beds fade out over their fade_out_ms.
 * Non-sustain events ("sfx") play once on a pooled channel and are left to run
   out — they are short by construction (the importer pre-trims clips).
+* ``role: "vo"`` events (Auntie Liza's lines, July 2026) play once on the
+  dedicated VO channel 0. A VO line spanning shots is never restarted: a
+  ``continues`` VO event only adopts the gain when its file is still playing
+  on channel 0, and is otherwise marked fired without playing (the line
+  already ran to its end during a HOLD). Channel 0 is never faded on a shot
+  transition — a line always runs out naturally.
 * ``input_lock`` does NOT stop anything: bed continuity across transitions is
   the point of this layer.
+* Segment jumps (FSM forks): when the playback frame jumps forward past a
+  batch of anchors (picking a branch jumps straight into its segment), only
+  events within ``_JUMP_GRACE_S`` of the landing frame fire — anchors skipped
+  by more than the grace window are consumed silently. Without this, entering
+  ``right_selected`` would blast every unfired event of the left branch too.
 
 Channel plan (pygame.mixer, NUM_CHANNELS total):
-  0     VO / narration (NarrationAdapter + RenderEngine audio.mp3 — untouched)
+  0     VO — "vo" audio_events (this mixer) + NarrationAdapter AL lines +
+        RenderEngine audio.mp3 (legacy whole-file shots)
   1     stroke / on_enter SFX          (RenderEngine play_sfx)
   2     detect.mp3 reaction SFX        (RenderEngine play_sfx)
   3–5   beds (music/ambience; spare channel leaves room for crossfades)
@@ -48,10 +60,12 @@ import pygame
 log = logging.getLogger(__name__)
 
 NUM_CHANNELS      = 16
+VO_CHANNEL        = 0
 BED_CHANNELS      = (3, 4, 5)
 ONESHOT_CHANNELS  = tuple(range(6, 16))
 _DEFAULT_FADE_OUT_MS = 400
 _SOUND_CACHE_MAX  = 32
+_JUMP_GRACE_S     = 3.0   # events this close before a jump's landing frame fire
 
 
 class ShotAudioMixer:
@@ -81,9 +95,16 @@ class ShotAudioMixer:
         # Pending shot (stashed at shot_load, activated at shot_frames_ready)
         self._pending: Optional[tuple[list, int]] = None
 
+        # Playback frame at the previous update() — the jump-guard reference.
+        self._last_frame: Optional[int] = None
+
         # channel index -> {"event": dict, "channel": Channel, "since": float}
         self._beds: dict[int, dict] = {}
         self._oneshot_rr = 0             # round-robin cursor into ONESHOT_CHANNELS
+
+        # Live VO line: {"event": dict, "channel": Channel} while a "vo" event
+        # owns channel 0 (None otherwise — narration/audio.mp3 territory).
+        self._vo: Optional[dict] = None
 
         # path(str) -> Sound, LRU-capped (decoded beds are RAM-heavy)
         self._sounds: OrderedDict[str, pygame.mixer.Sound] = OrderedDict()
@@ -101,26 +122,42 @@ class ShotAudioMixer:
     # ------------------------------------------------------------------
 
     def update(self) -> None:
-        """Fire any event whose anchor frame has been crossed."""
+        """Fire any event whose anchor frame has been crossed.
+
+        Anchors skipped over by a forward segment jump (frame moved more
+        than the grace window past them since the last update) are consumed
+        silently — see the module docstring's fork semantics."""
         if not self._events:
             return
         frame = self._frame_provider()
         if frame is None:
             return
+        grace = int(_JUMP_GRACE_S * self._fps)
+        last  = self._last_frame
         for i, ev in enumerate(self._events):
             if i in self._fired:
                 continue
-            if frame >= self._at_frame(ev):
+            at = self._at_frame(ev)
+            if frame >= at:
                 self._fired.add(i)
+                if last is not None and at < frame - grace:
+                    continue   # jumped over — consume without playing
                 self._start_event(ev)
+        self._last_frame = frame
 
     def stop(self) -> None:
-        """Stop everything this mixer owns (shutdown)."""
+        """Stop everything this mixer owns (shutdown / end-of-experience loop).
+
+        Channel 0 is stopped only while a "vo" event owns it — never a
+        NarrationAdapter line or a legacy whole-file audio.mp3."""
         if not pygame.mixer.get_init():
             return
         for ch in BED_CHANNELS + ONESHOT_CHANNELS:
             if ch < pygame.mixer.get_num_channels():
                 pygame.mixer.Channel(ch).stop()
+        if self._vo is not None:
+            self._vo["channel"].stop()
+            self._vo = None
         self._beds.clear()
         self._events = []
         self._pending = None
@@ -128,6 +165,7 @@ class ShotAudioMixer:
     def debug_info(self) -> dict:
         return {
             "beds":    [b["event"]["file"] for b in self._beds.values()],
+            "vo":      (self._vo["event"]["file"] if self._vo else None),
             "fired":   len(self._fired),
             "events":  len(self._events),
             "pending": self._pending is not None,
@@ -172,13 +210,36 @@ class ShotAudioMixer:
                 bed["channel"].fadeout(max(1, fade))
                 del self._beds[ch_idx]
 
+        # VO: a continues piece NEVER (re)starts playback. If the line is
+        # still running on channel 0 it is handed over (gain adopted);
+        # if it already finished during a HOLD it is simply marked fired.
+        for i, ev in enumerate(events):
+            if ev.get("role") != "vo" or not ev.get("continues"):
+                continue
+            claimed.add(i)
+            if (self._vo is not None
+                    and ev.get("file") == self._vo["event"].get("file")
+                    and self._vo["channel"].get_busy()):
+                self._vo["event"] = ev
+                self._vo["channel"].set_volume(self._gain(ev))
+            # else: line already ran out — restarting the whole file mid-scene
+            # would be wrong, so the piece is consumed silently.
+
+        if self._vo is not None and not self._vo["channel"].get_busy():
+            self._vo = None   # finished line: release ch0 bookkeeping
+
         self._events = events
-        self._fired  = set(claimed)   # handed-over beds are already "started"
+        self._fired  = set(claimed)   # handed-over beds/VO are already "started"
+        self._last_frame = None       # fresh shot: no jump reference yet
 
     def _on_master_volume(self, data: dict) -> None:
         self._master = max(0.0, min(1.0, float(data.get("volume", 1.0))))
         for bed in self._beds.values():
             bed["channel"].set_volume(self._gain(bed["event"]))
+        # RenderEngine stamps a flat master on ch0 before broadcasting this
+        # event; while a VO line is live, re-apply its gain × master on top.
+        if self._vo is not None and self._vo["channel"].get_busy():
+            self._vo["channel"].set_volume(self._gain(self._vo["event"]))
 
     # ------------------------------------------------------------------
     # Internal
@@ -220,7 +281,14 @@ class ShotAudioMixer:
         if sound is None:
             return
         fade_in = max(0, int(ev.get("fade_in_ms") or 0))
-        if ev.get("sustain"):
+        if ev.get("role") == "vo":
+            # Dedicated VO channel: a new line replaces whatever was there
+            # (the draft's slices never overlap on the timeline).
+            channel = pygame.mixer.Channel(VO_CHANNEL)
+            channel.set_volume(self._gain(ev))
+            channel.play(sound, fade_ms=fade_in)
+            self._vo = {"event": ev, "channel": channel}
+        elif ev.get("sustain"):
             ch_idx = self._free_bed_channel()
             if ch_idx is None:
                 log.warning("ShotAudioMixer: no free bed channel for %s", ev.get("file"))

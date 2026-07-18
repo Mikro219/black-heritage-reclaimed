@@ -1,15 +1,24 @@
 # Vision Pipeline — Optimization Notes & Alternatives
 
-Status: analysis / decision record, June 2026. Companion to `CLAUDE.md` (Tech Stack,
-Performance Budget). Nothing here is wired in yet except where marked DONE.
+Status: analysis / decision record, June 2026 (updated July 2026). Companion to
+`CLAUDE.md` (Tech Stack, Performance Budget). Nothing here is wired in yet
+except where marked DONE.
+
+> **POSE-ONLY REWORK (July 2026):** the Hands model was removed entirely — the
+> runtime runs a single MediaPipe Pose graph every frame, and all 28 detectors
+> read the skeleton (helpers in `engines/detectors/rules/pose_helpers.py`).
+> This halves vision inference cost outright and made the pose-hand fusion
+> layer below OBSOLETE (it existed to validate Hands output). Hands-specific
+> items in this doc are kept as decision history.
 
 ## Where we are
 
-- **mediapipe 0.10.14**, legacy *Solutions* API (`mp.solutions.hands` / `mp.solutions.pose`),
-  CPU (XNNPACK), `model_complexity=1` for both, one capture+inference worker thread
-  (`gesture_engine._capture_loop`), Pose gated to shots that need it (`_pose_needed()`).
-- Budget target (CLAUDE.md): Hands ~15–25% of one core at 30fps, Pose on the same
-  thread, on a Ryzen 7 7640HS (mini PC) with no discrete GPU.
+- **mediapipe 0.10.14**, legacy *Solutions* API (`mp.solutions.pose` only since
+  the pose-only rework), CPU (XNNPACK), `model_complexity=1`, one
+  capture+inference worker thread (`gesture_engine._capture_loop`), Pose every
+  frame.
+- Budget target (CLAUDE.md): Pose ~15–25% of one core at 30fps on a Ryzen 7
+  7640HS (mini PC) with no discrete GPU.
 
 The pipeline is healthy today. The items below are ordered by payoff-per-risk.
 
@@ -180,7 +189,48 @@ Ranked by feasibility for this project:
   July 2026** (see next section). The pose wrist is a better ROI anchor than a
   depth blob: it's already tracked, side-labelled, and works on plain webcams.
 
-## Pose-hand fusion layer (BUILT, July 2026)
+## Person-bbox pre-crop before Pose? (analysis — NOT building)
+
+Question raised July 2026: detect a human bounding box first and run Pose only
+on that crop instead of the whole camera frame.
+
+**BlazePose already does this internally.** MediaPipe Pose is a two-stage
+detector+tracker: a person detector localises an ROI, the 256×256 landmark
+model runs on that crop, and on subsequent frames the ROI is derived from the
+previous frame's landmarks — the full-frame detector re-runs only when
+tracking is lost. An external person detector would therefore not make the
+landmark stage any cheaper (it always sees a fixed-size crop) and would
+duplicate the detection stage with a second ML model on the CPU — the exact
+thing the performance budget lists as a breaker (~10–20% of a core for a
+nano-class detector, plus another model to ship and calibrate).
+
+**Where an external bbox WOULD add value: multi-person disambiguation.**
+BlazePose is single-person and locks onto the most prominent figure, so a
+passer-by walking close behind the visitor can steal the skeleton. Today the
+Gemini player-band gate (`depth.player_min_mm/player_max_mm`) vetoes
+detections from a skeleton outside the band — but a veto is not a re-target:
+while MediaPipe tracks the wrong person, the right person has no skeleton
+until re-detection kicks in.
+
+**If skeleton-stealing shows up on-site, the cheap fix is a depth-derived ROI,
+not an ML detector:** threshold the aligned Gemini depth to the player band
+(pure numpy, no model), take the largest blob's padded bbox with hysteresis
+(a jittery crop resets BlazePose's tracker every frame), crop the color frame
+to it, and map landmark coordinates back to full-frame space before publishing
+(detector regions and the depth sampler are full-frame normalised). That
+guarantees the skeleton belongs to the person inside the interaction band, at
+effectively zero CPU. Webcam-only setups get no benefit — which is acceptable,
+since they also lack the depth band today.
+
+**Decision: not building now.** Single-visitor operation is the norm, the
+depth band already guards detections, and the runtime is comfortably inside
+budget with the pose-only pipeline. Revisit only if on-site playtests show the
+skeleton locking onto bystanders; then implement the depth-blob ROI above.
+
+## Pose-hand fusion layer (BUILT July 2026 — REMOVED with the pose-only rework)
+
+> Removed along with the Hands model: every mechanism below existed to
+> validate/rescue Hands detections, which no longer exist. Kept as history.
 
 `engines/pose_hand_filter.py`, wired into the gesture engine's capture loop
 (config `"pose_hand"`). MediaPipe Holistic's pose→hand coupling, à la carte,
@@ -223,7 +273,8 @@ without Holistic's CPU cost:
 | GestureRecognizer for Layer A | only if GRLib shadow logs disappoint | low |
 | ONNX+DirectML pose offload | only if budget blows on-site | medium-high |
 | ~~Orbbec depth for z-gestures~~ | **DONE July 2026** — fusion layer wired | — |
-| ~~Pose-hand fusion (veto/handedness/arbitration)~~ | **DONE July 2026** — on by default, `"pose_hand"` config | — |
-| Pose-guided hand rescue | built; flip `"pose_hand".rescue` on-site, watch fps | low |
+| ~~Pose-hand fusion (veto/handedness/arbitration/rescue)~~ | **REMOVED July 2026** — obsolete once Hands was dropped | — |
+| ~~Pose-only detection (drop Hands + GRLib)~~ | **DONE July 2026** — single Pose graph, all detectors on the skeleton | — |
 | Learned fused gesture classifier (sklearn, shadow mode) | only if rule fusion hits a ceiling on-site | low |
 | IR-stream landmark fallback | on-site experiment if lighting hurts RGB | low |
+| Person-bbox pre-crop for Pose | NOT building — BlazePose crops internally; depth-blob ROI is the fallback if bystanders steal the skeleton on-site | — |

@@ -26,6 +26,7 @@ when a non-looping segment finishes.
 from __future__ import annotations
 
 import time
+from collections import deque
 from typing import Optional
 
 from .sequence_loader import Shot
@@ -40,7 +41,6 @@ STATE_PLAY       = "PLAY"         # playback shot: playing frames start-to-end
 STATE_PLAY_INTRO = "PLAY_INTRO"   # interactive: playing intro segment
 STATE_HOLD       = "HOLD"         # interactive: idle_loop; detectors armed
 STATE_PLAY_RES   = "PLAY_RES"     # interactive: playing resolution segment post-success
-STATE_TRANSITION = "TRANSITION"   # brief input-locked gap between shots (unused, Phase 3)
 
 # Top-level player states
 PLAYER_IDLE     = "IDLE"
@@ -105,6 +105,14 @@ class ShotSequencePlayer:
         # play_if branch gating so path-specific shots skip the unchosen branch.
         self._fork_choices: dict = {}
 
+        # Voice events arrive on the VoiceEngine thread. Mutating the FSM /
+        # advancing shots from that thread races the main loop (render segment
+        # state, shot index), so the bus handler only queues the payload here
+        # and update() drains it on the main thread — the same marshalling
+        # main.MetaVoice does for its meta commands. deque append/popleft are
+        # atomic, so no lock is needed.
+        self._pending_vi: deque = deque()
+
         # Pause/resume — while paused, update() is not driven and detection events
         # are ignored; on resume every monotonic timer is shifted forward by the
         # paused duration so HOLD timeouts and segment timing don't fire late.
@@ -128,11 +136,21 @@ class ShotSequencePlayer:
             return self.shots[self._index]
         return None
 
+    @property
+    def player_state(self) -> str:
+        """Coarse lifecycle state (RUNNING / FINAL_ADDRESS / ...) — main.py's
+        end-of-experience loop watches this."""
+        return self._player_state
+
     def start(self, start_index: int = 0) -> None:
         if not self.shots:
             self._player_state = PLAYER_FINISHED
             self.event_bus.emit("sequence_finished", {})
             return
+        # A restart (end-of-experience loop) must not inherit the previous
+        # visitor's fork choices — branch-gated shots would replay their path.
+        self._fork_choices.clear()
+        self._fsm = None
         self._player_state = PLAYER_RUNNING
         self._enter_shot(max(0, min(start_index, len(self.shots) - 1)))
 
@@ -149,6 +167,25 @@ class ShotSequencePlayer:
         print(f"[ShotPlayer] skip prologue -> shot {dest.shot} (act {dest.act})")
         self._fsm = None
         self._index = target - 1   # _advance() steps to `target`
+        self._advance()
+        return True
+
+    EPILOGUE_ACTS = ("12", "13")
+
+    def skip_epilogue(self) -> bool:
+        """While inside an epilogue act, jump straight past the end of the
+        sequence (-> FINAL_ADDRESS, which the end-of-experience loop watches).
+
+        Returns True if a jump happened; no-op anywhere else in the story so a
+        stray "skip" can never cut the journey itself short.
+        """
+        shot = self.current_shot
+        if (self._player_state != PLAYER_RUNNING or shot is None
+                or shot.act not in self.EPILOGUE_ACTS):
+            return False
+        print(f"[ShotPlayer] skip epilogue from shot {shot.shot} (act {shot.act})")
+        self._fsm = None
+        self._index = len(self.shots) - 1   # _advance() steps past the end
         self._advance()
         return True
 
@@ -179,6 +216,12 @@ class ShotSequencePlayer:
             return
         if self._player_state != PLAYER_RUNNING:
             return
+
+        # Voice events queued by the VoiceEngine thread — handle them here so
+        # every FSM/shot mutation happens on the main thread.
+        while self._pending_vi:
+            self._handle_vi_detected(self._pending_vi.popleft())
+
         shot = self.current_shot
         if shot is None:
             return
@@ -360,6 +403,11 @@ class ShotSequencePlayer:
         self._segment_start = time.monotonic()
         self._segment_done  = False
 
+        # Leaving HOLD: disarm any window still open (an auto_complete timeout
+        # arrives here without a detection, so nothing else closes it).
+        self.event_bus.emit("cg_window_open", {"interaction": None})
+        self.event_bus.emit("oi_window_open", {"interaction": None})
+
         self.event_bus.emit("shot_state_change", {
             "shot_id": shot.shot,
             "state":   STATE_PLAY_RES,
@@ -510,14 +558,14 @@ class ShotSequencePlayer:
         step_type = step.get("type", "")
 
         if step_type == "voice":
-            # --- COUPLING FLAG (Phase 3) ---
-            # VI chain steps need a VoiceEngine window.  VoiceEngine currently
-            # subscribes to "dialogue_cue" (old model); that event no longer
-            # exists.  Phase 3 will adapt VoiceEngine to listen to "vi_chain_step"
-            # and open a window.  Until then, emit the event and let HOLD timeout
-            # handle the auto-advance path.
+            # VoiceEngine listens for "vi_chain_step" and opens a keyword window.
+            # NOTE the return leg is still incomplete: when the keyword fires,
+            # _handle_vi_detected has no chain-step branch, so a voice chain step
+            # only advances via the HOLD timeout. No live shot uses type:"voice"
+            # chain steps today (forks use the FSM voice/voice_<kw> path instead);
+            # wire the return leg before authoring one.
             print(f"[ShotPlayer] shot {shot.shot} step {self._chain_index}: "
-                  f"VI '{step.get('keyword', '?')}' -- VI chain not wired until Phase 3")
+                  f"VI '{step.get('keyword', '?')}' (advances on timeout only)")
             self.event_bus.emit("vi_chain_step", {
                 "shot_id":    shot.shot,
                 "step_index": self._chain_index,
@@ -856,8 +904,12 @@ class ShotSequencePlayer:
             self.event_bus.emit("oi_flash", {"color": (0, 255, 80), "duration_ms": 800})
 
     def _on_vi_detected(self, data: dict) -> None:
-        if self._paused:
-            return
+        """Bus handler — runs on the VoiceEngine thread. Queue only; the real
+        handling happens in update() on the main thread (see _pending_vi)."""
+        if not self._paused:
+            self._pending_vi.append(data)
+
+    def _handle_vi_detected(self, data: dict) -> None:
         shot = self.current_shot
         if not shot:
             return
@@ -1123,13 +1175,17 @@ def _get_segment_range(shot: Shot, state: str) -> Optional[tuple[int, int]]:
     return None
 
 
+_frame_count_cache: dict = {}   # frames_dir(str) -> file count
+
+
 def _estimate_duration(shot: Shot, state: str) -> float:
     """
     Return the expected play duration in seconds for a PLAY/PLAY_INTRO/PLAY_RES segment.
 
     Priority:
       1. Explicit segment frame range in shot.segments → exact frame count / fps.
-      2. No segment range but frames_dir exists → count files in directory (one read per shot).
+      2. No segment range but frames_dir exists → count files in directory
+         (once per directory — memoised; shots replay across the end loop).
       3. assets_pending or no frames_dir → 0.0 (advance immediately).
     """
     seg_range = _get_segment_range(shot, state)
@@ -1140,13 +1196,17 @@ def _estimate_duration(shot: Shot, state: str) -> float:
     if shot.assets_pending or shot.frames_dir is None:
         return 0.0
 
-    from pathlib import Path
-    d = Path(shot.frames_dir)
-    image_exts = {".png", ".jpg", ".jpeg"}
-    try:
-        num_frames = sum(1 for f in d.iterdir() if f.suffix.lower() in image_exts)
-    except OSError:
-        return 0.0
+    key = str(shot.frames_dir)
+    num_frames = _frame_count_cache.get(key)
+    if num_frames is None:
+        from pathlib import Path
+        image_exts = {".png", ".jpg", ".jpeg"}
+        try:
+            num_frames = sum(1 for f in Path(shot.frames_dir).iterdir()
+                             if f.suffix.lower() in image_exts)
+        except OSError:
+            return 0.0
+        _frame_count_cache[key] = num_frames
     return num_frames / max(1, shot.fps)
 
 

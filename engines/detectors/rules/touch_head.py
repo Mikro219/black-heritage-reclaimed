@@ -42,6 +42,8 @@ Context keys: touch_head_since
 import math
 import time
 
+from . import pose_helpers
+
 # Fixed fallback geometry when Pose is unavailable
 _FIXED_CROWN_X = 0.50
 _FIXED_CROWN_Y = 0.10
@@ -86,8 +88,12 @@ def detect(landmarks, params: dict, context: dict) -> bool:
     radius *= radius_scale
 
     # POSE-ONLY (July 2026): wrists always come from the Pose skeleton
-    # (15 left, 16 right); use_pose is accepted and ignored.
-    wrists = [pose_lm[15], pose_lm[16]] if pose_lm is not None else []
+    # (15 left, 16 right); use_pose is accepted and ignored. Gate through
+    # trusted_wrists (visibility + depth phantom veto) — an occluded wrist's
+    # estimated position can land inside the crown circle and false-fire.
+    min_visibility = params.get("min_visibility", 0.5)
+    wrists = list(pose_helpers.trusted_wrists(
+        pose_lm, context, min_visibility).values()) if pose_lm is not None else []
 
     in_region = 0
     for wrist in wrists:

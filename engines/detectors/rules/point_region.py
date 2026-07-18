@@ -28,7 +28,10 @@ Params:
   dead_zone_frac (float): half-width of the centre dead zone as a fraction of
                           shoulder width. A wrist within this band of the midline
                           is "centre" and selects nothing, so only a deliberate
-                          reach to one side registers. Default 0.15.
+                          reach to one side registers. Default 0.45 (July 2026 —
+                          raised from 0.15: a raised hand barely off-centre was
+                          selecting a side; now the wrist must reach out to
+                          roughly its own shoulder line).
   require_raised (bool): if True (default), only wrists above the raise gate are
                           considered, so a relaxed arm hanging at the side (which
                           sits far from the midline) cannot trigger a selection.
@@ -83,7 +86,7 @@ def _pose_geometry(pose_lm):
 def detect(landmarks, params: dict, context: dict) -> bool:
     accepted = set(params.get("directions") or _ALL)
     hold_ms = params.get("hold_ms", 500)
-    dead_zone_frac = params.get("dead_zone_frac", 0.15)
+    dead_zone_frac = params.get("dead_zone_frac", 0.45)
     require_raised = params.get("require_raised", True)
     raise_gate_frac = params.get("raise_gate_frac", 0.25)
     min_visibility = params.get("min_visibility", 0.5)

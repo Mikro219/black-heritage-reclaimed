@@ -83,11 +83,9 @@ class RenderEngine:
         self._frames: list = []
         self._frame_index = 0
         self._fps = 24
-        self._last_frame_time = 0.0
         # Debug overlay starts OFF regardless of profile/config; toggle it at
         # runtime with the D key (render.toggle_debug()).
         self._debug = False
-        self._landmark_data = None
         self._font: Optional[pygame.font.Font] = None
         self._small_font: Optional[pygame.font.Font] = None
         self._playback_start_time: float = 0.0
@@ -127,6 +125,7 @@ class RenderEngine:
         # Master volume (0.0-1.0), applied to every mixer channel. Adjustable from
         # the pause menu (Up/Down or dragging the slider).
         self._volume: float = float(config.get("audio", {}).get("master_volume", 1.0))
+        self._sound_cache: OrderedDict = OrderedDict()   # path -> decoded Sound (LRU)
         self._volume_slider_rect: Optional[pygame.Rect] = None  # set when drawn
 
         # Skeleton-in-corner display option (pause menu, K key) — shows the
@@ -142,6 +141,14 @@ class RenderEngine:
             "L": {"pos": None, "shape": "open", "t": 0.0},
             "R": {"pos": None, "shape": "open", "t": 0.0},
         }
+
+        # Cursor visibility fade (July 2026): pose cursors are shown ONLY while
+        # an interaction window is armed — alpha ramps in when the window opens
+        # and out when it closes (the last window's icon persists through the
+        # fade-out so it doesn't flip mid-animation).
+        self._cursor_fade_alpha: float = 0.0
+        self._cursor_fade_mode: str = "grab"
+        self._cursor_fade_t: float = time.monotonic()
 
         # Play-through segment overshoot carry: when a non-loop FSM segment ends,
         # playback has typically run a fraction of a frame past the boundary by the
@@ -303,7 +310,6 @@ class RenderEngine:
         if self._flash_until > now:
             self._flash_start += delta
             self._flash_until += delta
-        self._last_frame_time     += delta
         self._paused = False
 
     def _draw_paused_overlay(self) -> None:
@@ -354,8 +360,7 @@ class RenderEngine:
         pygame.draw.circle(self._screen, (240, 240, 240), (kx, by + bar_h // 2), 9)
         pygame.draw.circle(self._screen, (60, 60, 60), (kx, by + bar_h // 2), 9, 2)
 
-    def update(self, landmark_data=None, handedness_data=None,
-               pose_data=None,
+    def update(self, pose_data=None,
                gesture_debug: dict | None = None,
                voice_debug: dict | None = None,
                narration_debug: dict | None = None,
@@ -375,10 +380,9 @@ class RenderEngine:
                 alpha = int(self._flash_alpha * math.sin(progress * math.pi))
                 self._flash_overlay.fill((*self._flash_color, max(0, min(255, alpha))))
                 self._screen.blit(self._flash_overlay, (0, 0))
-            self._draw_hand_cursors(landmark_data, handedness_data, pose_data, gesture_debug)
-            if self._debug or self._show_skeleton:
-                if landmark_data or pose_data:
-                    self._draw_hand_mini_panel(landmark_data, handedness_data, pose_data)
+            self._draw_hand_cursors(pose_data, gesture_debug)
+            if (self._debug or self._show_skeleton) and pose_data:
+                self._draw_hand_mini_panel(pose_data)
             pygame.display.flip()
             return
 
@@ -389,8 +393,6 @@ class RenderEngine:
             pygame.display.flip()
             return
 
-        self._landmark_data = landmark_data
-        self._pose_data = pose_data
         now = time.monotonic()
 
         # ── Swap in the incoming shot once the disk-backed cache can serve it. The
@@ -493,15 +495,14 @@ class RenderEngine:
         # Player-facing interaction indicator (target ring / draw arrow) and the
         # illustrated hand cursors — always on, not debug-gated.
         self._draw_interaction_indicator(gesture_debug)
-        self._draw_hand_cursors(landmark_data, handedness_data, pose_data, gesture_debug)
+        self._draw_hand_cursors(pose_data, gesture_debug)
 
         if self._debug:
             self._draw_oi_target_flag(gesture_debug)
-            self._draw_debug_panel(landmark_data, gesture_debug, voice_debug, narration_debug)
-        if self._debug or self._show_skeleton:
+            self._draw_debug_panel(gesture_debug, voice_debug, narration_debug)
+        if (self._debug or self._show_skeleton) and pose_data:
             # Skeleton preview: debug overlay OR the standalone pause-menu option.
-            if landmark_data or pose_data:
-                self._draw_hand_mini_panel(landmark_data, handedness_data, pose_data)
+            self._draw_hand_mini_panel(pose_data)
 
         pygame.display.flip()
 
@@ -558,15 +559,33 @@ class RenderEngine:
         print(f"[RenderEngine] shot ready: {count} frames "
               f"({'pack' if self._cache.pack_ready(self._current_frames_dir) else 'decode fallback'})")
 
+    # Decoded Sound cache: detect.mp3 fires on every OI detection and shots
+    # replay across the end-loop — decoding from disk on every play is waste.
+    _SOUND_CACHE_MAX = 16
+
+    def _load_sound(self, path) -> "pygame.mixer.Sound | None":
+        key = str(path)
+        sound = self._sound_cache.get(key)
+        if sound is not None:
+            self._sound_cache.move_to_end(key)
+            return sound
+        try:
+            sound = pygame.mixer.Sound(key)
+        except Exception as exc:
+            print(f"[RenderEngine] audio load failed: {key}: {exc}")
+            return None
+        self._sound_cache[key] = sound
+        while len(self._sound_cache) > self._SOUND_CACHE_MAX:
+            self._sound_cache.popitem(last=False)
+        return sound
+
     def _begin_audio(self) -> None:
         if self._pending_audio:
-            try:
-                sound = pygame.mixer.Sound(self._pending_audio)
+            sound = self._load_sound(self._pending_audio)
+            if sound is not None:
                 ch = pygame.mixer.Channel(0)
                 ch.set_volume(self._volume)
                 ch.play(sound)
-            except Exception as exc:
-                print(f"[RenderEngine] audio load failed: {exc}")
             self._pending_audio = None
 
     def _on_shot_load(self, data: dict):
@@ -575,7 +594,6 @@ class RenderEngine:
             return
         self._fps = getattr(shot, "fps", 24)
         self._loading_kind = getattr(shot, "kind", "playback")
-        self._last_frame_time = time.monotonic()
         audio_file = getattr(shot, "audio_file", None)
         self._pending_audio = str(audio_file) if audio_file else None
 
@@ -630,13 +648,15 @@ class RenderEngine:
         # channel 1: stroke / on_enter_sfx (can be long — carries tail audio).
         # channel 2: OI reaction sfx (detect.mp3) — overlays without cutting ch.1.
         channel = data.get("channel", 1)
+        sound = self._load_sound(path)
+        if sound is None:
+            return
         try:
-            sound = pygame.mixer.Sound(path)
             ch = pygame.mixer.Channel(channel)
             ch.set_volume(self._volume)
             ch.play(sound)
         except Exception as exc:
-            print(f"[RenderEngine] SFX load failed: {exc}")
+            print(f"[RenderEngine] SFX play failed: {exc}")
 
     def _on_set_frame_window(self, data: dict):
         self._oi_frame_start = data.get("start")
@@ -763,34 +783,53 @@ class RenderEngine:
     # Pose landmark indices per side: wrist + the pose "hand point" (index).
     _POSE_SIDE_POINTS = {"L": (15, 19), "R": (16, 20)}
 
-    def _draw_hand_cursors(self, landmark_data, handedness_data=None,
-                           pose_data=None, gesture_debug: dict | None = None):
+    # Window-scoped cursor fade (seconds full-off -> full-on and back).
+    _CURSOR_FADE_IN_S = 0.4
+    _CURSOR_FADE_OUT_S = 0.5
+
+    def _draw_hand_cursors(self, pose_data=None, gesture_debug: dict | None = None):
         """Illustrated hand cursors (assets/hand_icons/), POSE-DRIVEN since the
         July 2026 pose-only rework: position comes from the Pose index landmark
         (19/20) when visible, else the wrist (15/16); side labels are inherent
         to the skeleton. Icon picked by the active interaction — knock fists
         during knock windows, pointing hand during point windows, open hand
-        during grab windows, plain green (L) / blue (R) dots when no window is
-        open. Last-seen position persists through pose dropouts. (landmark_data
-        / handedness_data are the legacy Hands slots — always None now.)"""
+        during grab windows. Cursors exist ONLY while an interaction window is
+        armed: they fade in when the window opens and fade out when it closes
+        (no tracked visuals between windows — playtest feedback). Last-seen
+        position persists through pose dropouts."""
         if not self._screen:
             return
         gd = gesture_debug or {}
         active_type = gd.get("active_type")
-        if active_type in self._NO_CURSOR_TYPES:
+        window_open = (bool(active_type)
+                       and not gd.get("input_locked")
+                       and active_type not in self._NO_CURSOR_TYPES)
+
+        now = time.monotonic()
+        dt = max(0.0, min(0.1, now - self._cursor_fade_t))  # clamp pause stalls
+        self._cursor_fade_t = now
+        if window_open:
+            self._cursor_fade_alpha = min(
+                1.0, self._cursor_fade_alpha + dt / self._CURSOR_FADE_IN_S)
+        else:
+            self._cursor_fade_alpha = max(
+                0.0, self._cursor_fade_alpha - dt / self._CURSOR_FADE_OUT_S)
+        if self._cursor_fade_alpha <= 0.0:
             return
 
-        mode = "dots"
-        if active_type and not gd.get("input_locked"):
+        if window_open:
             if active_type in self._POINT_TYPES:
                 mode = "point"
             elif active_type in self._KNOCK_TYPES:
                 mode = "knock"
             else:
                 mode = "grab"
+            self._cursor_fade_mode = mode
+        else:
+            # Window just closed — keep its icon while the fade-out plays.
+            mode = self._cursor_fade_mode
 
         w, h = self._screen.get_size()
-        now = time.monotonic()
 
         if pose_data:
             for side, (wrist_i, index_i) in self._POSE_SIDE_POINTS.items():
@@ -808,6 +847,7 @@ class RenderEngine:
                 state["pos"] = (int((1 - lm.x) * w), int(lm.y * h))
                 state["t"] = now
 
+        fade = self._cursor_fade_alpha
         for side, state in self._hand_cursor_state.items():
             if state["pos"] is None:
                 continue
@@ -816,27 +856,33 @@ class RenderEngine:
                 continue   # long gone — drop the ghost cursor
             x, y = state["pos"]
 
-            if mode == "dots":
-                color = self._DOT_COLORS.get(side, (220, 220, 220))
-                pygame.draw.circle(self._screen, (0, 0, 0), (x, y), 12, 0)
-                pygame.draw.circle(self._screen, color, (x, y), 9, 0)
-                pygame.draw.circle(self._screen, (255, 255, 255), (x, y), 12, 2)
-                continue
-
             if mode == "knock":
                 icon_shape = "knock"
             elif mode == "point":
                 icon_shape = "point"
             else:
                 icon_shape = state["shape"]   # "open" | "fist"
-            icon = self._hand_icons.get(f"{icon_shape}_{side.lower()}")
+            # Mirror chirality (playtest-verified per art set): the open/fist
+            # art is drawn anatomically, so on the mirrored display pose side L
+            # needs the *_r art (a mirror flips handedness). The point/knock
+            # art was authored already-mirrored — same-side art is correct.
+            if icon_shape in ("open", "fist"):
+                art_side = "r" if side == "L" else "l"
+            else:
+                art_side = side.lower()
+            icon = self._hand_icons.get(f"{icon_shape}_{art_side}")
+            # Stale (pose dropout) dims the cursor; the window fade multiplies.
+            alpha = int(255 * fade * (0.47 if age > 0.5 else 1.0))
             if icon is None:
                 color = self._DOT_COLORS.get(side, (220, 220, 220))
-                pygame.draw.circle(self._screen, color, (x, y), 10)
+                r = 10
+                dot = pygame.Surface((r * 2 + 2, r * 2 + 2), pygame.SRCALPHA)
+                pygame.draw.circle(dot, (*color, alpha), (r + 1, r + 1), r)
+                self._screen.blit(dot, (x - r - 1, y - r - 1))
                 continue
-            if age > 0.5:
+            if alpha < 255:
                 icon = icon.copy()
-                icon.set_alpha(120)   # stale — hand not currently tracked
+                icon.set_alpha(alpha)
             self._screen.blit(icon, (x - icon.get_width() // 2,
                                      y - icon.get_height() // 2))
 
@@ -989,10 +1035,90 @@ class RenderEngine:
     ]
     _POSE_KEY_POINTS = [0, 7, 8, 11, 12, 13, 14, 15, 16, 23, 24]  # nose, ears, etc.
 
-    def _draw_hand_mini_panel(self, landmark_data, handedness_data=None, pose_data=None):
+    # Full-body extension for the camera-setup screen (legs matter there).
+    _POSE_CONNECTIONS_FULL = _POSE_CONNECTIONS + [
+        (23, 25), (25, 27),          # left leg
+        (24, 26), (26, 28),          # right leg
+    ]
+
+    def draw_camera_setup(self, frame_bgr, pose_lm) -> bool:
+        """Camera-setup screen (config.json "camera_setup"): the live camera
+        view, mirrored like the player-facing cursors, with the detected
+        skeleton drawn on top and a prompt to adjust the camera until the whole
+        body is in frame. Confirmed by ENTER/Space or the voice command
+        "ready" (handled in main.py). Returns the body-in-frame verdict.
+
+        Owns the whole frame: fills, draws and flips — the caller skips the
+        normal render update while this screen is active."""
+        if not self._screen:
+            return False
+        import numpy as np
+
+        sw, sh = self._screen.get_size()
+        self._screen.fill((8, 10, 14))
+
+        disp = None   # (x, y, w, h) of the displayed camera rect
+        if frame_bgr is not None:
+            # BGR -> RGB and mirror in one slice so the view behaves like a mirror.
+            rgb = np.ascontiguousarray(frame_bgr[:, ::-1, ::-1])
+            fh, fw = rgb.shape[:2]
+            surf = pygame.image.frombuffer(rgb.tobytes(), (fw, fh), "RGB")
+            scale = min(sw / fw, (sh * 0.82) / fh)   # leave room for the prompt
+            dw, dh = int(fw * scale), int(fh * scale)
+            dx, dy = (sw - dw) // 2, int(sh * 0.10)
+            self._screen.blit(pygame.transform.scale(surf, (dw, dh)), (dx, dy))
+            pygame.draw.rect(self._screen, (70, 80, 95), (dx, dy, dw, dh), 2)
+            disp = (dx, dy, dw, dh)
+
+        # Body-in-frame verdict: head and both ankles confidently inside view.
+        def _in_frame(idx):
+            if pose_lm is None or idx >= len(pose_lm):
+                return False
+            lm = pose_lm[idx]
+            return (getattr(lm, "visibility", 0.0) >= 0.5
+                    and 0.02 <= lm.x <= 0.98 and 0.02 <= lm.y <= 0.98)
+        body_ok = _in_frame(0) and _in_frame(27) and _in_frame(28)
+
+        # Skeleton over the displayed rect (nearest/most prominent person —
+        # the one MediaPipe Pose tracks).
+        if pose_lm is not None and disp is not None:
+            dx, dy, dw, dh = disp
+            pts = [(dx + int((1 - lm.x) * dw), dy + int(lm.y * dh))
+                   for lm in pose_lm]
+            def _vis(idx):
+                return (idx < len(pose_lm)
+                        and getattr(pose_lm[idx], "visibility", 0.0) >= 0.5)
+            color = (60, 220, 90) if body_ok else (255, 170, 40)
+            for a, b in self._POSE_CONNECTIONS_FULL:
+                if _vis(a) and _vis(b):
+                    pygame.draw.line(self._screen, color, pts[a], pts[b], 3)
+            for idx, lm in enumerate(pose_lm):
+                if _vis(idx):
+                    pygame.draw.circle(self._screen, color, pts[idx], 4)
+
+        # Prompt block
+        if self._font:
+            title = self._font.render("CAMERA SETUP", True, (200, 210, 225))
+            self._screen.blit(title, ((sw - title.get_width()) // 2, int(sh * 0.03)))
+            if pose_lm is None:
+                msg, col = "No one detected - step into the camera's view", (255, 170, 40)
+            elif not body_ok:
+                msg, col = "Adjust the camera until your WHOLE body is in the frame", (255, 170, 40)
+            else:
+                msg, col = "Body in frame - press ENTER or say \"READY\" to continue", (60, 220, 90)
+            line = self._font.render(msg, True, col)
+            self._screen.blit(line, ((sw - line.get_width()) // 2, int(sh * 0.935)))
+        if self._small_font:
+            hint = self._small_font.render(
+                "ENTER / Space or say \"ready\" to confirm", True, (120, 130, 145))
+            self._screen.blit(hint, ((sw - hint.get_width()) // 2, int(sh * 0.972)))
+
+        pygame.display.flip()
+        return body_ok
+
+    def _draw_hand_mini_panel(self, pose_data=None):
         """Pose-skeleton preview in bottom-right corner — keeps the main screen
-        clean. (landmark_data / handedness_data are the legacy Hands slots —
-        always None since the pose-only rework.)"""
+        clean."""
         if not self._screen:
             return
         sw, sh = self._screen.get_size()
@@ -1067,7 +1193,7 @@ class RenderEngine:
         self._screen.blit(id_surf, (cx + (card_w - id_surf.get_width()) // 2, cy + 80))
         self._screen.blit(mark, (cx + (card_w - mark.get_width()) // 2, cy + 180))
 
-    def _draw_debug_panel(self, landmark_data, gesture_debug: dict | None,
+    def _draw_debug_panel(self, gesture_debug: dict | None,
                           voice_debug: dict | None = None,
                           narration_debug: dict | None = None):
         if not self._font:

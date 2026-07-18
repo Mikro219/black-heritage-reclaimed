@@ -400,7 +400,8 @@ def _resolve_audio_file(act_dir: Optional[Path], shot_id: str,
     return p if p.exists() else None
 
 
-_AUDIO_ROLES = {"music", "ambience", "sfx"}
+_AUDIO_ROLES = {"music", "ambience", "sfx", "vo"}
+_BED_ROLES   = {"music", "ambience"}   # sustain (looping bed) by default
 
 
 def _parse_audio_events(raw_events, act_dir: Optional[Path], shot_id: str,
@@ -441,7 +442,7 @@ def _parse_audio_events(raw_events, act_dir: Optional[Path], shot_id: str,
             "gain":            float(e.get("gain", 1.0)),
             "fade_in_ms":      int(e.get("fade_in_ms", 0)),
             "fade_out_ms":     int(e.get("fade_out_ms", 0)),
-            "sustain":         bool(e.get("sustain", role != "sfx")),
+            "sustain":         bool(e.get("sustain", role in _BED_ROLES)),
             "continues":       bool(e.get("continues", False)),
             "path":            path,
         })

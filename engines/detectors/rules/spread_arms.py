@@ -34,6 +34,8 @@ Context keys: spread_since
 
 import time
 
+from ...depth.fusion import trusted_landmark
+
 
 def detect(landmarks, params: dict, context: dict) -> bool:
     pose_lm = context.get("_pose_lm")
@@ -55,8 +57,10 @@ def detect(landmarks, params: dict, context: dict) -> bool:
         return False
 
     matched = False
-    if (getattr(lw, "visibility", 1.0) >= min_visibility
-            and getattr(rw, "visibility", 1.0) >= min_visibility):
+    # trusted_landmark = visibility gate + depth phantom veto (the point_region
+    # parity the docstring promises — a raw visibility check misses the veto).
+    if (trusted_landmark(context, 15, lw, min_visibility)
+            and trusted_landmark(context, 16, rw, min_visibility)):
         shoulder_width = abs(sh_l.x - sh_r.x)
         shoulder_y = (sh_l.y + sh_r.y) / 2
         hip_y = (hip_l.y + hip_r.y) / 2

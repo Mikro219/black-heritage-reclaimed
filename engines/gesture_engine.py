@@ -115,6 +115,7 @@ class GestureEngine:
         self._frame_lock = threading.Lock()
         self._pub_pose_lm = None
         self._pub_pose_time: float = 0.0
+        self._pub_frame = None            # latest BGR camera frame (setup screen)
         self._pub_seq: int = 0            # increments on each new inference result
         self._last_consumed_seq: int = -1  # last seq the main thread dispatched
 
@@ -126,6 +127,8 @@ class GestureEngine:
         self._active_oi_window_ms: float = config.get("timing_defaults", {}).get("oi_window_ms", 6000)
         self._cooldown_until: float = 0.0
         self._input_locked = False
+        self._paused = False
+        self._pause_started: float = 0.0
         self._last_fired: Optional[str] = None
         self._last_fired_time: float = 0.0
         self._warned_missing: set = set()   # suppress repeated "not in registry" noise
@@ -163,6 +166,12 @@ class GestureEngine:
                 time.sleep(0.005)   # camera hiccup — don't spin at 100% CPU
                 continue
 
+            # Publish the raw frame regardless of lock state — the camera-setup
+            # screen needs the live view before the experience starts. Reference
+            # only, no copy: cap.read() returns a fresh array each call.
+            with self._frame_lock:
+                self._pub_frame = frame
+
             # Always drain the camera to keep the USB pipeline fresh, but skip the
             # expensive inference while input is locked (playback/transitions need
             # no detection).
@@ -181,6 +190,38 @@ class GestureEngine:
                     self._pub_pose_lm = pose_lm
                     self._pub_pose_time = now
                 self._pub_seq += 1
+
+    def pause(self) -> None:
+        """Freeze the engine's wall-clock state. Idempotent.
+
+        update() isn't driven while the app is paused, but the OI-window expiry
+        and detector cooldown are monotonic timestamps — without shifting them
+        on resume, a pause mid-OI silently expires the window (the player shifts
+        its own timers; this is the gesture-side counterpart)."""
+        if self._paused:
+            return
+        self._paused = True
+        self._pause_started = time.monotonic()
+
+    def resume(self) -> None:
+        if not self._paused:
+            return
+        delta = time.monotonic() - self._pause_started
+        if self._oi_open_time is not None:
+            self._oi_open_time += delta
+        self._cooldown_until += delta
+        # Detector hold state (context "*_since" timestamps, histories) can't be
+        # shifted from here — clear it so a hold must be re-performed after the
+        # pause instead of completing across it ("detect intent").
+        self._active_cg_context.clear()
+        self._active_oi_context.clear()
+        self._paused = False
+
+    def latest_camera_frame(self):
+        """Newest raw BGR camera frame (or None before the first read). Used by
+        the camera-setup screen; published even while input is locked."""
+        with self._frame_lock:
+            return self._pub_frame
 
     def fresh_pose_lm(self):
         """Pose landmarks for the render overlay, or None if none were detected
@@ -268,6 +309,14 @@ class GestureEngine:
 
     def _on_input_lock(self, data: dict):
         self._input_locked = data.get("locked", False)
+        if self._input_locked:
+            # Disarm on lock, mirroring VoiceEngine (which clears its windows):
+            # otherwise a window armed before the lock keeps dispatching — and
+            # keeps the window-scoped cursors on screen — after the transition.
+            self._active_cg = None
+            self._active_cg_context = {}
+            self._active_oi = None
+            self._active_oi_context = {}
 
     def _emit_cg(self, gesture_id: str, choice: str | None = None):
         cooldown = self._thresholds.get("gesture_cooldown_ms", 600) / 1000

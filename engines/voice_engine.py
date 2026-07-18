@@ -164,6 +164,15 @@ class VoiceEngine:
                 del self._windows[window_id]
                 log.info("VI window closed early: id=%s", window_id[:8])
 
+    def window_open(self, window_id: Optional[str]) -> bool:
+        """True while the given window is still open. Long-lived meta windows
+        (main.py's skip/ready commands) poll this to re-open after the engine
+        clears windows on expiry or input_lock."""
+        if not window_id:
+            return False
+        with self._lock:
+            return window_id in self._windows
+
     def subscribe(self, callback: Callable[[VoiceEvent], None]) -> None:
         """Register a callback invoked whenever a VI fires. Used by the test CLI."""
         self._subscribers.append(callback)
@@ -246,12 +255,18 @@ class VoiceEngine:
 
     def _process_chunk(self, chunk: bytes) -> None:
         import math
-        import struct
 
-        # DSP: RMS + peak amplitude for hum detection and volume gating
-        samples = struct.unpack(f"{len(chunk) // 2}h", chunk)
-        rms = math.sqrt(sum(s * s for s in samples) / len(samples)) / 32768.0
-        peak = max(abs(s) for s in samples) / 32768.0
+        import numpy as np
+
+        # DSP: RMS + peak amplitude for hum detection and volume gating.
+        # Vectorised — the old pure-Python loop over each 4000-sample block was
+        # a recurring hot spot on the voice thread.
+        samples = np.frombuffer(chunk, dtype=np.int16)
+        if samples.size == 0:
+            return
+        samples64 = samples.astype(np.float64)
+        rms = float(np.sqrt(np.mean(samples64 * samples64))) / 32768.0
+        peak = float(np.max(np.abs(samples64))) / 32768.0
         # Convert peak to dBFS (−inf guard: clamp below −120 dB)
         peak_dbfs = 20.0 * math.log10(peak) if peak > 1e-6 else -120.0
         self._check_hum(rms)
