@@ -6,10 +6,12 @@ night sky, cloth, and the North Star. Every colour the VISITOR sees lives here
 under a semantic name; the render layer never spells an RGB literal.
 
 Scope — deliberately partial. This themes the player-facing surfaces (tutorial
-card, captions, pause/volume UI, interaction indicators, the success flash).
-The diagnostic surfaces are NOT themed and must stay high-contrast and ugly:
-the debug overlay, the skeleton mini-panel, the camera-setup screen and the
-gesture/voice tuners are instruments, not part of the piece.
+card, camera-setup screen, captions, pause/volume UI, interaction indicators,
+the success flash). The camera-setup screen joined the piece in the Aug 2026
+Lantern Vignette redesign — visitors see it, so it speaks the palette. The
+diagnostic surfaces are NOT themed and must stay high-contrast and ugly: the
+debug overlay, the skeleton mini-panel and the gesture/voice tuners are
+instruments, not part of the piece.
 
 Contrast: the work is projected in a lit public venue, so every text colour
 carries its measured WCAG ratio against NIGHT below. tests/test_render.py pins

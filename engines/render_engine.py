@@ -503,9 +503,11 @@ class RenderEngine:
         veil.fill(P.VEIL_RGBA)
         self._screen.blit(veil, (0, 0))
 
-        if self._font:
-            title = self._font.render("|| PAUSED", True, P.NORTH_STAR)
-            self._screen.blit(title, ((sw - title.get_width()) // 2, sh // 2 - 116))
+        # Serif display title — the camera/tutorial redesign's type ladder
+        # applied to the pause screen.
+        title = self._serif_font(max(30, int(sh * 0.062))).render(
+            "Paused", True, P.NORTH_STAR)
+        self._screen.blit(title, ((sw - title.get_width()) // 2, sh // 2 - 130))
 
         self._draw_volume_slider(sw, sh)
         self._draw_pause_keys(sw, sh, sh // 2 + 30)
@@ -539,12 +541,13 @@ class RenderEngine:
         for header, rows in columns:
             kw = max(font.size(k)[0] for k, _ in rows)
             aw = max(font.size(a)[0] for _, a in rows)
-            metrics.append((max(kw + gutter + aw, font.size(header)[0]), kw))
+            hw = font.size(header)[0] + 3 * max(0, len(header) - 1)  # tracked
+            metrics.append((max(kw + gutter + aw, hw), kw))
         total_w = sum(w for w, _ in metrics) + col_gap
         x = (sw - total_w) // 2
 
         for (header, rows), (col_w, key_w) in zip(columns, metrics):
-            head = font.render(header, True, P.LANTERN_DIM)
+            head = self._tracked_label(font, [(header, P.LANTERN_DIM)], 3)
             self._screen.blit(head, (x, top))
             y = top + line_h + 2
             for key, action in rows:
@@ -2092,21 +2095,26 @@ class RenderEngine:
         return (int(box.x + u * box.w), int(box.y + v * box.h))
 
     def _tutorial_figure_box(self, sw: int, sh: int):
-        """Panel rect for the step figure — bottom-RIGHT of the tutorial card.
-
-        Moves to the bottom-LEFT when the K-key skeleton mini-panel owns that
-        corner: swapping corners is the only rule that holds at every
-        resolution (the panel is a fixed 240x180, so shrinking or stacking
-        breaks on small displays). Always fully on screen."""
+        """Panel rect for the step figure — CENTRED under the prompt (Quilt
+        Card design, 2a). The centred panel never collides with the K-key
+        skeleton mini-panel in the bottom-right, so the old corner-swap rule
+        is gone. Always fully on screen."""
         fw = max(200, int(sw * 0.20))
-        fh = max(180, int(sh * 0.30))
-        m  = max(8, int(sh * 0.03))
-        corner_taken = self._debug or self._show_skeleton
-        bx = m if corner_taken else sw - fw - m
-        by = sh - fh - m
+        fh = max(180, int(sh * 0.34))
+        bx = (sw - fw) // 2
+        by = int(sh * 0.50)
         bx = max(0, min(bx, max(0, sw - fw)))
         by = max(0, min(by, max(0, sh - fh)))
-        return pygame.Rect(bx, by, fw, fh)
+        box = pygame.Rect(bx, by, fw, fh)
+        # On a tiny debug window the FIXED-size mini panel can still reach the
+        # centre — nudge left just enough to clear it.
+        if self._debug or self._show_skeleton:
+            pw, ph = self._MINI_PANEL_SIZE
+            pm = self._MINI_PANEL_MARGIN
+            panel = pygame.Rect(sw - pw - pm, sh - ph - pm, pw, ph)
+            if box.colliderect(panel):
+                box.x = max(0, panel.left - box.w - 8)
+        return box
 
     def _draw_step_figure(self, figure, box) -> None:
         """Panel + stick figure + accent + caption for one tutorial step.
@@ -2231,15 +2239,47 @@ class RenderEngine:
                                    (rad + 2, rad + 2), rad, max(2, stroke - 1))
                 self._screen.blit(ring, (cx - rad - 2, cy - rad - 2))
 
+    # Serif stack for the piece's display type (Camera & Tutorial redesign,
+    # Aug 2026 — the design canvas sets Cormorant Garamond / Lora; the kiosk
+    # ships no webfonts, so this is the closest installed-serif ladder).
+    _SERIF_STACK = "garamond,georgia,palatinolinotype,book antiqua,timesnewroman"
+
+    def _serif_font(self, size: int, italic: bool = False,
+                    bold: bool = False) -> pygame.font.Font:
+        key = (size, italic, bold)
+        cache = getattr(self, "_serif_cache", None)
+        if cache is None:
+            cache = self._serif_cache = {}
+        f = cache.get(key)
+        if f is None:
+            f = pygame.font.SysFont(self._SERIF_STACK, size,
+                                    bold=bold, italic=italic)
+            cache[key] = f
+        return f
+
+    def _tracked_label(self, font, segments, tracking: int) -> pygame.Surface:
+        """Letter-spaced label (pygame has no tracking). segments is
+        [(text, color), ...] so one label can mix colours (the amber READY
+        inside a faint hint line)."""
+        glyphs = []
+        for text, color in segments:
+            for ch in text:
+                glyphs.append(font.render(ch, True, color))
+        w = sum(g.get_width() for g in glyphs) + tracking * max(0, len(glyphs) - 1)
+        surf = pygame.Surface((max(1, w), font.get_linesize()), pygame.SRCALPHA)
+        x = 0
+        for g in glyphs:
+            surf.blit(g, (x, 0))
+            x += g.get_width() + tracking
+        return surf
+
     def _tutorial_fonts(self, sh: int):
         """Screen-relative tutorial fonts, rebuilt when the display height
-        changes. At 1080 these resolve to the 52/30px the card used when the
-        sizes were hard-coded; every other resolution now scales with it."""
+        changes. Serif display type per the Quilt Card design (2a); the label
+        font stays sans for the small tracked captions."""
         if getattr(self, "_tut_font_h", None) != sh:
-            self._tut_title_font = pygame.font.SysFont(
-                "arial", max(28, int(sh * 0.048)), bold=True)
-            self._tut_prompt_font = pygame.font.SysFont(
-                "arial", max(18, int(sh * 0.028)))
+            self._tut_title_font = self._serif_font(max(30, int(sh * 0.098)))
+            self._tut_prompt_font = self._serif_font(max(18, int(sh * 0.031)))
             self._tut_label_font = pygame.font.SysFont(
                 "arial", max(12, int(sh * 0.020)), bold=True)
             self._tut_font_h = sh
@@ -2255,19 +2295,36 @@ class RenderEngine:
         # arrow breathe in phase.
         pulse = 0.5 + 0.5 * math.sin(time.monotonic() * 4.0)
 
+        # Quilt-block progress row (2a): one diamond per step, the current one
+        # a filled lantern patch, the rest outlined seams.
+        step, total = card.get("step"), card.get("total")
+        if step and total:
+            side = max(7, int(sh * 0.020))
+            gap = side + max(6, int(sh * 0.012))
+            cx0 = sw // 2 - gap * (total - 1) // 2
+            cy = int(sh * 0.115)
+            for i in range(total):
+                cx = cx0 + i * gap
+                pts = [(cx, cy - side), (cx + side, cy),
+                       (cx, cy + side), (cx - side, cy)]
+                if i + 1 == step:
+                    pygame.draw.polygon(self._screen, P.LANTERN, pts)
+                else:
+                    pygame.draw.polygon(self._screen, P.LANTERN_DIM, pts, 1)
+
         title = card.get("title", "")
         if title:
             surf = title_font.render(title, True, P.NORTH_STAR)
-            self._screen.blit(surf, ((sw - surf.get_width()) // 2, int(sh * 0.14)))
+            self._screen.blit(surf, ((sw - surf.get_width()) // 2, int(sh * 0.17)))
 
         prompt = card.get("prompt", "")
         if prompt:
-            lh = prompt_font.get_linesize()
+            lh = int(prompt_font.get_linesize() * 1.35)   # airy leading (2a)
             for li, line in enumerate(self._wrap_text(prompt, prompt_font,
-                                                      int(sw * 0.7))):
-                surf = prompt_font.render(line, True, P.LINEN)
+                                                      int(sw * 0.58))):
+                surf = prompt_font.render(line, True, P.LINEN_DIM)
                 self._screen.blit(surf, ((sw - surf.get_width()) // 2,
-                                         int(sh * 0.26) + li * lh))
+                                         int(sh * 0.33) + li * lh))
 
         # Optional on-card target box (player-space rect) for the pointing steps.
         rect = card.get("target_rect")
@@ -2297,15 +2354,12 @@ class RenderEngine:
         self._draw_step_figure(card.get("figure"),
                                self._tutorial_figure_box(sw, sh))
 
+        # Skip hint, tracked small caps (the diamonds carry the step count).
         if self._small_font:
-            step = card.get("step")
-            total = card.get("total")
-            if step is not None:
-                surf = self._small_font.render(f"Step {step} of {total}", True,
-                                               P.LINEN_DIM)
-                self._screen.blit(surf, ((sw - surf.get_width()) // 2, int(sh * 0.86)))
-            hint = self._small_font.render("S: skip tutorial", True, P.LINEN_FAINT)
-            self._screen.blit(hint, ((sw - hint.get_width()) // 2, int(sh * 0.90)))
+            hint = self._tracked_label(
+                self._small_font,
+                [('S TO SKIP  ·  OR SAY "SKIP"', P.LINEN_FAINT)], 3)
+            self._screen.blit(hint, ((sw - hint.get_width()) // 2, int(sh * 0.93)))
 
     # MediaPipe Pose: upper-body skeleton for the debug panel.
     _POSE_CONNECTIONS = [
@@ -2323,11 +2377,49 @@ class RenderEngine:
         (24, 26), (26, 28),          # right leg
     ]
 
+    def _camera_setup_overlay(self, sw: int, sh: int) -> pygame.Surface:
+        """Static dressing for the Lantern Vignette camera screen (1a), baked
+        once per display size: an inset vignette pulling the frame into
+        darkness, the four lantern corner brackets, and the bottom gradient
+        band the prompt sits on."""
+        cached = getattr(self, "_cam_overlay", None)
+        if cached is not None and cached.get_size() == (sw, sh):
+            return cached
+        import numpy as np
+
+        fade = max(60, int(min(sw, sh) * 0.26))
+        yy = np.minimum(np.arange(sh), sh - 1 - np.arange(sh))
+        xx = np.minimum(np.arange(sw), sw - 1 - np.arange(sw))
+        edge = np.minimum.outer(yy, xx).astype(np.float32) / fade
+        alpha = np.clip(1.0 - edge, 0.0, 1.0) ** 1.6 * 225
+        # Bottom band: the prompt's gradient (to top, ~0.95 -> transparent).
+        band_h = max(1, int(sh * 0.24))
+        band = np.zeros(sh, np.float32)
+        band[sh - band_h:] = np.linspace(0.0, 1.0, band_h) * 242
+        alpha = np.maximum(alpha, band[:, None])
+
+        rgba = np.empty((sh, sw, 4), np.uint8)
+        rgba[..., 0], rgba[..., 1], rgba[..., 2] = P.NIGHT_DEEP
+        rgba[..., 3] = alpha.astype(np.uint8)
+        overlay = pygame.image.frombuffer(rgba.tobytes(), (sw, sh),
+                                          "RGBA").convert_alpha()
+
+        m, arm = max(16, int(sh * 0.053)), max(18, int(sh * 0.058))
+        bracket = (*P.LANTERN, 153)
+        for cx, sx in ((m, 1), (sw - m, -1)):
+            for cy, sy in ((m, 1), (sh - m, -1)):
+                pygame.draw.line(overlay, bracket, (cx, cy),
+                                 (cx + sx * arm, cy))
+                pygame.draw.line(overlay, bracket, (cx, cy),
+                                 (cx, cy + sy * arm))
+        self._cam_overlay = overlay
+        return overlay
+
     def draw_camera_setup(self, frame_bgr, pose_lm) -> bool:
-        """Camera-setup screen (config.json "camera_setup"): the live camera
-        view, mirrored like the player-facing cursors, with the detected
-        skeleton drawn on top and a prompt to adjust the camera until the whole
-        body is in frame. Confirmed by ENTER/Space or the voice command
+        """Camera-setup screen (config.json "camera_setup"), Lantern Vignette
+        design (1a): the mirrored live view sunk into a lantern-lit vignette,
+        the tracked skeleton on top, corner brackets, and a serif prompt on a
+        bottom gradient. Confirmed by ENTER/Space or the voice command
         "ready" (handled in main.py). Returns the body-in-frame verdict.
 
         Owns the whole frame: fills, draws and flips — the caller skips the
@@ -2337,7 +2429,7 @@ class RenderEngine:
         import numpy as np
 
         sw, sh = self._screen.get_size()
-        self._screen.fill((8, 10, 14))
+        self._screen.fill(P.NIGHT_DEEP)
 
         disp = None   # (x, y, w, h) of the displayed camera rect
         if frame_bgr is not None:
@@ -2345,11 +2437,10 @@ class RenderEngine:
             rgb = np.ascontiguousarray(frame_bgr[:, ::-1, ::-1])
             fh, fw = rgb.shape[:2]
             surf = pygame.image.frombuffer(rgb.tobytes(), (fw, fh), "RGB")
-            scale = min(sw / fw, (sh * 0.82) / fh)   # leave room for the prompt
+            scale = min(sw / fw, sh / fh)   # full-bleed feed; vignette frames it
             dw, dh = int(fw * scale), int(fh * scale)
-            dx, dy = (sw - dw) // 2, int(sh * 0.10)
+            dx, dy = (sw - dw) // 2, (sh - dh) // 2
             self._screen.blit(pygame.transform.scale(surf, (dw, dh)), (dx, dy))
-            pygame.draw.rect(self._screen, (70, 80, 95), (dx, dy, dw, dh), 2)
             disp = (dx, dy, dw, dh)
 
         # Body-in-frame verdict: head and both ankles confidently inside view.
@@ -2370,30 +2461,50 @@ class RenderEngine:
             def _vis(idx):
                 return (idx < len(pose_lm)
                         and getattr(pose_lm[idx], "visibility", 0.0) >= 0.5)
-            color = (60, 220, 90) if body_ok else (255, 170, 40)
+            # Lantern skeleton; success green stays the one learned "you did
+            # it" signal, so a framed body still reads green.
+            color = P.SUCCESS if body_ok else P.LANTERN
             for a, b in self._POSE_CONNECTIONS_FULL:
                 if _vis(a) and _vis(b):
-                    pygame.draw.line(self._screen, color, pts[a], pts[b], 3)
+                    pygame.draw.line(self._screen, color, pts[a], pts[b], 2)
             for idx, lm in enumerate(pose_lm):
                 if _vis(idx):
                     pygame.draw.circle(self._screen, color, pts[idx], 4)
 
-        # Prompt block
-        if self._font:
-            title = self._font.render("CAMERA SETUP", True, (200, 210, 225))
-            self._screen.blit(title, ((sw - title.get_width()) // 2, int(sh * 0.03)))
-            if pose_lm is None:
-                msg, col = "No one detected - step into the camera's view", (255, 170, 40)
-            elif not body_ok:
-                msg, col = "Adjust the camera until your WHOLE body is in the frame", (255, 170, 40)
-            else:
-                msg, col = "Body in frame - press ENTER or say \"READY\" to continue", (60, 220, 90)
-            line = self._font.render(msg, True, col)
-            self._screen.blit(line, ((sw - line.get_width()) // 2, int(sh * 0.935)))
+        # Vignette + brackets + bottom gradient over the feed and skeleton.
+        self._screen.blit(self._camera_setup_overlay(sw, sh), (0, 0))
+
+        # Header: tracked small caps flanked by hairline rules.
         if self._small_font:
-            hint = self._small_font.render(
-                "ENTER / Space or say \"ready\" to confirm", True, (120, 130, 145))
-            self._screen.blit(hint, ((sw - hint.get_width()) // 2, int(sh * 0.972)))
+            label = self._tracked_label(self._small_font,
+                                        [("CAMERA SETUP", P.LANTERN_DIM)], 5)
+            lx = (sw - label.get_width()) // 2
+            ly = int(sh * 0.055)
+            cy = ly + label.get_height() // 2
+            rule_w, gap = max(40, int(sw * 0.075)), 16
+            for x0 in (lx - gap - rule_w, lx + label.get_width() + gap):
+                seam = pygame.Surface((rule_w, 1), pygame.SRCALPHA)
+                seam.fill(P.EDGE_RGBA)
+                self._screen.blit(seam, (x0, cy))
+            self._screen.blit(label, (lx, ly))
+
+        # Prompt block on the gradient band: serif italic line + tracked hint.
+        if pose_lm is None:
+            msg = "Step into the lantern's view."
+        elif not body_ok:
+            msg = "Step back until your whole body rests in the frame."
+        else:
+            msg = "The frame holds all of you — continue when ready."
+        prompt_font = self._serif_font(max(20, int(sh * 0.052)), italic=True)
+        line = prompt_font.render(msg, True,
+                                  P.SUCCESS if body_ok else P.LINEN)
+        self._screen.blit(line, ((sw - line.get_width()) // 2, int(sh * 0.845)))
+        if self._small_font:
+            hint = self._tracked_label(
+                self._small_font,
+                [("ENTER · SPACE · OR SAY ", P.LINEN_FAINT),
+                 ('"READY"', P.LANTERN)], 3)
+            self._screen.blit(hint, ((sw - hint.get_width()) // 2, int(sh * 0.925)))
 
         pygame.display.flip()
         return body_ok
