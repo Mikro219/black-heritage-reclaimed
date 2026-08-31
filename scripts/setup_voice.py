@@ -9,7 +9,6 @@ That directory is gitignored — this script is the canonical way to get it.
 """
 
 import hashlib
-import shutil
 import sys
 import urllib.request
 import zipfile

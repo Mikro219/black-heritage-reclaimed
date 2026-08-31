@@ -4,10 +4,10 @@ scripts/voice_tuner.py — Live voice detection tuning tool for BHR.
 Click-driven UI — all controls are on-screen buttons.
 
 Usage:
-  py -3.12 scripts/voice_tuner.py [--profile NAME]
+  py -3.12 scripts/voice_tuner.py
 
-Tuning values are saved to the host profile (default: laptop_dev) under
-the "voice_tuning" key. Swap values into config.json["voice"] for production.
+Tuning values are saved to config.json's "host" section under the
+"voice_tuning" key. Swap values into config.json["voice"] for production.
 """
 
 import argparse
@@ -104,12 +104,12 @@ def _load_tune_params(params: dict, profile_path: str) -> None:
     if not os.path.exists(profile_path):
         return
     try:
-        with open(profile_path) as f:
-            profile = json.load(f)
+        with open(profile_path, encoding="utf-8") as f:
+            config = json.load(f)
     except Exception as e:
         print(f"[voice_tuner] Could not read {profile_path}: {e}", file=sys.stderr)
         return
-    saved = profile.get("voice_tuning", {})
+    saved = config.get("host", {}).get("voice_tuning", {})
     for k in params:
         if k in saved:
             params[k] = saved[k]
@@ -121,17 +121,18 @@ def _save_tune_params(params: dict, profile_path: str) -> None:
     if not profile_path:
         return
     try:
-        with open(profile_path) as f:
-            profile = json.load(f)
+        with open(profile_path, encoding="utf-8") as f:
+            config = json.load(f)
     except Exception as e:
-        print(f"[voice_tuner] Could not read profile for save: {e}", file=sys.stderr)
+        print(f"[voice_tuner] Could not read config.json for save — NOT saving: {e}",
+              file=sys.stderr)
         return
-    profile["voice_tuning"] = dict(params)
+    config.setdefault("host", {})["voice_tuning"] = dict(params)
     try:
-        with open(profile_path, "w") as f:
-            json.dump(profile, f, indent=2)
+        with open(profile_path, "w", encoding="utf-8") as f:
+            json.dump(config, f, indent=2, ensure_ascii=False)
     except Exception as e:
-        print(f"[voice_tuner] Could not save profile: {e}", file=sys.stderr)
+        print(f"[voice_tuner] Could not save config.json: {e}", file=sys.stderr)
 
 
 # ── Layout + colour constants ─────────────────────────────────────────────────
@@ -453,12 +454,9 @@ def _draw_action_buttons(frame, btns_list, mx, my, flash_key, flash_until):
 
 def main():
     parser = argparse.ArgumentParser(description="BHR voice tuner")
-    parser.add_argument("--profile", default="laptop_dev",
-                        help="Host profile (laptop_dev / mini_pc_prod)")
-    args   = parser.parse_args()
+    parser.parse_args()
 
-    profile_name = args.profile or "laptop_dev"
-    profile_path = os.path.join(ROOT, "config", "host_profiles", f"{profile_name}.json")
+    profile_path = os.path.join(ROOT, "config.json")   # tuning lives in ["host"]
 
     tune = dict(_DEFAULTS)
     _load_tune_params(tune, profile_path)
@@ -734,8 +732,7 @@ def main():
         _sep(frame, Y_HEADER_BOT)
 
         # Profile badge (top-right)
-        prof_col = (80, 200, 255) if profile_name == "mini_pc_prod" else (130, 130, 200)
-        _label(frame, f"profile: {profile_name}", W - 200, 20, prof_col, 0.40)
+        _label(frame, "tuning: config.json [host]", W - 220, 20, (130, 130, 200), 0.40)
         vosk_ok = recognizer is not None
         _label(frame, f"vosk: {'ready' if vosk_ok else 'unavailable'}",
                W - 200, 38, (80, 200, 80) if vosk_ok else C_RED, 0.40)

@@ -213,7 +213,7 @@ class TestRetryChoiceExport(unittest.TestCase):
         cls.by_name = {}
         for s in cls.shots:
             meta_path = (cls.out / export_experience.ACT_DIRNAME /
-                         f"shot_{s.shot}" / "metadata.json")
+                         f"scene_{s.shot}" / "metadata.json")
             with open(meta_path, encoding="utf-8") as f:
                 cls.by_name[json.load(f)["_generated_from"]["name"]] = s
 
@@ -461,7 +461,7 @@ class TestExperienceExport(unittest.TestCase):
         names = []
         for s in self.shots:
             meta_path = (self.out / export_experience.ACT_DIRNAME /
-                         f"shot_{s.shot}" / "metadata.json")
+                         f"scene_{s.shot}" / "metadata.json")
             with open(meta_path, encoding="utf-8") as f:
                 names.append(json.load(f)["_generated_from"]["name"])
         self.assertEqual(names, ["Intro", "Choose Direction", "Forest Path",
@@ -521,6 +521,21 @@ class TestExperienceExport(unittest.TestCase):
         self.assertEqual(export_experience.oi_dict(point, 1)["sfx"],
                          "detect.mp3")
 
+    def test_block_captions_pass_through(self):
+        """A block's authored captions flow to shot metadata; rect (screen-space
+        placement) is preserved, textless entries dropped, sorted by at_s."""
+        block = {"captions": [
+            {"id": "c2", "at_s": 5.0, "duration_s": 3, "text": "second"},
+            {"id": "c1", "at_s": 1.0, "duration_s": 2, "text": "first",
+             "rect": {"x": 0.2, "y": 0.8, "w": 0.6, "h": 0.1}},
+            {"id": "c3", "at_s": 9.0, "text": "   "},   # empty -> dropped
+        ]}
+        caps = export_experience.block_captions(block)
+        self.assertEqual([c["text"] for c in caps], ["first", "second"])
+        self.assertEqual(caps[0]["rect"]["x"], 0.2)
+        self.assertNotIn("rect", caps[1])
+        self.assertEqual(export_experience.block_captions({}), [])
+
     def test_voice_alternative_param_exports_as_payload(self):
         """params.voice_alternative on a gesture window becomes a parallel
         VI declaration in the OI payload (Scene 1 raise-hands / "freedom")
@@ -558,15 +573,14 @@ class TestExperienceExport(unittest.TestCase):
         self.assertAlmostEqual(p["indicator_rect"]["x"], 0.3, places=3)
         self.assertNotIn("region_rect", p)
 
-    def test_region_mirror_round_trips(self):
-        """Live raw region_rect -> importer (screen) -> exporter -> raw again."""
-        import scenes_to_builder
+    def test_region_screen_to_raw_mirror(self):
+        """Builder regions are SCREEN space; the exporter mirrors non-draw
+        rects to RAW camera space (x -> 1-x-w) for the detectors."""
         raw = {"x": 0.567, "y": 0.12, "w": 0.134, "h": 0.253}
-        win = scenes_to_builder.window_from_params(
-            "05", "oi", "point_quilt_block", "point_target_held",
-            {"hold_ms": 600, "region_rect": dict(raw)}, 0.0, None)
-        self.assertAlmostEqual(win["region"]["x"], 1.0 - 0.567 - 0.134,
-                               places=3)
+        screen = {"x": round(1.0 - 0.567 - 0.134, 6), "y": 0.12,
+                  "w": 0.134, "h": 0.253}
+        win = {"id": "w", "label": "Point", "detector": "point_target_held",
+               "params": {"hold_ms": 600}, "region": dict(screen)}
         back = export_experience.oi_dict(win, 1)["params"]["region_rect"]
         for k in ("x", "y", "w", "h"):
             self.assertAlmostEqual(back[k], raw[k], places=3)
@@ -726,44 +740,8 @@ class TestExperienceExport(unittest.TestCase):
             for t in candidates:
                 self.assertIn(t, REGISTRY, f"shot {s.shot}: {t!r} not a real detector")
 
-    def test_scenes_import_round_trips(self):
-        """scripts/scenes_to_builder.py converts the live scenes/ tree into a
-        .bhrx project; exporting that project back must satisfy the wiring
-        invariants and preserve the three forks (shots 09 / 37 / 50)."""
-        import scenes_to_builder
-        import sys as _sys
-        with tempfile.TemporaryDirectory() as td:
-            proj_path = Path(td) / "bhr.bhrx.json"
-            argv = _sys.argv
-            _sys.argv = ["scenes_to_builder.py", "--out", str(proj_path)]
-            try:
-                scenes_to_builder.main()
-            finally:
-                _sys.argv = argv
-
-            with open(proj_path, encoding="utf-8") as f:
-                proj = json.load(f)
-            blocks = {b["id"]: b for b in proj["blocks"]}
-            self.assertEqual(sum(1 for b in proj["blocks"] if b["type"] == "choice"), 3)
-            # every edge / branch endpoint resolves
-            for e in proj["edges"]:
-                self.assertIn(e["from"], blocks)
-                self.assertIn(e["to"], blocks)
-            for b in proj["blocks"]:
-                for br in b.get("branches") or []:
-                    self.assertIn(br["to"], blocks)
-
-            out = Path(td) / "scenes_generated"
-            export_experience.warnings.clear()
-            export_experience.export(proj_path, out, do_frames=False,
-                                     video_override=None, sound_override=None)
-            shots = load_sequence(out, {"fps": 30})
-            by_id = {s.shot: s for s in shots}
-            forks = {s.play_if["shot"] for s in shots if s.play_if}
-            self.assertEqual(len(forks), 3, "three forks must survive round-trip")
-            for s in shots:
-                if s.play_if:
-                    self.assertIsNotNone(by_id[s.play_if["shot"]].interaction)
+    # (test_scenes_import_round_trips retired Aug 2026 with scenes_to_builder.py
+    #  and the live scenes/ tree — the .bhrx is the single source of truth.)
 
     # ── layered stem audio (audio_events) ──────────────────────────────────
 
@@ -898,6 +876,94 @@ class TestExperienceExport(unittest.TestCase):
         missing = set(REGISTRY) - offered
         self.assertFalse(missing,
                          f"detectors.js is missing runtime detectors: {sorted(missing)}")
+
+
+class TestChoicePickAudio(unittest.TestCase):
+    """A choice block's authored pick/switch sound (Builder inspector ->
+    Pick / switch audio) exports as on_enter_audio with delay / source offset
+    / duration, applied at runtime."""
+
+    SOUNDS = {"s3": {"id": "s3", "name": "crinkle.mp3"}}
+
+    def _choice(self, **audio):
+        block = _retry_project()["blocks"][1]
+        if audio:
+            block["choice_audio"] = audio
+        return block
+
+    def test_spec_defaults_are_omitted(self):
+        spec = export_experience.choice_audio_spec(
+            self._choice(sound="s3"), self.SOUNDS)
+        self.assertEqual(spec, {"file": "crinkle.mp3"})   # no noisy zero keys
+
+    def test_spec_carries_timing(self):
+        spec = export_experience.choice_audio_spec(
+            self._choice(sound="s3", delay_s=0.5, source_offset_s=2.25,
+                         duration_s=3.0, gain=0.8), self.SOUNDS)
+        self.assertEqual(spec, {"file": "crinkle.mp3", "delay_s": 0.5,
+                                "source_offset_s": 2.25, "duration_s": 3.0,
+                                "gain": 0.8})
+
+    def test_unknown_sound_is_ignored(self):
+        self.assertIsNone(export_experience.choice_audio_spec(
+            self._choice(sound="nope"), self.SOUNDS))
+        self.assertIsNone(export_experience.choice_audio_spec(
+            self._choice(), self.SOUNDS))
+
+    def test_states_take_the_clip_but_the_retry_buzzer_survives(self):
+        block = self._choice(sound="s3", delay_s=0.4)
+        meta = export_experience.choice_metadata(block, "02", 330, 30, self.SOUNDS)
+        states = meta["interaction"]["interaction_fsm"]["states"]
+        # the correct-side confirm is a detection -> it takes the clip
+        confirm = states["confirm_right"]
+        self.assertEqual(confirm["on_enter_audio"],
+                         {"file": "crinkle.mp3", "delay_s": 0.4})
+        self.assertNotIn("on_enter_sfx", confirm)
+        # waiting is idle, never a detection
+        self.assertNotIn("on_enter_audio", states["waiting"])
+        # a wrong-way redirect says "not that way", not "picked" — it keeps its
+        # own audio (here the animated redirect's folded clips) and never takes
+        # the pick sound
+        self.assertNotIn("on_enter_audio", states["wrong_path"])
+
+    def test_sound_only_retry_keeps_its_buzzer(self):
+        block = self._choice(sound="s3")
+        del block["hold_segments"]          # sound-only wrong-way bounce
+        meta = export_experience.choice_metadata(block, "02", 330, 30, self.SOUNDS)
+        wrong = meta["interaction"]["interaction_fsm"]["states"]["wrong_path"]
+        self.assertEqual(wrong["on_enter_sfx"], export_experience.RETRY_WRONG_SFX)
+        self.assertNotIn("on_enter_audio", wrong)
+
+    def test_hold_model_switch_states_replace_the_default_click(self):
+        """In the voice-confirmed hold model the pick AND switch states carry
+        CHOICE_HOLD_SFX by default; the authored clip replaces it so the beat
+        doesn't double up."""
+        block = _confirm_choice_block(None)
+        block["choice_audio"] = {"sound": "s3", "duration_s": 1.5}
+        meta = export_experience.choice_metadata(block, "02", 900, 30, self.SOUNDS)
+        states = meta["interaction"]["interaction_fsm"]["states"]
+        for sid in ("left_selected", "right_selected"):
+            self.assertNotIn("on_enter_sfx", states[sid])
+            self.assertEqual(states[sid]["on_enter_audio"],
+                             {"file": "crinkle.mp3", "duration_s": 1.5})
+        self.assertFalse(any(s.get("on_enter_sfx") == export_experience.CHOICE_HOLD_SFX
+                             for s in states.values()))
+
+    def test_clip_file_is_collected_for_shipping(self):
+        """on_enter_audio files must be copied into the shot's audio/ dir like
+        any other FSM sound, or the runtime can't resolve them."""
+        meta = export_experience.choice_metadata(
+            self._choice(sound="s3"), "02", 330, 30, self.SOUNDS)
+        self.assertIn("crinkle.mp3", export_experience.collect_sfx_names(meta))
+
+    def test_no_audio_authored_keeps_todays_behaviour(self):
+        block = self._choice()
+        del block["hold_segments"]
+        meta = export_experience.choice_metadata(block, "02", 330, 30, {})
+        states = meta["interaction"]["interaction_fsm"]["states"]
+        self.assertFalse(any("on_enter_audio" in s for s in states.values()))
+        self.assertEqual(states["wrong_path"]["on_enter_sfx"],
+                         export_experience.RETRY_WRONG_SFX)
 
 
 if __name__ == "__main__":

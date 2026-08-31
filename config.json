@@ -5,13 +5,125 @@
   ],
   "camera_index": 0,
   "use_orbbec_camera": true,
+
+  "//host": [
+    "Hardware binding + on-site tuning (formerly config/host_profiles/*.json;",
+    "merged Aug 2026 — the laptop_dev profile content, the other profiles were",
+    "scrapped). The tuners read/write the gesture_tuning and voice_tuning",
+    "sections here. For the exhibition machine set display.fullscreen true,",
+    "display.resolution 1920x1080, performance.mediapipe_complexity 1,",
+    "performance.debug_overlay false."
+  ],
+  "host": {
+    "camera": {
+      "backend": "dshow",
+      "device_name_match": null,
+      "resolution": [1280, 720],
+      "fps": 30,
+      "fallback_index": 0
+    },
+    "microphone": {
+      "device_name_match": null,
+      "sample_rate": 16000,
+      "channels": 1,
+      "fallback_index": 0
+    },
+    "display": {
+      "fullscreen": false,
+      "resolution": [1280, 720]
+    },
+    "performance": {
+      "mediapipe_complexity": 0,
+      "render_fps_cap": 30,
+      "debug_overlay": true
+    },
+    "voice_tuning": {
+      "hum_rms_threshold": 0.008,
+      "hum_min_duration_ms": 400,
+      "whisper_max_volume_dbfs": -20.0
+    },
+    "gesture_tuning": {
+      "reach_flask": {"area_growth_threshold": 0.3, "window_frames": 12, "target_region": "upper_center"},
+      "point_quilt_block": {"target_region": "top_left_quadrant", "hold_ms": 800},
+      "point_path — LEFT": {"directions": ["left"], "hold_ms": 500, "dead_zone_frac": 0.99},
+      "point_path — RIGHT": {"directions": ["right"], "hold_ms": 500, "dead_zone_frac": 1.05},
+      "point_river_marker": {"target_region": "lower_third", "hold_ms": 500},
+      "point_dipper_corner": {"target_region": "top_right_quadrant", "hold_ms": 500},
+      "raise_hands": {"y_threshold": "shoulder", "hold_ms": 500},
+      "look_up (bilateral raise)": {"y_threshold": "head", "hold_ms": 300},
+      "cup_ear_listen": {"direction": "ear", "hold_ms": 500, "ear_radius": 0.22},
+      "survey": {"brow_y": 0.45, "hold_ms": 200, "scan_window_ms": 2000, "min_x_delta": 0.01},
+      "trace_dipper — stroke 1: LEFT": {"direction": "left", "window_ms": 400, "min_displacement": 0.04},
+      "trace_dipper — stroke 2: DOWN": {"direction": "down", "window_ms": 400, "min_displacement": 0.04},
+      "trace_dipper — stroke 3: RIGHT": {"direction": "right", "window_ms": 400, "min_displacement": 0.04},
+      "trace_dipper — stroke 4: UP": {"direction": "up", "window_ms": 400, "min_displacement": 0.04},
+      "trace_dipper — strokes 5-7: UP-LEFT": {"direction": "up_left", "window_ms": 400, "min_displacement": 0.04},
+      "trace_star — stroke 1: UP-RIGHT": {"direction": "up_right", "window_ms": 400, "min_displacement": 0.04},
+      "drink_gesture": {"hold_ms": 400, "proximity_threshold": 0.12},
+      "three_knock": {"short_window_ms": 500, "long_min_ms": 400, "long_max_ms": 1400, "threshold_fraction": 0.3, "refractory_ms": 220, "wrist_y_offset": -0.05},
+      "fast_gather": {"speed_multiplier": 2.0, "use_pose": true},
+      "touch_temple": {"hands_required": 1, "hold_ms": 500, "target": "temple", "use_pose": true, "radius_scale": 1.0},
+      "hands_to_head": {"hands_required": 2, "hold_ms": 500, "radius_scale": 4.0},
+      "arms_crossed": {"hold_ms": 500, "dead_zone_frac": 0.05},
+      "forward_push": {"min_growth_pct": 50, "window_ms": 250},
+      "launch_push": {"min_growth_pct": 100, "window_ms": 400},
+      "run_arms": {"min_cycles": 3, "window_ms": 2000, "waist_y_offset": -0.09},
+      "unravel": {"min_cycles": 2, "window_ms": 3000, "min_amplitude_frac": 0.9, "prox_frac": 1.75},
+      "paddle": {"min_strokes": 3, "sync_window_ms": 400, "waist_y_offset": -0.18},
+      "throw": {"max_stroke_ms": 600, "shoulder_margin": 0.03, "release_y_offset": 0.0, "require_growth": false, "min_growth_pct": 40, "min_pose_z_delta": 0.2}
+    }
+  },
   "tutorial_enabled": true,
+  "captions_enabled": true,
   "depth": {
     "player_min_mm": 500,
     "player_max_mm": 3200,
     "phantom_behind_mm": 400
   },
-  "projector_audio_offset_ms": 40,
+
+  "//master_audio_offset_ms": [
+    "Lip-sync trim for BAKED MASTER AUDIO only (a shot's whole-file audio.mp3).",
+    "Shots that carry layered audio_events are frame-anchored and never drift,",
+    "so they are deliberately NOT affected by this.",
+    "POSITIVE = hold the audio back (use when the audio runs AHEAD of the lips).",
+    "NEGATIVE = start the file that far in, so the audio runs earlier.",
+    "Applied live at shot start — edit and relaunch, no re-export needed.",
+    "by_shot overrides the global for that shot id; null/absent = use global.",
+    "19 shots = 20 blocks in BHR_Experience.bhrx.json minus the one retry",
+    "branch (br_37_left), which folds into its choice shot and emits no shot.",
+    "Only the 5 marked BAKED below carry an audio.mp3; the other 14 are",
+    "audio_events shots and this trim cannot affect them."
+  ],
+  "master_audio_offset_ms": 50,
+  "master_audio_offset_ms_by_shot": {
+    "01": null,
+    "02": null, "03": null, "04": null,
+    "05": null,
+    "06": null, "07": null,
+    "08": null,
+    "09": null, "10": null,
+    "11": null,
+    "12": null, "13": null, "14": null, "15": null,
+    "16": null, "17": null, "18": null,
+    "19": null
+  },
+  "//master_audio_baked_shots": {
+    "01": "b_stretch_1  01-08 Prologue -> Crossroads",
+    "05": "b_stretch_2  10-18 Flying Geese -> North Star",
+    "08": "b_stretch_3  21-36 North Star -> Bear Paw",
+    "11": "b_stretch_4  38-49 Bear Paw -> Wagon Wheel",
+    "19": "b_stretch_5  60-79 Tumbling Blocks -> Epilogue"
+  },
+
+  "//warm_pose_hz": [
+    "Pose inference rate while input is LOCKED. 0 = skip entirely (default).",
+    "Warming at a trickle was tried against the window-open frame hitch and",
+    "made it WORSE on the exhibition build: at a low rate MediaPipe's tracking",
+    "ROI is always stale, so every warm frame re-runs the heavy detector.",
+    "Do not raise this without measuring."
+  ],
+  "warm_pose_hz": 0.0,
+
   "debug_overlay": false,
   "start_scene": "scene_01",
   "keyboard_fallback_enabled": true,
@@ -53,7 +165,8 @@
       "freedom",
       "go",
       "north",
-      "follow the gourd",
+      "gourd",
+      "follow",
       "shoofly",
       "yes",
       "water",

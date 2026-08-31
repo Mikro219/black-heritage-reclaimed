@@ -23,8 +23,7 @@ This produces **`dist/BHR/`** — a self-contained, relocatable folder:
 dist/BHR/
   BHR.exe          the app (console build: logs stay visible / capturable)
   _internal/       bundled Python + MediaPipe + Vosk + pygame + OpenCV
-  config.json
-  config/          host profiles
+  config.json      includes the "host" hardware section (camera/mic/display)
   scenes/          sequence.json + shot metadata + shot audio (frames NOT included by default)
   models/          vosk model (staged automatically if present locally)
 ```
@@ -33,7 +32,7 @@ Useful flags:
 
 | Flag | Effect |
 |---|---|
-| `--scenes-root PATH` | Stage a different tree as the packaged `scenes/` (e.g. `export/scenes_generated` — the Builder-exported experience) |
+| `--scenes-root PATH` | Stage a different tree as the packaged `scenes/` (e.g. `export/generated` — the Builder-exported experience) |
 | `--with-frames` | Also stage every shot's `frames/` folder (multi-GB — single-folder deploys) |
 | `--link-frames` | Hardlink staged scene files instead of copying — zero extra disk on the same NTFS volume; they become real files when the folder is copied to another drive |
 | `--with-assets` | Also stage `assets/` (storyboard pages, reference video). `assets/hand_icons/` is always staged regardless — the runtime cursors live there |
@@ -44,7 +43,7 @@ Useful flags:
 The Builder-exported single-folder build used for playtests:
 
 ```powershell
-py -3.12 scripts/build_exe.py --scenes-root export/scenes_generated --with-frames --link-frames
+py -3.12 scripts/build_exe.py --scenes-root export/generated --with-frames --link-frames
 ```
 
 Disk note: at runtime the frame cache writes `framecache.npy` packs NEXT TO each
@@ -76,14 +75,14 @@ Design choices baked in (don't change casually):
 4. Plug in the Brio webcam + PowerConf mic, then smoke test:
    ```powershell
    C:\BHR\BHR.exe --dry-run        # no camera/audio needed; walks all shots
-   C:\BHR\BHR.exe --profile mini_pc_prod
+   C:\BHR\BHR.exe                  # hardware binding comes from config.json "host"
    ```
 5. First real launch: app starts **paused** — press **Space** to begin.
    Keys: Space/P pause·play · F11/F fullscreen · D debug overlay · S skip
    prologue · Up/Down volume (while paused) · → advance shot · Esc quit.
 6. For unattended exhibition boot, follow the CLAUDE.md *Windows-Specific
-   Considerations* section (auto-login, Startup-folder wrapper with
-   `BHR_HOST_PROFILE=mini_pc_prod`, Defender exclusion for `C:\BHR`, High
+   Considerations* section (auto-login, Startup-folder wrapper,
+   Defender exclusion for `C:\BHR`, High
    Performance power plan, USB selective suspend off).
 
 Defender note: unsigned PyInstaller exes sometimes trigger SmartScreen
@@ -130,7 +129,7 @@ attach the zip → Publish**.
   Git LFS is *not* recommended here — LFS bandwidth quotas make multi-GB frame
   pulls painful for collaborators.
 - Release notes: mention which script/spec revision the shot wiring matches and
-  any host-profile changes the mini PC needs.
+  any config.json "host" changes the mini PC needs.
 
 ### Suggested release checklist
 

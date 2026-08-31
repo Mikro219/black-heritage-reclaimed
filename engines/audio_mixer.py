@@ -51,6 +51,7 @@ clip to its own file, so every event's ``path`` is played whole.
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from collections import OrderedDict
 from typing import Callable, Optional
@@ -111,8 +112,21 @@ class ShotAudioMixer:
         # owns channel 0 (None otherwise — narration/audio.mp3 territory).
         self._vo: Optional[dict] = None
 
-        # path(str) -> Sound, LRU-capped (decoded beds are RAM-heavy)
+        # path(str) -> Sound, LRU-capped (decoded beds are RAM-heavy).
+        # Guarded by _sounds_lock: the preload worker inserts from its own
+        # thread while _load_sound reads on the main thread.
         self._sounds: OrderedDict[str, pygame.mixer.Sound] = OrderedDict()
+        self._sounds_lock = threading.Lock()
+
+        # Background pre-decode: pygame.mixer.Sound() decodes the WHOLE file
+        # synchronously (a minutes-long bed render measured 311ms), so first
+        # play of a shot's beds used to stall the main loop at shot entry.
+        # prefetch_shot / shot_load queue the upcoming shot's files here and a
+        # throwaway daemon thread decodes them into the cache ahead of the
+        # anchor crossing.
+        self._preload_q: list[str] = []
+        self._preload_cv = threading.Condition()
+        self._preload_thread: Optional[threading.Thread] = None
 
         if pygame.mixer.get_init():
             pygame.mixer.set_num_channels(max(NUM_CHANNELS,
@@ -122,6 +136,7 @@ class ShotAudioMixer:
         event_bus.subscribe("shot_frames_ready", self._on_shot_frames_ready)
         event_bus.subscribe("master_volume",     self._on_master_volume)
         event_bus.subscribe("play_segment",      self._on_play_segment)
+        event_bus.subscribe("prefetch_shot",     self._on_prefetch_shot)
 
     # ------------------------------------------------------------------
     # Public
@@ -194,6 +209,20 @@ class ShotAudioMixer:
         events = list(getattr(shot, "audio_events", None) or [])
         fps    = int(getattr(shot, "fps", 24) or 24)
         self._pending = (events, fps)
+        # Fallback pre-decode for entries that never saw a prefetch_shot
+        # (start-at-shot, seeks): anchors later in the shot still decode in
+        # time; only an at_s≈0 event can beat the worker and fall back to a
+        # (now instrumented) synchronous decode.
+        self._queue_preload(events)
+
+    def _on_prefetch_shot(self, data: dict) -> None:
+        """The player announced the next shot: decode its audio files now,
+        while the current shot is still playing, so first-play never decodes
+        on the main thread."""
+        shot = data.get("shot")
+        if shot is None:
+            return
+        self._queue_preload(list(getattr(shot, "audio_events", None) or []))
 
     def _on_shot_frames_ready(self, data: dict) -> None:
         """The new shot starts playing now: hand over / fade beds, arm events."""
@@ -315,10 +344,12 @@ class ShotAudioMixer:
                             ev.get("file"))
             return None
         key = str(path)
-        sound = self._sounds.get(key)
-        if sound is not None:
-            self._sounds.move_to_end(key)
-            return sound
+        with self._sounds_lock:
+            sound = self._sounds.get(key)
+            if sound is not None:
+                self._sounds.move_to_end(key)
+                return sound
+        t0 = time.perf_counter()
         try:
             sound = pygame.mixer.Sound(key)
         except Exception as exc:
@@ -326,10 +357,57 @@ class ShotAudioMixer:
                 self._warned.add(ev.get("file"))
                 log.warning("ShotAudioMixer: could not load %s: %s", key, exc)
             return None
-        self._sounds[key] = sound
-        while len(self._sounds) > _SOUND_CACHE_MAX:
-            self._sounds.popitem(last=False)
+        ms = (time.perf_counter() - t0) * 1000.0
+        if ms >= 60.0:
+            print(f"[perf] mixer decode {ev.get('file')} blocked the main "
+                  f"thread for {ms:.0f}ms (preload missed)", flush=True)
+        self._cache_sound(key, sound)
         return sound
+
+    def _cache_sound(self, key: str, sound) -> None:
+        with self._sounds_lock:
+            self._sounds[key] = sound
+            while len(self._sounds) > _SOUND_CACHE_MAX:
+                self._sounds.popitem(last=False)
+
+    def _queue_preload(self, events: list) -> None:
+        """Queue every not-yet-decoded event file for the background worker."""
+        keys = []
+        with self._sounds_lock:
+            for ev in events:
+                p = ev.get("path")
+                if p is None:
+                    continue
+                k = str(p)
+                if k not in self._sounds and k not in keys:
+                    keys.append(k)
+        if not keys:
+            return
+        with self._preload_cv:
+            for k in keys:
+                if k not in self._preload_q:
+                    self._preload_q.append(k)
+            if self._preload_thread is None or not self._preload_thread.is_alive():
+                self._preload_thread = threading.Thread(
+                    target=self._preload_worker, daemon=True,
+                    name="MixerPreload")
+                self._preload_thread.start()
+
+    def _preload_worker(self) -> None:
+        """Drains the preload queue, then exits (respawned per batch)."""
+        while True:
+            with self._preload_cv:
+                if not self._preload_q:
+                    return
+                key = self._preload_q.pop(0)
+            with self._sounds_lock:
+                if key in self._sounds:
+                    continue
+            try:
+                sound = pygame.mixer.Sound(key)
+            except Exception:
+                continue   # _load_sound warns if the file is ever needed
+            self._cache_sound(key, sound)
 
     def _start_event(self, ev: dict) -> None:
         sound = self._load_sound(ev)

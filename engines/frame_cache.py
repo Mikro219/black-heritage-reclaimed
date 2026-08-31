@@ -23,6 +23,7 @@ never holds more than one frame in RAM.
 from __future__ import annotations
 
 import threading
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -147,16 +148,41 @@ class FrameCacheManager:
         return self._order[lo:hi]
 
     def _evict_outside_window(self) -> None:
+        """Drop packs behind/far ahead of the priority shot.
+
+        The dict pop happens here (cheap, under the lock, so no reader can
+        obtain an evicted mmap), but the actual mmap CLOSE runs on a throwaway
+        background thread: unmapping a multi-GB pack makes the OS tear down
+        every resident page mapping, which measured ~1ms/frame-in-residence —
+        944ms for the shot-01 pack — and used to land as a picture freeze at
+        every shot transition (prioritize() runs on the main thread). Only the
+        main thread reads packs, and only the priority shot's (always in the
+        window), so nothing can touch an mmap once it leaves ``_packs``.
+        Eviction never deletes the .npy file — it is re-mmapped next visit.
+        """
         keep = set(self._window())
+        stale: list[tuple[Path, np.memmap]] = []
         with self._lock:
             for d in list(self._packs):
                 if d not in keep:
-                    mm = self._packs.pop(d)
-                    try:
-                        mm._mmap.close()
-                    except Exception:
-                        pass
-                    print(f"[FrameCache] evicted pack {d.parent.name}")
+                    stale.append((d, self._packs.pop(d)))
+        if not stale:
+            return
+
+        def _close(items=stale):
+            for d, mm in items:
+                t0 = time.perf_counter()
+                try:
+                    mm._mmap.close()
+                except Exception:
+                    pass
+                print(f"[FrameCache] evicted pack {d.parent.name} "
+                      f"(unmapped off-thread in "
+                      f"{(time.perf_counter() - t0) * 1000:.0f}ms; "
+                      f"file kept on disk)")
+
+        threading.Thread(target=_close, daemon=True,
+                         name="FrameCacheEvict").start()
 
     # ------------------------------------------------------------------
     # Worker thread — builds/mmaps packs for the window

@@ -480,5 +480,57 @@ class TestSegmentReentryReplaysOneShots(unittest.TestCase):
                          total, "forward transition must not re-fire anchors")
 
 
+class TestPreload(unittest.TestCase):
+    """Background pre-decode (August 2026): pygame.mixer.Sound() decodes the
+    whole file synchronously (a bed render measured 311ms), so first-play must
+    never construct a Sound on the main thread — prefetch_shot / shot_load
+    queue the files for a worker thread instead."""
+
+    def _join_preload(self, mixer):
+        t = mixer._preload_thread
+        if t is not None:
+            t.join(timeout=2.0)
+            self.assertFalse(t.is_alive(), "preload worker did not finish")
+
+    def test_prefetch_shot_predecodes_in_background(self):
+        mixer, fake, bus, frame = make_mixer(None)
+        events = [ev("bed.mp3", path="p_bed"),
+                  ev("line.mp3", role="vo", path="p_vo"),
+                  ev("ghost.mp3", role="sfx", path=None)]   # unresolved: skipped
+        bus.emit("prefetch_shot",
+                 {"shot": SimpleNamespace(audio_events=events, fps=30)})
+        self._join_preload(mixer)
+        self.assertIn("p_bed", mixer._sounds)
+        self.assertIn("p_vo", mixer._sounds)
+        self.assertEqual(len(mixer._sounds), 2)
+
+    def test_shot_load_queues_preload_as_fallback(self):
+        # make_mixer emits shot_load itself; the event's path must get decoded
+        # even when no prefetch_shot ever fired (start-at-shot / seeks).
+        mixer, fake, bus, frame = make_mixer([ev("bed.mp3", path="p_bed")])
+        self._join_preload(mixer)
+        self.assertIn("p_bed", mixer._sounds)
+
+    def test_preloaded_sound_served_without_main_thread_decode(self):
+        mixer, fake, bus, frame = make_mixer(None)
+        bus.emit("prefetch_shot", {"shot": SimpleNamespace(
+            audio_events=[ev("bed.mp3", path="p_bed")], fps=30)})
+        self._join_preload(mixer)
+
+        def boom(path):   # any main-thread decode after preload is a failure
+            raise AssertionError(f"main-thread Sound decode of {path}")
+        fake.Sound = boom
+        sound = mixer._load_sound(ev("bed.mp3", path="p_bed"))
+        self.assertIsInstance(sound, FakeSound)
+
+    def test_preload_never_replaces_cached_sound(self):
+        mixer, fake, bus, frame = make_mixer(None)
+        first = mixer._load_sound(ev("bed.mp3", path="p_bed"))
+        bus.emit("prefetch_shot", {"shot": SimpleNamespace(
+            audio_events=[ev("bed.mp3", path="p_bed")], fps=30)})
+        self._join_preload(mixer)
+        self.assertIs(mixer._sounds["p_bed"], first)
+
+
 if __name__ == "__main__":
     unittest.main()

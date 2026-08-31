@@ -21,12 +21,18 @@ ROOT = Path(__file__).resolve().parent.parent
 SRC = ROOT / "assets" / "source" / "Hand Assets"
 DST = ROOT / "assets" / "hand_icons"
 
-# Source sheet number -> output icon name
+# Source sheet number -> output icon name.
+# Convention (mirrored display): a "<shape>_l" icon must LOOK like the mirror
+# image of the visitor's left hand — thumb toward the body midline, i.e. on
+# the RIGHT side of the image (and vice versa for _r). The delivered OPEN
+# sheets 3/4 are chirality-swapped relative to their labels (audit Aug 2026:
+# sheet 3's thumb sits on the image LEFT = a right hand), so they map crossed
+# here on purpose. Fist/point/knock sheets are labelled correctly.
 MAPPING = {
     "1": "fist_l",
     "2": "fist_r",
-    "3": "open_l",
-    "4": "open_r",
+    "3": "open_r",
+    "4": "open_l",
     "5": "point_l",
     "6": "point_r",
     "7": "knock_l",

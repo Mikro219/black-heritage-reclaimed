@@ -61,11 +61,12 @@ install). Everything runs locally; the MP4 never leaves your machine.
    py -3.12 scripts/export_experience.py "My_Experience.bhrx.json"
    ```
 
-   Output goes to `export/scenes_generated/` — per-shot `metadata.json`,
-   `sequence.json`, extracted frames (needs ffmpeg: `winget install ffmpeg`),
-   and `detect.mp3` copied into each shot that references it. The live
-   `scenes/` tree is never touched; swap it in manually when ready.
-   `--no-frames` skips extraction for a quick metadata-only look.
+   Output goes to `export/generated/` (`scenes/scene_NN/` dirs) — per-scene
+   `metadata.json`, `sequence.json`, extracted frames (needs ffmpeg:
+   `winget install ffmpeg`), and `detect.mp3` copied into each scene that
+   references it. The runtime runs it directly (`py -3.12 main.py` — it is
+   the default scenes root). `--no-frames` skips extraction for a quick
+   metadata-only look.
 
 ## How blocks map to the runtime
 
@@ -92,25 +93,17 @@ one `play_if` per shot, one voice keyword per choice hold, and the runtime
 records fork choices from gesture picks only (a voice pick leaves branch-gated
 shots on the first-branch default — the export warns when this applies).
 
-## Importing the existing experience
+## Merging CapCut audio
 
-The current live experience (everything wired in `scenes/sequence.json`) can be
-converted into an editable project:
-
-```
-py -3.12 scripts/scenes_to_builder.py        # writes BHR_Experience.bhrx.json
-```
-
-The CapCut master-timeline audio (music/ambience/SFX placements from
-`assets/audio/draft_content.json`, plus Auntie Liza's VO slices) can be
-merged into that project as lane clips:
+`BHR_Experience.bhrx.json` is the single source of truth (the old
+`scenes_to_builder.py` reverse importer was retired Aug 2026 along with the
+hand-authored `scenes/` tree). The CapCut master-timeline audio
+(music/ambience/SFX placements from `assets/audio/draft_content.json`, plus
+Auntie Liza's VO slices) can be merged into the project as lane clips:
 
 ```
 py -3.12 scripts/capcut_audio.py assets/audio/draft_content.json --to-builder BHR_Experience.bhrx.json
 ```
-
-(The same script's `--apply-scenes` writes the events straight into the live
-`scenes/` tree for the runtime — see the top-level CLAUDE.md.)
 
 The project then **loads automatically** when you open `index.html`: the
 importer regenerates `js/project_data.js` (a script-tag bundle of the

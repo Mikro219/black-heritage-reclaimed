@@ -1,9 +1,10 @@
-"""Meta-flow contract (July 2026): voice "skip" plumbing for tutorial /
-prologue / epilogue, the end-of-experience loop restart, and the camera-setup
-screen's confirm path.
+"""Meta-flow contract (July 2026): the MetaVoice window plumbing, the
+VoiceEngine window-open lifecycle, and the player's seek contract
+(start-at-frame / skip-prologue), all over synthetic shots — hardware-free.
 
-Player tests run the real ShotSequencePlayer over the real scenes/ tree with a
-mock bus — entering shots only emits events, so this is hardware-free.
+The tests that ran the player over the hand-authored scenes/ tree were
+retired with that tree (Aug 2026 — the .bhrx export is the single source
+of truth).
 """
 
 import os
@@ -14,108 +15,10 @@ from types import SimpleNamespace
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 
-from engines.sequence_loader import load_sequence
-from engines.shot_sequence_player import (ShotSequencePlayer, PLAYER_RUNNING,
-                                          PLAYER_FINAL)
+from engines.shot_sequence_player import ShotSequencePlayer
 from tests.mocks import Bus
 
 ROOT = Path(__file__).resolve().parent.parent
-
-
-def make_player():
-    shots = load_sequence(ROOT / "scenes", {"fps": 30})
-    return ShotSequencePlayer(shots, {"timing_defaults": {}}, Bus()), shots
-
-
-class TestSkipEpilogue(unittest.TestCase):
-    def test_no_op_outside_epilogue(self):
-        player, shots = make_player()
-        player.start(0)
-        self.assertEqual(player.current_shot.act, "00")
-        self.assertFalse(player.skip_epilogue())
-        self.assertEqual(player.player_state, PLAYER_RUNNING)
-
-    def test_skips_to_final_from_epilogue_act(self):
-        player, shots = make_player()
-        target = next(i for i, s in enumerate(shots)
-                      if s.act in ShotSequencePlayer.EPILOGUE_ACTS)
-        player.start(target)
-        self.assertTrue(player.skip_epilogue())
-        self.assertEqual(player.player_state, PLAYER_FINAL)
-
-    def test_skip_prologue_then_epilogue_guard(self):
-        player, shots = make_player()
-        player.start(0)
-        self.assertTrue(player.skip_prologue())
-        self.assertNotEqual(player.current_shot.act, "00")
-        # mid-story: neither skip may fire
-        self.assertFalse(player.skip_prologue())
-        self.assertFalse(player.skip_epilogue())
-
-
-class TestLoopRestart(unittest.TestCase):
-    def test_start_resets_final_state_and_fork_choices(self):
-        player, shots = make_player()
-        target = next(i for i, s in enumerate(shots)
-                      if s.act in ShotSequencePlayer.EPILOGUE_ACTS)
-        player.start(target)
-        player._fork_choices["09"] = "left"
-        player.skip_epilogue()
-        self.assertEqual(player.player_state, PLAYER_FINAL)
-
-        player.start(0)   # the end-of-experience loop restart
-        self.assertEqual(player.player_state, PLAYER_RUNNING)
-        self.assertEqual(player.current_shot.shot, shots[0].shot)
-        self.assertEqual(player._fork_choices, {},
-                         "restart must not inherit the previous visitor's forks")
-
-
-class TestCrossroadsSwitch(unittest.TestCase):
-    """Shot 09 fork: switching a picked path plays the switch animation ONCE
-    and then holds silently on its end frame — it must NOT re-enter the
-    *_selected state (which would replay pick.mp3 + the full pick animation:
-    the 'two audios and two animations' bug)."""
-
-    def _fsm(self):
-        import json
-        from engines.shot_sequence_player import ShotFSM
-        meta_path = (ROOT / "scenes" / "act_02_crossroads" / "shot_09" /
-                     "metadata.json")
-        with open(meta_path, encoding="utf-8-sig") as f:
-            meta = json.load(f)
-        return ShotFSM(meta["interaction"]["interaction_fsm"], meta["segments"])
-
-    def test_switch_lands_in_silent_hold_not_reselect(self):
-        fsm = self._fsm()
-        self.assertEqual(fsm.fire("point_left"), "left_selected")
-        self.assertEqual(fsm.on_enter_sfx(), "pick.mp3")      # first pick: audible
-        self.assertEqual(fsm.fire("point_right"), "left_to_right")
-        self.assertEqual(fsm.on_enter_sfx(), "switch.mp3")    # switch: audible
-        hold = fsm.fire("segment_end")
-        self.assertNotIn("selected", hold, "switch must not replay a pick state")
-        self.assertIsNone(fsm.on_enter_sfx(), "hold state is silent")
-        self.assertTrue(fsm.is_loop(), "hold freezes (1-frame loop)")
-        a, b = fsm.segment_range()
-        self.assertEqual(a, b, "hold is a single frame")
-        # the hold frame is the switch animation's end frame — no visual jump
-        self.assertEqual(a, meta_seg_end(fsm, "left_to_right"))
-
-    def test_hold_still_confirms_and_switches_back(self):
-        fsm = self._fsm()
-        fsm.fire("point_left"); fsm.fire("point_right"); fsm.fire("segment_end")
-        self.assertEqual(fsm.voice_keyword(), "go")
-        self.assertEqual(fsm.fire("voice_go"), "confirm_right")
-
-        fsm = self._fsm()
-        fsm.fire("point_left"); fsm.fire("point_right"); fsm.fire("segment_end")
-        self.assertEqual(fsm.fire("point_left"), "right_to_left")
-        self.assertEqual(fsm.fire("segment_end"), "left_switch_hold")
-        self.assertEqual(fsm.fire("voice_go"), "confirm_left")
-        self.assertEqual(fsm.fire("segment_end"), "__advance__")
-
-
-def meta_seg_end(fsm, segment_name):
-    return int(fsm._segments[segment_name][1])
 
 
 class FakeVoice:
@@ -237,7 +140,8 @@ class TestStartSeek(unittest.TestCase):
                               "on_timeout": "auto_advance"},
                     play_if=None, fps=30, timing_profile="standard",
                     frames_dir=Path("frames"), audio_dir=None, audio_file=None,
-                    audio_events=[], assets_pending=False, segments_todo=False,
+                    audio_events=[], captions=[], assets_pending=False,
+                    segments_todo=False,
                     interaction_todo=False, reuse_self=False)
         base.update(over)
         return Shot(**base)

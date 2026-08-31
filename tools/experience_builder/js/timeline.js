@@ -26,14 +26,88 @@
   });
   EB.tlVideo = video;
 
+  // Subtitle overlay laid exactly over the scrub preview, so playing the block
+  // back shows how each caption reads against the video — a timing check that
+  // mirrors the runtime's on-frame placement (bottom band, or the authored
+  // screen-space rect). The preview box is 16/9 like the 1920×1080 source, so
+  // rect fractions map straight onto it.
+  const capOverlay = document.createElement("div");
+  Object.assign(capOverlay.style, {
+    position: "absolute", right: "14px", bottom: "58px",
+    width: "min(340px, 30vw)", aspectRatio: "16 / 9",
+    borderRadius: "10px", overflow: "hidden", zIndex: 12,
+    pointerEvents: "none", display: "none",
+  });
+  capOverlay.id = "tl-cap-overlay";
+  EB.tlCapOverlay = capOverlay;
+
   let blockId = null;       // block being edited
   let playing = false;
   let rafId = null;
 
+  // Horizontal zoom: the shared scroller's content is `viewport × zoom` wide.
+  // Every time-aligned row (ruler, window track, audio lanes, caption lane)
+  // positions its bars against this content width via EB.tlContentW().
+  let zoom = 1;
+  const ZMIN = 1, ZMAX = 24;
+  function hscroll() { return $("tl-hscroll"); }
+  function contentWidth() {
+    const sc = hscroll();
+    const vw = sc ? sc.clientWidth : 0;
+    return Math.max(0, Math.round(vw * zoom));
+  }
+  EB.tlContentW = contentWidth;
+
   document.addEventListener("DOMContentLoaded", () => {
     $("canvas-wrap").appendChild(video);
+    $("canvas-wrap").appendChild(capOverlay);
     wire();
   });
+
+  /* ── subtitle preview overlay ── */
+  function activeCaption(b, t) {
+    for (const c of (b.captions || [])) {
+      const at = c.at_s || 0;
+      const dur = Math.max(0.1, c.duration_s || 2);
+      if (at <= t && t < at + dur && (c.text || "").trim()) return c;
+    }
+    return null;
+  }
+
+  function renderCaptionOverlay(t) {
+    const b = block();
+    if (!b || video.style.display === "none") { capOverlay.style.display = "none"; return; }
+    const c = activeCaption(b, t);
+    if (!c) { capOverlay.style.display = "none"; return; }
+    capOverlay.style.display = "block";
+    capOverlay.innerHTML = "";
+    const card = document.createElement("div");
+    card.textContent = c.text;
+    const h = capOverlay.clientHeight || 190;
+    Object.assign(card.style, {
+      position: "absolute", boxSizing: "border-box",
+      padding: ".28em .5em", borderRadius: "4px",
+      background: "rgba(10,8,8,.72)", color: "#f8f5ee",
+      border: "1px solid rgba(255,245,225,.10)",
+      font: `600 ${Math.max(9, Math.round(h * 0.062))}px 'IBM Plex Sans', 'Segoe UI', sans-serif`,
+      lineHeight: "1.25", textAlign: "center", whiteSpace: "normal",
+      textShadow: "0 1px 2px rgba(0,0,0,.7)",
+      boxShadow: "0 1px 3px rgba(0,0,0,.5)",
+    });
+    const r = c.rect;
+    if (r && ["x", "y", "w", "h"].every(k => k in r)) {
+      card.style.left = (r.x + r.w / 2) * 100 + "%";
+      card.style.top = (r.y + r.h / 2) * 100 + "%";
+      card.style.transform = "translate(-50%,-50%)";
+      card.style.maxWidth = Math.max(12, r.w * 100) + "%";
+    } else {
+      card.style.left = "50%";
+      card.style.bottom = "7%";
+      card.style.transform = "translateX(-50%)";
+      card.style.maxWidth = "88%";
+    }
+    capOverlay.appendChild(card);
+  }
 
   function block() { return blockId ? EB.getBlock(blockId) : null; }
 
@@ -47,6 +121,7 @@
     blockId = id;
     $("tl-empty").style.display = "none";
     $("tl-body").classList.add("active");
+    if (!sameBlock && hscroll()) hscroll().scrollLeft = 0;
     const url = mediaURL(b);
     if (url && video.src !== url) {
       video.src = url;
@@ -64,6 +139,7 @@
     $("tl-empty").style.display = "flex";
     $("tl-body").classList.remove("active");
     video.style.display = "none";
+    capOverlay.style.display = "none";
   }
 
   EB.on("selection-changed", () => {
@@ -160,6 +236,10 @@
   function renderAll() {
     const b = block();
     if (!b) return;
+    // Size the shared scroll content to the current zoom before laying out any
+    // time-aligned rows (they read EB.tlContentW()).
+    const inner = $("tl-hscroll-inner");
+    if (inner) inner.style.width = contentWidth() + "px";
     const media = b.media ? EB.getMedia(b.media) : null;
     $("tl-kind-icon").textContent = b.type === "choice" ? "call_split" : "movie";
     $("tl-kind-icon").style.color = b.type === "choice" ? "var(--amber)" : "var(--sky)";
@@ -223,7 +303,7 @@
     ruler.innerHTML = "";
     if (!b) return;
     const len = EB.blockLen(b);
-    const W = ruler.clientWidth;
+    const W = contentWidth();
     if (len <= 0 || W <= 0) return;
     const targetPx = 80;
     const steps = [0.1, 0.25, 0.5, 1, 2, 5, 10, 15, 30, 60];
@@ -255,7 +335,7 @@
     track.querySelectorAll(".tl-win").forEach(el => el.remove());
     if (!b) return;
     const len = EB.blockLen(b);
-    const W = track.clientWidth;
+    const W = contentWidth();
     if (len <= 0 || W <= 0) return;
     const sel = EB.runtime.selection;
 
@@ -326,6 +406,18 @@
         EB.emit("edit-window", { blockId: b.id, winId: w.id });
       });
 
+      el.addEventListener("contextmenu", (ev) => {
+        ev.preventDefault(); ev.stopPropagation();
+        EB.select({ kind: "window", id: w.id });
+        EB.contextMenu(ev.clientX, ev.clientY, [
+          { label: "Edit…", icon: "edit",
+            onClick: () => EB.emit("edit-window", { blockId: b.id, winId: w.id }) },
+          { sep: true },
+          { label: "Delete window", icon: "delete", danger: true,
+            onClick: () => EB.deleteSelection() },
+        ]);
+      });
+
       track.appendChild(el);
     }
   }
@@ -334,9 +426,45 @@
     const b = block();
     if (!b) return;
     const len = EB.blockLen(b);
-    const W = $("tl-track").clientWidth;
+    const W = contentWidth();
     $("tl-playhead").style.left = (len > 0 ? (t / len) * W : 0) + "px";
+    keepPlayheadInView();
+    renderCaptionOverlay(t);
   }
+
+  // Auto-scroll so the playhead stays visible while zoomed and playing.
+  function keepPlayheadInView() {
+    const sc = hscroll();
+    if (!sc || zoom <= 1) return;
+    const x = parseFloat($("tl-playhead").style.left) || 0;
+    const pad = 40;
+    if (x < sc.scrollLeft + pad) sc.scrollLeft = Math.max(0, x - pad);
+    else if (x > sc.scrollLeft + sc.clientWidth - pad)
+      sc.scrollLeft = x - sc.clientWidth + pad;
+  }
+
+  /* ── zoom ── */
+  function updateZoomLabel() {
+    const el = $("tl-zoom-val");
+    if (el) el.textContent = Math.round(zoom * 100) + "%";
+  }
+  // Set zoom, keeping the time under `anchorClientX` (or the viewport centre)
+  // fixed on screen.
+  function setZoom(z, anchorClientX) {
+    const sc = hscroll();
+    z = Math.max(ZMIN, Math.min(ZMAX, z));
+    if (!sc) { zoom = z; updateZoomLabel(); return; }
+    const rect = sc.getBoundingClientRect();
+    const ax = (anchorClientX == null ? rect.left + rect.width / 2 : anchorClientX) - rect.left;
+    const before = contentWidth() || 1;
+    const frac = (sc.scrollLeft + ax) / before;
+    zoom = z;
+    if (block()) renderAll();
+    const after = contentWidth();
+    sc.scrollLeft = Math.max(0, frac * after - ax);
+    updateZoomLabel();
+  }
+  EB.tlZoom = () => zoom;
 
   function updateTimecode(t) {
     const b = block();
@@ -380,6 +508,23 @@
     $("tl-play").addEventListener("click", () => EB.tlTogglePlay());
     $("tl-prev-frame").addEventListener("click", () => EB.tlStepFrame(-1));
     $("tl-next-frame").addEventListener("click", () => EB.tlStepFrame(1));
+
+    // zoom controls
+    $("tl-zoom-in").addEventListener("click", () => setZoom(zoom * 1.5));
+    $("tl-zoom-out").addEventListener("click", () => setZoom(zoom / 1.5));
+    $("tl-zoom-fit").addEventListener("click", () => setZoom(1));
+    updateZoomLabel();
+    const sc = $("tl-hscroll");
+    if (sc) sc.addEventListener("wheel", (e) => {
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        setZoom(zoom * (e.deltaY < 0 ? 1.15 : 1 / 1.15), e.clientX);
+      } else if (zoom > 1 && e.deltaY && !e.shiftKey) {
+        // when zoomed, a plain vertical wheel pans the time axis left/right
+        e.preventDefault();
+        sc.scrollLeft += e.deltaY;
+      }
+    }, { passive: false });
     $("tl-add-window").addEventListener("click", () => {
       const b = block();
       if (b) EB.emit("add-window", { blockId: b.id, at: localTime() });

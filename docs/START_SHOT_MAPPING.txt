@@ -1,0 +1,81 @@
+HOW --start-shot NN IS MAPPED
+==============================
+
+BHR.exe --start-shot NN   (or: py -3.12 main.py --start-shot NN)
+
+This lets you launch straight into the middle of the experience instead of
+watching the whole thing from shot 01 every time you test something.
+
+THREE NUMBERING SYSTEMS
+------------------------
+There are three different "shot numbers" used across this project. They are
+NOT the same thing, and --start-shot means something different depending on
+which scenes tree you're running:
+
+  1. Shot number (01-78)     - the ORIGINAL master-timeline shot, as listed
+                                 in the asset tracker. This is the number that
+                                 maps 1:1 to a frame folder in the raw scenes/
+                                 tree (scenes/act_NN_.../shot_NN/).
+
+  2. Script scene (AL-00..AL-11) - Auntie Liza's voice-script scene. Not used
+                                 by --start-shot at all; just mentioned here
+                                 so you don't confuse it with the shot number.
+
+  3. Exported shot id        - when a project is exported from the Experience
+                                 Builder (scripts/export_experience.py), many
+                                 original shots get merged into ONE exported
+                                 "stretch shot" (e.g. shots 01-08 all become
+                                 exported shot 01). The exported tree only has
+                                 about 20 of these merged shots, not 78.
+
+WHICH CASE YOU'RE IN
+----------------------
+Check whether the scenes root you're running has a shot_map.json in it
+(the shipped build's scenes/ folder normally does, since it ships the
+EXPORTED tree, not the raw one):
+
+  * scenes/shot_map.json EXISTS
+      --start-shot NN is read as the ORIGINAL shot number (01-79, the asset
+      tracker numbering). main.py looks it up in shot_map.json, finds which
+      exported shot contains it and at what local frame, and seeks straight
+      to that point inside the merged shot. This also sets where "skip
+      prologue" (S key / voice "skip") ends, since the prologue is baked
+      into the front of the first exported shot.
+
+      Example: --start-shot 09 jumps into the Crossroads choice, wherever
+      that lands inside whichever exported "stretch shot" contains it.
+
+  * scenes/shot_map.json DOES NOT EXIST (raw / un-exported scenes tree)
+      --start-shot NN is matched directly against the shot ids in that
+      tree's sequence.json (usually the same 01-78 numbering). No frame
+      seeking happens - it starts at the top of that shot.
+
+  * NN not found in either case
+      main.py prints a warning to stderr and falls back to starting at
+      shot 01.
+
+WHERE shot_map.json COMES FROM
+---------------------------------
+scripts/export_experience.py writes shot_map.json into its output folder
+(export/generated/ by default) on every export. It records, for each
+original tracker shot number 01-79, which exported shot id contains it and
+the local frame to seek to. Adjacent exported blocks overlap by about one
+master frame, so a boundary shot number resolves to the LATER block's
+frame 1; a shot number that falls inside a cut choice-transition region
+snaps forward to the next block.
+
+QUICK REFERENCE
+------------------
+  BHR.exe --start-shot 01     start from the very beginning (default)
+  BHR.exe --start-shot 09     jump to the Crossroads choice
+  BHR.exe --start-shot 37     jump to the Bear Paw choice
+  BHR.exe --start-shot 50     jump to the Wagon Wheel choice
+  BHR.exe --start-shot 60     jump to Tumbling Blocks / the chase sequence
+  BHR.exe --start-shot 79     jump to the Final Address / epilogue
+
+--scenes lets you point at a different tree entirely (e.g. a fresh export
+you haven't shipped yet):
+  BHR.exe --scenes export\generated --start-shot 09
+
+See CLAUDE.md ("Start-at-any-original-shot + skip-prologue on exported
+trees") for the full engineering write-up of this feature.

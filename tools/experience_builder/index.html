@@ -139,6 +139,12 @@
           <button class="fab-btn" id="tl-next-frame" title="Next frame (→)"><span class="msr">skip_next</span></button>
         </div>
         <span id="tl-timecode">0:00.00 <span class="tc-total">/ 0:00.00</span></span>
+        <div id="tl-zoom" title="Timeline zoom (Ctrl + mouse wheel over the track)">
+          <button class="fab-btn" id="tl-zoom-out" title="Zoom out"><span class="msr">remove</span></button>
+          <span id="tl-zoom-val">100%</span>
+          <button class="fab-btn" id="tl-zoom-in" title="Zoom in"><span class="msr">add</span></button>
+          <button class="fab-btn" id="tl-zoom-fit" title="Fit to width"><span class="msr">fit_screen</span></button>
+        </div>
         <button class="fab-btn" id="tl-add-window" title="Add interaction window at playhead"><span class="msr">touch_app</span><span class="lbl">Add window</span></button>
       </div>
       <div id="tl-source" title="Block's slice of the source video — drag edges to trim, drag middle to move">
@@ -150,15 +156,25 @@
         <span id="tl-src-label"></span>
       </div>
       <div id="tl-track-wrap">
-        <div id="tl-ruler"></div>
-        <div id="tl-track">
-          <div id="tl-playhead" style="left:0;"></div>
-        </div>
-        <div id="tl-audio-lanes">
-          <div class="tl-alane" data-role="vo"><span class="alane-label">VO</span><div class="alane-track"></div></div>
-          <div class="tl-alane" data-role="music"><span class="alane-label">MUSIC</span><div class="alane-track"></div></div>
-          <div class="tl-alane" data-role="ambience"><span class="alane-label">AMB</span><div class="alane-track"></div></div>
-          <div class="tl-alane" data-role="sfx"><span class="alane-label">SFX</span><div class="alane-track"></div></div>
+        <!-- One horizontal scroller so the ruler, window track, audio lanes and
+             caption lane share a single zoom scale and scroll position. -->
+        <div id="tl-hscroll">
+          <div id="tl-hscroll-inner">
+            <div id="tl-ruler"></div>
+            <div id="tl-track">
+              <div id="tl-playhead" style="left:0;"></div>
+            </div>
+            <div id="tl-audio-lanes">
+              <div class="tl-alane" data-role="vo"><span class="alane-label">VO</span><div class="alane-track"></div></div>
+              <div class="tl-alane" data-role="music"><span class="alane-label">MUSIC</span><div class="alane-track"></div></div>
+              <div class="tl-alane" data-role="ambience"><span class="alane-label">AMB</span><div class="alane-track"></div></div>
+              <div class="tl-alane" data-role="sfx"><span class="alane-label">SFX</span><div class="alane-track"></div></div>
+            </div>
+            <div id="cap-lane" class="tl-clane">
+              <span class="clane-label">CAPTIONS <button id="cap-add" class="cap-add-btn" title="Add a caption at the start">+</button></span>
+              <div class="clane-track"></div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -237,6 +253,51 @@
       <span class="spacer"></span>
       <button class="tb-btn" id="ix-cancel">Cancel</button>
       <button class="tb-btn primary" id="ix-save"><span class="msr" style="font-size:16px;">touch_app</span><span id="ix-save-label">Add interaction</span></button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ CAPTION EDITOR MODAL ═══ -->
+<div class="modal-scrim" id="cap-modal">
+  <div class="modal">
+    <div class="modal-head">
+      <span class="msr" style="color:var(--green,#3ddc84);">subtitles</span>
+      <span class="m-title">Caption</span>
+      <span class="m-sub" id="cap-sub"></span>
+      <span class="m-sub" id="cap-frame-label">frame @ 0:00</span>
+      <button class="m-close" id="cap-close"><span class="msr">close</span></button>
+    </div>
+    <div id="ix-body">
+      <div id="ix-stage-col">
+        <div id="cap-stage" class="cap-stage">
+          <canvas class="frame" id="cap-frame-canvas"></canvas>
+          <div id="cap-region"><span class="cap-region-text" id="cap-region-text"></span><span class="cap-rz"></span></div>
+        </div>
+        <div id="ix-stage-hint"><span class="msr">info</span>Drag on the frame to draw a caption box; drag the box to move it, the corner to resize. Position is where the player sees it. "Bottom band" clears the box for the default lower-third placement.</div>
+      </div>
+      <div id="ix-form-col">
+        <div class="insp-field">
+          <label>Caption text</label>
+          <textarea id="cap-text" rows="3" style="width:100%;resize:vertical;"></textarea>
+        </div>
+        <div class="insp-row">
+          <div class="insp-field"><label>Appears at</label><input id="cap-at" placeholder="0:03"></div>
+          <div class="insp-field"><label>Duration (s)</label><input id="cap-dur" placeholder="3"></div>
+        </div>
+        <div class="insp-field">
+          <label>Position</label>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <button id="cap-default" class="tb-btn" type="button">Bottom band</button>
+            <span id="cap-pos-label" class="m-sub"></span>
+          </div>
+        </div>
+        <div class="ix-actions">
+          <button id="cap-delete" class="tb-btn" style="color:var(--red);border-color:rgba(248,113,113,.4);display:flex;"><span class="msr" style="font-size:16px;">delete</span>Delete</button>
+          <div style="flex:1;"></div>
+          <button id="cap-cancel" class="tb-btn">Cancel</button>
+          <button id="cap-save" class="tb-btn primary">Save caption</button>
+        </div>
+      </div>
     </div>
   </div>
 </div>
@@ -323,9 +384,9 @@
       <code>metadata.json</code> + <code>sequence.json</code> + extracted frames), run this from the
       repo root:</p>
       <code id="export-cmd">py -3.12 scripts/export_experience.py "project.bhrx.json"</code>
-      <p>Output goes to <code>export/scenes_generated/</code> — the live <code>scenes/</code> tree is
-      never touched. Add <code>--no-frames</code> to skip ffmpeg frame extraction and only write
-      metadata (fast; good for a first look).</p>
+      <p>Output goes to <code>export/generated/</code> — the runtime's default scenes root
+      (<code>py -3.12 main.py</code> runs it directly). Add <code>--no-frames</code> to skip ffmpeg
+      frame extraction and only write metadata (fast; good for a first look).</p>
       <p id="export-warnings" style="color:var(--amber);"></p>
     </div>
     <div class="modal-foot">
@@ -369,10 +430,12 @@
 <script src="js/project_data.js"></script>
 <script src="js/detectors.js"></script>
 <script src="js/state.js"></script>
+<script src="js/contextmenu.js"></script>
 <script src="js/library.js"></script>
 <script src="js/graph.js"></script>
 <script src="js/timeline.js"></script>
 <script src="js/audio_lanes.js"></script>
+<script src="js/captions.js"></script>
 <script src="js/pv_audio.js"></script>
 <script src="js/interaction.js"></script>
 <script src="js/inspector.js"></script>

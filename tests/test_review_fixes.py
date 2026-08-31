@@ -380,13 +380,28 @@ class TestArmsCrossed(unittest.TestCase):
 # 1.1 — voice events marshalled to the main thread
 # ---------------------------------------------------------------------------
 
+def _synthetic_shots():
+    """A minimal playback shot — these tests exercise the player's voice-event
+    marshalling, not any scene content."""
+    from engines.sequence_loader import Shot
+    from pathlib import Path
+    return [Shot(shot="01", act="01", kind="playback", audio_lines=[],
+                 tracker_type="", tracker_notes="", reuse_of=None,
+                 segments=None, interaction=None,
+                 fallback={"timeout_s": 300, "reprompt_s": [],
+                           "on_timeout": "auto_advance"},
+                 play_if=None, fps=30, timing_profile="standard",
+                 frames_dir=Path("frames"), audio_dir=None, audio_file=None,
+                 audio_events=[], captions=[], assets_pending=False,
+                 segments_todo=False, interaction_todo=False,
+                 reuse_self=False)]
+
+
 class TestVoiceEventMarshalling(unittest.TestCase):
     def test_vi_detected_queues_and_drains_on_update(self):
-        from engines.sequence_loader import load_sequence
         from engines.shot_sequence_player import ShotSequencePlayer
-        shots = load_sequence(ROOT / "scenes", {"fps": 30})
         bus = Bus()
-        player = ShotSequencePlayer(shots, {"timing_defaults": {}}, bus)
+        player = ShotSequencePlayer(_synthetic_shots(), {"timing_defaults": {}}, bus)
         player.start(0)
 
         state_before = player._shot_state
@@ -410,14 +425,59 @@ class TestVoiceEventMarshalling(unittest.TestCase):
         self.assertEqual(len(player._pending_vi), 0)
 
     def test_paused_player_drops_voice_events(self):
-        from engines.sequence_loader import load_sequence
         from engines.shot_sequence_player import ShotSequencePlayer
-        shots = load_sequence(ROOT / "scenes", {"fps": 30})
-        player = ShotSequencePlayer(shots, {"timing_defaults": {}}, Bus())
+        player = ShotSequencePlayer(_synthetic_shots(), {"timing_defaults": {}},
+                                    Bus())
         player.start(0)
         player.pause()
         player._on_vi_detected({"voice_id": "voice_go"})
         self.assertEqual(len(player._pending_vi), 0)
+
+
+class TestWarmPoseWhileLocked(unittest.TestCase):
+    """Pose is kept warm at a trickle while input is locked.
+
+    Skipping inference entirely during locked playback meant the first
+    inference after a lock ran cold (heavy detector + TFLite re-warm), landing
+    a frame hitch on the exact frame each gesture prompt appeared."""
+
+    def _engine(self, hz=3.0):
+        from engines.gesture_engine import GestureEngine
+        g = GestureEngine.__new__(GestureEngine)
+        g._input_locked = False
+        g._warm_pose_interval = 0.0 if hz <= 0 else 1.0 / hz
+        g._last_pose_run = 0.0
+        return g
+
+    def test_unlocked_runs_every_frame(self):
+        g = self._engine()
+        for t in (10.0, 10.01, 10.02):
+            self.assertTrue(g._should_run_pose(t))
+
+    def test_locked_runs_at_the_warm_rate(self):
+        g = self._engine(hz=3.0)          # one every ~0.333s
+        g._should_run_pose(100.0)         # unlocked, stamps the clock
+        g._input_locked = True
+        self.assertFalse(g._should_run_pose(100.1))   # too soon
+        self.assertFalse(g._should_run_pose(100.3))
+        self.assertTrue(g._should_run_pose(100.4))    # due
+        self.assertFalse(g._should_run_pose(100.5))   # and re-armed
+
+    def test_unlocking_runs_immediately(self):
+        """The frame a window opens must not wait out the warm interval."""
+        g = self._engine()
+        g._input_locked = True
+        g._should_run_pose(200.0)
+        g._input_locked = False
+        self.assertTrue(g._should_run_pose(200.001))
+
+    def test_zero_hz_restores_skip_entirely(self):
+        g = self._engine(hz=0)
+        g._input_locked = True
+        for t in (300.0, 305.0, 900.0):
+            self.assertFalse(g._should_run_pose(t))
+        g._input_locked = False
+        self.assertTrue(g._should_run_pose(901.0))
 
 
 if __name__ == "__main__":

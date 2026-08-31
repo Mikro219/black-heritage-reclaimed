@@ -680,6 +680,10 @@ class ShotSequencePlayer:
             return
         state_id = self._fsm.current
         print(f"[ShotPlayer] FSM -> {state_id}  loop={self._fsm.is_loop()}")
+        # This runs on the main thread between two rendered frames: anything
+        # slow here freezes the picture while the audio keeps going. Timed so a
+        # stall names itself (see render_engine.warn_slow).
+        _t0 = time.perf_counter()
 
         # Switch render engine to this state's frame range
         seg = self._fsm.segment_range()
@@ -698,6 +702,22 @@ class ShotSequencePlayer:
                 self.event_bus.emit("play_sfx", {"path": sfx_path})
             else:
                 print(f"[ShotPlayer] FSM SFX not found: {sfx!r}")
+
+        # Authored pick/switch clip: same entry moment, but with a delay and a
+        # source offset/duration the plain on_enter_sfx path can't express.
+        clip = self._fsm.on_enter_audio()
+        if clip:
+            clip_path = _resolve_sfx(shot, clip["file"])
+            if clip_path:
+                self.event_bus.emit("play_clip", {
+                    "path":            clip_path,
+                    "delay_s":         clip.get("delay_s", 0.0),
+                    "source_offset_s": clip.get("source_offset_s", 0.0),
+                    "duration_s":      clip.get("duration_s", 0.0),
+                    "gain":            clip.get("gain", 1.0),
+                })
+            else:
+                print(f"[ShotPlayer] FSM clip not found: {clip['file']!r}")
 
         # Arm gesture detector for any outgoing transitions.
         # gesture_type in the FSM spec selects the detector family:
@@ -861,6 +881,9 @@ class ShotSequencePlayer:
                     "window_ms": vi_window_ms,
                 }
             })
+
+        from .render_engine import warn_slow
+        warn_slow(f"FSM enter {state_id}", _t0)
 
     def _fsm_fire(self, event: str) -> None:
         """Fire an FSM event from the current state, enter the resulting state or advance."""
@@ -1220,6 +1243,14 @@ class ShotFSM:
 
     def on_enter_sfx(self) -> Optional[str]:
         return self.states.get(self.current, {}).get("on_enter_sfx")
+
+    def on_enter_audio(self) -> Optional[dict]:
+        """Richer alternative to on_enter_sfx: {file, delay_s, source_offset_s,
+        duration_s, gain}. Authored per choice block in the Experience Builder
+        (the pick / switch sound) and played by the render engine, which owns
+        the delay timer and the offset/duration slicing."""
+        clip = self.states.get(self.current, {}).get("on_enter_audio")
+        return clip if isinstance(clip, dict) and clip.get("file") else None
 
     def voice_keyword(self) -> Optional[str]:
         return self.states.get(self.current, {}).get("voice")

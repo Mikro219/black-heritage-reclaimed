@@ -7,7 +7,9 @@ its live internal state is shown on screen so you can see exactly what is and
 is not being recognised and tune params on the spot.
 
 Usage:
-  python scripts/gesture_tuner.py [--profile NAME]
+  python scripts/gesture_tuner.py
+
+Tuning values persist in config.json's "host" section ("gesture_tuning").
 
 Controls:
   N / Right   next gesture
@@ -28,7 +30,6 @@ import sys
 import time
 import cv2
 import mediapipe as mp
-import numpy as np
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
@@ -1327,17 +1328,10 @@ def open_camera(config_path):
 
 def main():
     parser = argparse.ArgumentParser(description="BHR gesture tuner")
-    parser.add_argument(
-        "--profile", default="laptop_dev",
-        help="Host profile to read/write gesture tuning from. "
-             "Options: laptop_dev (default), mini_pc_prod. "
-             "Example: --profile mini_pc_prod"
-    )
-    args = parser.parse_args()
+    parser.parse_args()
 
-    profile_name = args.profile or "laptop_dev"
-    profile_path = os.path.join(ROOT, "config", "host_profiles", f"{profile_name}.json")
     config_path = os.path.join(ROOT, "config.json")
+    profile_path = config_path   # tuning lives in config.json["host"] now
     _load_tune_params(GESTURES, profile_path)
 
     cap = open_camera(config_path)
@@ -1989,9 +1983,8 @@ def main():
         cv2.putText(frame, "pose: OK" if pose_lm is not None else "pose: --",
                     (w - 130, 28),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, pose_color, 2, cv2.LINE_AA)
-        profile_color = (80, 200, 255) if profile_name == "mini_pc_prod" else (160, 160, 255)
-        cv2.putText(frame, f"profile: {profile_name}", (w - 220, 72),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.42, profile_color, 1, cv2.LINE_AA)
+        cv2.putText(frame, "tuning: config.json [host]", (w - 240, 72),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.42, (160, 160, 255), 1, cv2.LINE_AA)
 
         # ── Controls reminder (bottom-right) ─────────────────────────────
         ctrl_lines = [
@@ -2058,17 +2051,17 @@ def main():
 
 
 def _load_tune_params(gestures: list, profile_path: str) -> None:
-    """Apply saved tuning values from the host profile's gesture_tuning section."""
+    """Apply saved tuning values from config.json's host.gesture_tuning section."""
     tuning: dict = {}
     if os.path.exists(profile_path):
         try:
-            with open(profile_path) as f:
-                profile = json.load(f)
-            tuning = profile.get("gesture_tuning", {})
+            with open(profile_path, encoding="utf-8") as f:
+                config = json.load(f)
+            tuning = config.get("host", {}).get("gesture_tuning", {})
         except Exception as e:
             print(f"[tuner] Could not read {profile_path}: {e}", file=sys.stderr)
     else:
-        print(f"[tuner] Profile not found: {profile_path} — using built-in defaults",
+        print(f"[tuner] config.json not found: {profile_path} — using built-in defaults",
               file=sys.stderr)
 
     applied = 0
@@ -2093,27 +2086,29 @@ def _load_tune_params(gestures: list, profile_path: str) -> None:
 
 
 def _save_tune_params(gestures: list, profile_path: str) -> None:
-    """Write current tunable params to the host profile's gesture_tuning section."""
+    """Write current tunable params to config.json's host.gesture_tuning section."""
     if not profile_path:
         return
     try:
-        with open(profile_path) as f:
-            profile = json.load(f)
+        with open(profile_path, encoding="utf-8") as f:
+            config = json.load(f)
     except Exception as e:
-        print(f"[tuner] Could not read profile for save: {e}", file=sys.stderr)
-        profile = {}
+        # Never write a gutted config.json over the real one.
+        print(f"[tuner] Could not read config.json for save — NOT saving: {e}",
+              file=sys.stderr)
+        return
     tuning: dict = {}
     for gesture in gestures:
         saved = dict(gesture["params"])
         if saved:
             tuning[gesture["name"]] = saved
-    profile["gesture_tuning"] = tuning
+    config.setdefault("host", {})["gesture_tuning"] = tuning
     try:
-        with open(profile_path, "w") as f:
-            json.dump(profile, f, indent=2)
-        print(f"[tuner] Saved gesture params → {os.path.basename(profile_path)}")
+        with open(profile_path, "w", encoding="utf-8") as f:
+            json.dump(config, f, indent=2, ensure_ascii=False)
+        print(f"[tuner] Saved gesture params → {os.path.basename(profile_path)} [host]")
     except Exception as e:
-        print(f"[tuner] Could not save profile: {e}", file=sys.stderr)
+        print(f"[tuner] Could not save config.json: {e}", file=sys.stderr)
 
 
 def _adjust_tune_param(gesture, param_num: int, direction: int):

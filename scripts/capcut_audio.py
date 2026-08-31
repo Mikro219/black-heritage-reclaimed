@@ -599,9 +599,9 @@ def main() -> int:
     parser.add_argument("--audio-dir", type=Path,
                         default=ROOT / "assets" / "audio" / "stems")
     parser.add_argument("--apply-scenes", action="store_true",
-                        help="write audio_events into the live scenes/ tree")
-    parser.add_argument("--scenes-root", type=Path, default=ROOT / "scenes",
-                        help="scenes tree for --apply-scenes (default: scenes/)")
+                        help="write audio_events into the scenes tree metadata")
+    parser.add_argument("--scenes-root", type=Path, default=ROOT / "export" / "generated",
+                        help="scenes tree for --apply-scenes (default: export/generated)")
     parser.add_argument("--to-builder", type=Path, default=None,
                         help="merge audio clips into a .bhrx.json project")
     parser.add_argument("--no-trim", action="store_true",

@@ -33,7 +33,8 @@ class TestTutorialFlow(unittest.TestCase):
         self.assertEqual(self._armed_ids()[-1], "tutorial_0")
         self.assertIn(("input_lock", {"locked": False}), self.bus.log)
         card = self.tut.card_info()
-        self.assertEqual((card["step"], card["total"]), (1, 6))
+        # 5 steps since August 2026 (the Reach IN step was removed).
+        self.assertEqual((card["step"], card["total"]), (1, 5))
 
         # success on step 1 -> green flash, linger, advance
         self.bus.emit("cg_detected", {"gesture_id": "tutorial_0"})
@@ -60,6 +61,17 @@ class TestTutorialFlow(unittest.TestCase):
         self.assertIn(("cg_window_open", {"interaction": None}), self.bus.log)
         self.assertIn(("input_lock", {"locked": True}), self.bus.log)
         self.assertFalse(self.tut.begin())   # one-shot per session
+
+    def test_card_carries_a_per_step_figure(self):
+        """`figure` keys the code-drawn vector figure in the card's corner box
+        and is the step's stable id — it must change with the step."""
+        self.assertTrue(self.tut.begin())
+        first = self.tut.card_info()["figure"]
+        self.assertTrue(first)
+        self.bus.emit("cg_detected", {"gesture_id": "tutorial_0"})
+        time.sleep(0.07)
+        self.tut.update()
+        self.assertNotEqual(self.tut.card_info()["figure"], first)
 
     def test_disabled_never_starts(self):
         tut = TutorialEngine({"tutorial_enabled": False}, Bus(), FakeGesture())

@@ -65,7 +65,7 @@
       if (!b) continue;
       const role = lane.dataset.role;
       const len = EB.blockLen(b);
-      const W = track.clientWidth;
+      const W = EB.tlContentW ? EB.tlContentW() : track.clientWidth;
       if (len <= 0 || W <= 0) continue;
       for (const c of (b.audio || [])) {
         if ((c.role || "sfx") !== role) continue;
@@ -137,6 +137,21 @@
     });
 
     el.addEventListener("dblclick", (ev) => { ev.stopPropagation(); openModal(b, c); });
+
+    el.addEventListener("contextmenu", (ev) => {
+      ev.preventDefault(); ev.stopPropagation();
+      EB.contextMenu(ev.clientX, ev.clientY, [
+        { label: "Edit…", icon: "edit", onClick: () => openModal(b, c) },
+        { sep: true },
+        { label: "Delete clip", icon: "delete", danger: true, onClick: () => {
+          EB.change("delete audio clip", () => {
+            b.audio = (b.audio || []).filter(x => x.id !== c.id);
+            if (!b.audio.length) delete b.audio;
+          });
+          renderLanes();
+        } },
+      ]);
+    });
     return el;
   }
 

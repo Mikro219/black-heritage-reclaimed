@@ -92,6 +92,48 @@
           </div>
         </div>
       </div>`;
+
+      /* Pick / switch audio — fires when a side is detected and on every
+         switch. Replaces the built-in UI click; a wrong-way retry keeps its
+         own buzzer. Offset/duration/delay are applied at runtime, so retuning
+         them is a metadata-only re-export. */
+      const ca = b.choice_audio || {};
+      const sounds = (EB.project.sounds || []).slice()
+        .sort((x, y) => (x.name || "").localeCompare(y.name || ""));
+      html += `<div class="insp-sec">
+        <div class="insp-sec-head"><span>Pick / switch audio</span></div>
+        <div class="insp-field">
+          <label>Sound</label>
+          <select id="insp-ca-sound">
+            <option value="">— default UI click —</option>
+            ${sounds.map(s => `<option value="${s.id}" ${ca.sound === s.id ? "selected" : ""}>${esc(s.name)}</option>`).join("")}
+          </select>
+        </div>
+        <div class="insp-row" style="margin-top:6px;">
+          <div class="insp-field">
+            <label title="Wait this long after the gesture lands before playing">Delay (s)</label>
+            <input type="number" id="insp-ca-delay" min="0" step="0.05" value="${ca.delay_s != null ? ca.delay_s : 0}">
+          </div>
+          <div class="insp-field">
+            <label title="Start this far into the source file">Offset (s)</label>
+            <input type="number" id="insp-ca-offset" min="0" step="0.05" value="${ca.source_offset_s != null ? ca.source_offset_s : 0}">
+          </div>
+        </div>
+        <div class="insp-row" style="margin-top:6px;">
+          <div class="insp-field">
+            <label title="0 = play to the end of the file">Duration (s)</label>
+            <input type="number" id="insp-ca-dur" min="0" step="0.05" value="${ca.duration_s != null ? ca.duration_s : 0}">
+          </div>
+          <div class="insp-field">
+            <label>Gain</label>
+            <input type="number" id="insp-ca-gain" min="0" max="2" step="0.05" value="${ca.gain != null ? ca.gain : 1}">
+          </div>
+        </div>
+        <div style="margin-top:6px;font-size:11px;color:var(--text-mute);line-height:1.5;">
+          Fires on detection and on every switch. Duration 0 plays to the end of the file.
+          A wrong-way retry branch keeps its own buzzer.
+        </div>
+      </div>`;
     }
 
     if (b.type !== "merge") {
@@ -212,6 +254,33 @@
         b.timeout.to = ttTo.value || null;
       });
     });
+
+    /* Pick / switch audio */
+    const caSound = $("insp-ca-sound");
+    if (caSound) {
+      const num = (id, min, max) => {
+        const el = $(id);
+        const v = parseFloat(el && el.value);
+        if (!isFinite(v)) return min;
+        return Math.max(min, max == null ? v : Math.min(max, v));
+      };
+      const commit = (label) => EB.change(label, () => {
+        if (!caSound.value) { delete b.choice_audio; return; }
+        b.choice_audio = {
+          sound: caSound.value,
+          delay_s: num("insp-ca-delay", 0),
+          source_offset_s: num("insp-ca-offset", 0),
+          duration_s: num("insp-ca-dur", 0),
+          gain: num("insp-ca-gain", 0, 2),
+        };
+      });
+      caSound.addEventListener("change", () => commit("pick audio"));
+      ["insp-ca-delay", "insp-ca-offset", "insp-ca-dur", "insp-ca-gain"]
+        .forEach(id => {
+          const el = $(id);
+          if (el) el.addEventListener("change", () => commit("pick audio timing"));
+        });
+    }
   }
 
   EB.on("selection-changed", render);

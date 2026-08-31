@@ -127,6 +127,19 @@ class GestureEngine:
         self._active_oi_window_ms: float = config.get("timing_defaults", {}).get("oi_window_ms", 6000)
         self._cooldown_until: float = 0.0
         self._input_locked = False
+        # Keep-warm inference rate while input is LOCKED. DEFAULT 0 (skip
+        # entirely, the long-standing behaviour). Warming at a trickle was
+        # tried against the "frames hitch when a window opens" report and made
+        # it WORSE on the exhibition build: at a low rate MediaPipe's tracking
+        # ROI is always stale, so every warm frame re-runs the heavy detector —
+        # continuous cost during playback for no cold-start saving. Left as a
+        # knob rather than deleted, but do not enable it without measuring.
+        try:
+            hz = float(config.get("warm_pose_hz", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            hz = 0.0
+        self._warm_pose_interval: float = 0.0 if hz <= 0 else 1.0 / hz
+        self._last_pose_run: float = 0.0
         self._paused = False
         self._pause_started: float = 0.0
         self._last_fired: Optional[str] = None
@@ -155,8 +168,28 @@ class GestureEngine:
         self._capture_thread.start()
         print("[GestureEngine] capture thread started")
 
+    def _should_run_pose(self, now: float) -> bool:
+        """Whether this camera frame gets a Pose inference.
+
+        Unlocked: every frame (detectors need it). Locked: only every
+        `_warm_pose_interval` seconds — enough to keep MediaPipe's graph and
+        tracking state hot so the first inference after a window opens doesn't
+        pay the cold-start cost as a frame hitch, but ~1/10th the CPU of full
+        rate. `warm_pose_hz: 0` in config restores the old skip-entirely
+        behaviour."""
+        if not self._input_locked:
+            self._last_pose_run = now
+            return True
+        if self._warm_pose_interval <= 0.0:
+            return False
+        if now - self._last_pose_run < self._warm_pose_interval:
+            return False
+        self._last_pose_run = now
+        return True
+
     def _capture_loop(self) -> None:
         """Worker: read camera, run Pose, publish the skeleton. Never touches the bus."""
+        inf_mute_until = 0.0   # rate limit for the slow-inference report
         while self._capture_running:
             cap = self._cap
             if cap is None:
@@ -172,14 +205,28 @@ class GestureEngine:
             with self._frame_lock:
                 self._pub_frame = frame
 
-            # Always drain the camera to keep the USB pipeline fresh, but skip the
-            # expensive inference while input is locked (playback/transitions need
-            # no detection).
-            if self._input_locked:
+            # Always drain the camera to keep the USB pipeline fresh. While
+            # input is locked we need no detections, but we do keep the model
+            # warm at a trickle — see _should_run_pose.
+            if not self._should_run_pose(time.monotonic()):
                 continue
 
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            t_inf = time.perf_counter()
             pose_results = self._pose.process(rgb)
+            # Measured: process() releases the GIL, so a slow inference here
+            # can NOT stall the render loop — but the first inference after a
+            # locked stretch runs 2-6x the steady cost (stale tracking ROI ->
+            # heavy detector + CPU clocks ramping from idle). Reported so a
+            # visible stutter at window-open can be correlated (or cleared).
+            inf_ms = (time.perf_counter() - t_inf) * 1000.0
+            if inf_ms >= 150.0:
+                now_rep = time.monotonic()
+                if now_rep >= inf_mute_until:
+                    inf_mute_until = now_rep + 1.0
+                    print(f"[perf] pose inference {inf_ms:.0f}ms "
+                          f"(capture thread — does not block the picture)",
+                          flush=True)
             pose_lm = None
             if pose_results.pose_landmarks:
                 pose_lm = pose_results.pose_landmarks.landmark
@@ -284,11 +331,6 @@ class GestureEngine:
                 self._active_oi = None
                 self._active_oi_context = {}
                 self._oi_open_time = None
-
-    def hands_detected(self) -> bool:
-        """Player-presence liveness for the calibration check. The name is
-        historical (pre pose-only rework): it now reports a FRESH pose skeleton."""
-        return self.fresh_pose_lm() is not None
 
     def _on_cg_window_open(self, data: dict):
         self._active_cg = data.get("interaction")

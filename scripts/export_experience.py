@@ -7,17 +7,17 @@ a BHR runtime scenes tree.
     py -3.12 scripts/export_experience.py project.bhrx.json --video "assets/video/BHR Draft 1.mp4"
     py -3.12 scripts/export_experience.py project.bhrx.json --out export/my_scenes
 
-Output (default export/scenes_generated/ — the live scenes/ tree is NEVER touched):
+Output (default export/generated/):
 
-    export/scenes_generated/
+    export/generated/
       sequence.json                    ordered shot list (loader-compatible)
-      act_01_experience/
+      scenes/
         act.json                       {"fps": <project fps>}
-        shot_NN/metadata.json          playback / OI / choice-fork wiring
-        shot_NN/frames/00001.jpg ...   (unless --no-frames)
-        shot_NN/audio/detect.mp3       (when the global detect sound is found)
+        scene_NN/metadata.json         playback / OI / choice-fork wiring
+        scene_NN/frames/00001.jpg ...  (unless --no-frames)
+        scene_NN/audio/detect.mp3      (when the global detect sound is found)
 
-Mapping (mirrors the hand-authored patterns in scenes/):
+Mapping (the hand-authored shot patterns these were derived from):
   playback block, no windows   -> kind playback                        (plain)
   playback block, 1 window     -> kind playback + OI oi_frame_window   (shot 58 pattern)
   playback block, 2+ windows   -> kind interactive, play-through FSM
@@ -49,7 +49,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 ACT_ID = "01"
-ACT_DIRNAME = f"act_{ACT_ID}_experience"
+ACT_DIRNAME = "scenes"          # flat single-act layout (Aug 2026)
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from capcut_audio import trim_name, render_trim, TRIM_OFFSET_S, TRIM_TAIL_S  # noqa: E402
@@ -323,17 +323,50 @@ def warn_if_unknown_keyword(kw: str, where: str) -> None:
 
 def voice_oi_dict(win: dict, idx: int) -> dict:
     """FSM `oi` payload for a voice window: a `keywords` list makes the runtime
-    open a VI window (reaction tier) instead of arming a gesture detector."""
-    kw = (win.get("params") or {}).get("keyword") or "go"
-    warn_if_unknown_keyword(str(kw).strip().lower(),
-                            f"voice window {win.get('label')!r}")
+    open a VI window (reaction tier) instead of arming a gesture detector).
+    params.keyword may be a single string, a list, or a comma-separated
+    string — any of these authors multiple acceptable keywords (e.g. "gourd"
+    OR "follow" for the North Star hum-or-gourd VI)."""
+    raw = (win.get("params") or {}).get("keyword") or "go"
+    if isinstance(raw, str):
+        kws = [k.strip() for k in raw.split(",") if k.strip()]
+    elif isinstance(raw, list):
+        kws = [str(k).strip() for k in raw if str(k).strip()]
+    else:
+        kws = [str(raw).strip()]
+    if not kws:
+        kws = ["go"]
+    for kw in kws:
+        warn_if_unknown_keyword(kw.lower(), f"voice window {win.get('label')!r}")
     return {
         "id": slug(win.get("label"), f"vi_{idx}"),
-        "keywords": [kw],
+        "keywords": kws,
         "mode": (win.get("params") or {}).get("mode", "keyword"),
         "sfx": "detect.mp3",
         "feedback": "green_flash",
     }
+
+
+def block_captions(block: dict) -> list:
+    """A block's authored captions -> shot metadata (screen-space, display-only).
+    Each: {at_s, duration_s, text, rect?}. The runtime draws them against the
+    shot playhead; rect (x,y,w,h fractions) places the subtitle, else a default
+    bottom band."""
+    out = []
+    for c in block.get("captions") or []:
+        text = str(c.get("text", "")).strip()
+        if not text:
+            continue
+        entry = {"at_s": round(float(c.get("at_s", 0.0) or 0.0), 3),
+                 "duration_s": round(float(c.get("duration_s", 0.0) or 0.0), 3),
+                 "text": text}
+        rect = c.get("rect")
+        if isinstance(rect, dict) and all(k in rect for k in ("x", "y", "w", "h")):
+            entry["rect"] = {k: round(float(rect[k]), 4)
+                             for k in ("x", "y", "w", "h")}
+        out.append(entry)
+    out.sort(key=lambda e: e["at_s"])
+    return out
 
 
 def playback_metadata(block: dict, shot_id: str, n_frames: int, fps: int) -> dict:
@@ -477,6 +510,38 @@ CHOICE_HOLD_SFX = "UIAlert-Hybrid_Apple_Pay_+_T-Elevenlabs.mp3"
 # "hold_segments" field (block-local frames, e.g. authored from live shot 09).
 _HOLD_ANIM_KEYS = ("left_selected", "right_selected", "left_to_right",
                    "right_to_left", "left_switch_hold", "right_switch_hold")
+
+
+def choice_audio_spec(block: dict, sounds_by_id: dict) -> dict | None:
+    """The block's authored pick/switch sound, as an `on_enter_audio` payload.
+
+    Authored in the Builder's inspector (Choice Block -> Pick / switch audio):
+    {sound, delay_s, source_offset_s, duration_s, gain}. When present it
+    REPLACES the built-in CHOICE_HOLD_SFX on every pick and switch state —
+    playing both would double up on the same beat.
+
+    delay_s / source_offset_s / duration_s are honoured at RUNTIME (the render
+    engine slices the decoded PCM), so they can be retuned in the Builder and
+    re-exported as metadata only — no audio re-render."""
+    spec = block.get("choice_audio")
+    if not isinstance(spec, dict):
+        return None
+    snd = sounds_by_id.get(spec.get("sound"))
+    if not snd:
+        if spec.get("sound"):
+            warn(f"choice {block.get('name')!r}: pick/switch sound "
+                 f"{spec.get('sound')!r} is not in the project — ignored")
+        return None
+    out = {"file": snd["name"]}
+    for key, default in (("delay_s", 0.0), ("source_offset_s", 0.0),
+                         ("duration_s", 0.0), ("gain", 1.0)):
+        try:
+            val = float(spec.get(key, default) or default)
+        except (TypeError, ValueError):
+            val = default
+        if val != default:
+            out[key] = round(val, 3)
+    return out
 
 
 def hold_choice_fsm(block: dict, n_frames: int, confirm_kw: str,
@@ -625,7 +690,8 @@ def branch_chain(project: dict, blocks: dict, deg: dict,
     return out
 
 
-def choice_metadata(block: dict, shot_id: str, n_frames: int, fps: int) -> dict:
+def choice_metadata(block: dict, shot_id: str, n_frames: int, fps: int,
+                    sounds_by_id: dict | None = None) -> dict:
     fork_branches, voice_branches = split_choice_branches(block)
     wins = gesture_windows(block)
     win_by_id = {w["id"]: w for w in wins}
@@ -689,6 +755,25 @@ def choice_metadata(block: dict, shot_id: str, n_frames: int, fps: int) -> dict:
                 {"from": "confirm_right", "on": "segment_end", "to": "__advance__"},
             ],
         }
+    # Authored pick/switch sound. Every state but these two is entered by a
+    # detection or a switch, so all of them take it:
+    #   waiting     — the idle loop, never a detection
+    #   wrong_path  — a wrong-way redirect says "not that way", not "picked".
+    #                 It keeps its buzzer (sound-only model) or its own folded
+    #                 redirect audio (animated model).
+    pick_audio = choice_audio_spec(block, sounds_by_id or {})
+    if pick_audio:
+        stamped = []
+        for sid, st in body["states"].items():
+            if sid in ("waiting", "wrong_path"):
+                continue
+            st.pop("on_enter_sfx", None)
+            st["on_enter_audio"] = dict(pick_audio)
+            stamped.append(sid)
+        print(f"  choice {block.get('name')!r}: pick/switch audio "
+              f"{pick_audio['file']!r} on {len(stamped)} state(s)"
+              + (f" (delay {pick_audio['delay_s']}s)" if pick_audio.get("delay_s") else ""))
+
     waiting = body["states"]["waiting"]
     fsm = {
         "gesture_type": "region",
@@ -824,10 +909,11 @@ def resolve_detect_sound(project: dict, project_path: Path,
                       ROOT / "assets" / name, Path(name)):
         if candidate.exists():
             return candidate
-    # Fall back to any copy in the live scenes tree (the runtime ships one per
-    # interactive shot, so the first hit is as good as any).
-    hits = sorted((ROOT / "scenes").glob(f"*/*/{name}")) + \
-           sorted((ROOT / "scenes").glob(f"*/*/audio/{name}"))
+    # Fall back to any copy shipped by a previous export (one per interactive
+    # scene, so the first hit is as good as any).
+    prev = ROOT / "export" / "generated"
+    hits = sorted(prev.glob(f"*/*/{name}")) + \
+           sorted(prev.glob(f"*/*/audio/{name}"))
     return hits[0] if hits else None
 
 
@@ -841,6 +927,8 @@ def collect_sfx_names(meta: dict) -> set[str]:
             for k, v in obj.items():
                 if k in ("sfx", "on_enter_sfx") and isinstance(v, str) and v:
                     names.add(v)
+                elif k == "on_enter_audio" and isinstance(v, dict) and v.get("file"):
+                    names.add(v["file"])
                 else:
                     walk(v)
         elif isinstance(obj, list):
@@ -855,14 +943,15 @@ def resolve_sfx_file(name: str, project_path: Path,
                      detect_sound: Path | None) -> Path | None:
     """Locate an on_enter_sfx/feedback sound: the global detect sound for
     detect.mp3, else next to the project -> assets/audio/stems/ -> anywhere in
-    the live scenes tree."""
+    a previous export."""
     if name == "detect.mp3":
         return detect_sound
     for candidate in (project_path.parent / name,
-                      ROOT / "assets" / "audio" / "stems" / name):
+                      ROOT / "assets" / "audio" / "stems" / name,
+                      ROOT / "assets" / "audio" / "voice_lines" / name):
         if candidate.exists():
             return candidate
-    hits = sorted((ROOT / "scenes").rglob(name))
+    hits = sorted((ROOT / "export" / "generated").rglob(name))
     return hits[0] if hits else None
 
 
@@ -1220,7 +1309,7 @@ def export(project_path: Path, out_root: Path, do_frames: bool,
         n_frames = max(1, int(round((rng[1] - rng[0]) * fps)))
 
         if block.get("type") == "choice":
-            meta = choice_metadata(block, shot_id, n_frames, fps)
+            meta = choice_metadata(block, shot_id, n_frames, fps, sounds_by_id)
         else:
             meta = playback_metadata(block, shot_id, n_frames, fps)
 
@@ -1246,7 +1335,11 @@ def export(project_path: Path, out_root: Path, do_frames: bool,
                 merged.sort(key=lambda e: e["at_s"])
                 meta["audio_events"] = merged
 
-        shot_dir = act_dir / f"shot_{shot_id}"
+        caps = block_captions(block)
+        if caps:
+            meta["captions"] = caps
+
+        shot_dir = act_dir / f"scene_{shot_id}"
         shot_dir.mkdir(parents=True, exist_ok=True)
 
         # master_audio: slice the source video's own baked mix to the
@@ -1282,8 +1375,8 @@ def export(project_path: Path, out_root: Path, do_frames: bool,
             if src is None:
                 if sfx_name != "detect.mp3":   # missing detect already warned
                     warn(f"shot {shot_id}: sfx {sfx_name!r} not found next to "
-                         f"the project, in assets/audio/stems/, or in scenes/ "
-                         f"— not copied")
+                         f"the project, in assets/audio/stems/, or in a "
+                         f"previous export — not copied")
                 continue
             audio_dir = shot_dir / "audio"
             audio_dir.mkdir(exist_ok=True)
@@ -1319,16 +1412,16 @@ def export(project_path: Path, out_root: Path, do_frames: bool,
     print(f"\n[export] {len(seq_shots)} shots -> {out_root}")
     if warnings:
         print(f"[export] {len(warnings)} warning(s) above")
-    print("[export] to run it: point the runtime's scenes root at the generated tree "
-          "(swap scenes/ manually — this script never touches the live tree).")
+    print("[export] to run it: py -3.12 main.py (export/generated is the "
+          "default scenes root).")
     return 0
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[1])
     parser.add_argument("project", type=Path, help="path to the .bhrx.json project file")
-    parser.add_argument("--out", type=Path, default=ROOT / "export" / "scenes_generated",
-                        help="output scenes root (default export/scenes_generated)")
+    parser.add_argument("--out", type=Path, default=ROOT / "export" / "generated",
+                        help="output scenes root (default export/generated)")
     parser.add_argument("--no-frames", action="store_true",
                         help="write metadata/sequence only; skip ffmpeg extraction")
     parser.add_argument("--force-frames", action="store_true",

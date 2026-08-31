@@ -7,6 +7,11 @@ Run from the BHR project root:
 
 Add new entries to SHOT_FRAMES as shots are mapped:
     ("act_folder", "shot_id", global_start, global_end)
+
+NOTE: this module doubles as the canonical shot <-> master-frame map.
+SHOT_FRAMES is imported by capcut_audio.py,
+export_experience.py and build_captions.py (and consumed by tests) — treat
+it as data with a CLI attached, not a one-off script.
 """
 
 import argparse

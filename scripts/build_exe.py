@@ -1,8 +1,17 @@
 """
 build_exe.py — package BHR into a Windows executable with PyInstaller.
 
+THE .bhrx PROJECT IS THE SINGLE SOURCE OF TRUTH: by default the build first
+runs scripts/export_experience.py on BHR_Experience.bhrx.json (sound files
+resolve from assets/) and stages the generated tree (export/generated)
+as the packaged scenes/. Use --skip-export to reuse the existing export, or
+--scenes-root to stage a different tree.
+
 Run from the BHR project root:
-    py -3.12 scripts/build_exe.py                     # build dist/BHR/BHR.exe
+    py -3.12 scripts/build_exe.py                     # export .bhrx + build dist/BHR/BHR.exe
+    py -3.12 scripts/build_exe.py --keep-packs        # rebuild WITHOUT wiping dist/BHR
+                                                      # (prewarmed framecache packs survive)
+    py -3.12 scripts/build_exe.py --skip-export       # stage the existing export as-is
     py -3.12 scripts/build_exe.py --with-frames       # also stage scene frames (GBs)
     py -3.12 scripts/build_exe.py --with-assets       # also stage assets/ (storyboard, video)
     py -3.12 scripts/build_exe.py --zip --version v1.0.0   # produce BHR-v1.0.0-win64.zip
@@ -14,9 +23,8 @@ antivirus behaviour are much worse):
     dist/BHR/
       BHR.exe            <- console app (logs to stdout; kiosk launcher captures them)
       _internal/         <- Python runtime + libraries (PyInstaller-managed)
-      config.json
-      config/host_profiles/*.json
-      scenes/            <- sequence.json + per-shot metadata/audio
+      config.json        <- includes the "host" hardware section (edit on target)
+      scenes/            <- the exported .bhrx tree: sequence.json + metadata/audio
                             (+ frames/ only with --with-frames)
       models/            <- vosk model (staged if present locally)
       assets/            <- only with --with-assets
@@ -36,6 +44,7 @@ See docs/packaging.md for install + GitHub release instructions.
 import argparse
 import os
 import shutil
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -51,7 +60,7 @@ APP_NAME = "BHR"
 COLLECT_ALL = ["mediapipe", "vosk", "sounddevice", "pyorbbecsdk"]
 
 
-def pyinstaller_cmd() -> list[str]:
+def pyinstaller_cmd(distpath: Path = DIST) -> list[str]:
     cmd = [
         sys.executable, "-m", "PyInstaller",
         str(ROOT / "main.py"),
@@ -61,13 +70,69 @@ def pyinstaller_cmd() -> list[str]:
         # one-dir console build: fastest startup, logs visible/capturable
         "--onedir",
         "--console",
-        "--distpath", str(DIST),
+        "--distpath", str(distpath),
         "--workpath", str(BUILD),
         "--specpath", str(BUILD),
     ]
     for pkg in COLLECT_ALL:
         cmd += ["--collect-all", pkg]
     return cmd
+
+
+def _chmod_retry(func, path, excinfo):
+    """rmtree helper: clear read-only and retry once."""
+    os.chmod(path, stat.S_IWRITE)
+    func(path)
+
+
+def swap_in_build(fresh_app: Path, app_dir: Path) -> None:
+    """Move a fresh PyInstaller output into an existing dist/BHR, replacing
+    only what PyInstaller produced (BHR.exe + _internal/ on PyInstaller 6;
+    every top-level entry it emitted on older layouts) and touching NOTHING
+    else — scenes/ with its multi-GB prewarmed framecache.npy packs, models/,
+    config and assets all stay in place. Same-volume moves are renames, so
+    this is fast regardless of build size.
+
+    A running BHR.exe (or an antivirus scan) denies DELETION of the old files
+    — but Windows does allow RENAMING a running exe, so locked entries are
+    shoved aside as *.stale (the standard updater trick) and swept on the
+    next successful swap."""
+    app_dir.mkdir(parents=True, exist_ok=True)
+    for old in app_dir.glob("*.stale"):
+        try:
+            shutil.rmtree(old, onexc=_chmod_retry) if old.is_dir() \
+                else old.unlink()
+        except OSError:
+            pass   # still locked — swept on a later build
+    for entry in fresh_app.iterdir():
+        target = app_dir / entry.name
+        try:
+            if target.is_dir() and not target.is_symlink():
+                shutil.rmtree(target, onexc=_chmod_retry)
+            elif target.exists():
+                try:
+                    target.unlink()
+                except PermissionError:
+                    os.chmod(target, stat.S_IWRITE)
+                    target.unlink()
+        except PermissionError:
+            stale = target.with_name(target.name + ".stale")
+            if stale.exists():
+                raise   # previous stale copy is ALSO still locked — give up
+            target.rename(stale)
+        shutil.move(str(entry), str(target))
+
+
+def report_kept_packs(app_dir: Path) -> None:
+    packs = list((app_dir / "scenes").rglob("framecache.npy")) \
+        if (app_dir / "scenes").is_dir() else []
+    if packs:
+        gb = sum(p.stat().st_size for p in packs) / (1024 ** 3)
+        print(f"  kept {len(packs)} prewarmed framecache pack(s), {gb:.1f} GB "
+              f"— no re-prewarm needed")
+    else:
+        print("  no framecache packs found under dist scenes/ "
+              "(nothing was prewarmed here yet)")
 
 
 # Derived caches that must never ship: framecache.npy packs are multi-GB,
@@ -114,8 +179,31 @@ def stage_content(app_dir: Path, with_frames: bool, with_assets: bool,
     shutil.copy2(ROOT / "config.json", app_dir / "config.json")
     print("  config.json")
 
-    n = _copy_tree(ROOT / "config", app_dir / "config")
-    print(f"  config/  ({n} files)")
+    guide = ROOT / "docs" / "HOW_TO_RUN.md"
+    if guide.exists():
+        shutil.copy2(guide, app_dir / "HOW_TO_RUN.md")
+        print("  HOW_TO_RUN.md  (non-technical operator guide)")
+
+    start_shot_doc = ROOT / "docs" / "START_SHOT_MAPPING.txt"
+    if start_shot_doc.exists():
+        shutil.copy2(start_shot_doc, app_dir / "START_SHOT_MAPPING.txt")
+        print("  START_SHOT_MAPPING.txt  (--start-shot numbering reference)")
+
+    # One-click preload: build every shot's frame-cache pack ahead of time so
+    # the first real run has no cold-decode stutter (BHR.exe --prewarm).
+    bat = app_dir / "Prewarm cache (run once).bat"
+    bat.write_text(
+        "@echo off\r\n"
+        "rem Builds the speed-up cache for every scene so the first show runs\r\n"
+        "rem smoothly. Run this ONCE after copying the BHR folder. Takes a while\r\n"
+        "rem and needs plenty of free disk. Safe to re-run.\r\n"
+        'cd /d "%~dp0"\r\n'
+        "BHR.exe --prewarm\r\n"
+        "echo.\r\n"
+        "echo Done. You can close this window.\r\n"
+        "pause\r\n",
+        encoding="ascii")
+    print("  Prewarm cache (run once).bat")
 
     skip = set() if with_frames else {"frames"}
     n = _copy_tree(scenes_root, app_dir / "scenes", skip_dirnames=skip,
@@ -167,25 +255,78 @@ def main() -> int:
     parser.add_argument("--link-frames", action="store_true",
                         help="Hardlink staged scene files instead of copying "
                              "(zero extra disk on the same NTFS volume).")
-    parser.add_argument("--scenes-root", type=Path, default=ROOT / "scenes",
+    parser.add_argument("--project", type=Path,
+                        default=ROOT / "BHR_Experience.bhrx.json",
+                        help="Experience Builder project to export and stage "
+                             "(the single source of truth).")
+    parser.add_argument("--skip-export", action="store_true",
+                        help="Don't re-run export_experience.py; stage the "
+                             "existing scenes root as-is.")
+    parser.add_argument("--scenes-root", type=Path,
+                        default=ROOT / "export" / "generated",
                         help="Scenes tree to stage as the packaged scenes/ "
-                             "(e.g. export/scenes_generated).")
+                             "(default: the .bhrx export output).")
     parser.add_argument("--with-assets", action="store_true",
                         help="Stage assets/ (storyboard pages, reference video).")
     parser.add_argument("--zip", action="store_true",
                         help="Zip dist/BHR into dist/BHR-<version>-win64.zip.")
     parser.add_argument("--version", default="dev",
                         help="Version tag used in the zip name (e.g. v1.0.0).")
+    parser.add_argument("--keep-packs", action="store_true",
+                        help="Rebuild without wiping the existing dist/BHR "
+                             "(PyInstaller's --noconfirm normally deletes it, "
+                             "taking the prewarmed multi-GB framecache.npy "
+                             "packs with it). Builds into a temp distpath and "
+                             "swaps in only what PyInstaller produced.")
     parser.add_argument("--skip-build", action="store_true",
                         help="Skip PyInstaller; only re-stage content / re-zip.")
     parser.add_argument("--dry-run", action="store_true",
                         help="Print the PyInstaller command and exit.")
     args = parser.parse_args()
 
-    cmd = pyinstaller_cmd()
+    # With --keep-packs, PyInstaller must not own dist/ — its --noconfirm
+    # wipes the whole dist/BHR output dir, which is exactly what destroys the
+    # prewarmed packs on every rebuild.
+    fresh_dist = DIST / "_fresh" if args.keep_packs else None
+    cmd = pyinstaller_cmd(distpath=fresh_dist or DIST)
     if args.dry_run:
         print(" ".join(cmd))
         return 0
+
+    app_dir = DIST / APP_NAME
+
+    def finish_swap() -> bool:
+        # A running BHR.exe blocks the swap: Windows allows renaming the exe
+        # itself, but not the _internal/ directory (the loader holds handles
+        # inside it). Detect it up front and name the culprit.
+        try:
+            out = subprocess.run(
+                ["tasklist", "/FI", f"IMAGENAME eq {APP_NAME}.exe",
+                 "/FO", "CSV", "/NH"], capture_output=True, text=True)
+            if f"{APP_NAME}.exe" in (out.stdout or ""):
+                print(f"ERROR: {APP_NAME}.exe is currently RUNNING — the old "
+                      f"runtime cannot be replaced under it.")
+                print(f"    {out.stdout.strip().splitlines()[0]}")
+                print("The finished build is safe in dist/_fresh. Close it, then")
+                print("finish WITHOUT rebuilding:")
+                print("    py -3.12 scripts/build_exe.py --keep-packs --skip-build")
+                return False
+        except OSError:
+            pass   # tasklist unavailable — fall through and let the swap try
+        print(f"-- swapping the fresh runtime into {app_dir} "
+              f"(scenes/ and packs untouched) --")
+        try:
+            swap_in_build(fresh_dist / APP_NAME, app_dir)
+        except (PermissionError, OSError) as exc:
+            print(f"ERROR: could not replace files in {app_dir}: {exc}")
+            print("Something is still holding them — usually BHR.exe is running.")
+            print("The finished build is safe in dist/_fresh. Close BHR.exe, then")
+            print("finish WITHOUT rebuilding:")
+            print("    py -3.12 scripts/build_exe.py --keep-packs --skip-build")
+            return False
+        shutil.rmtree(fresh_dist, ignore_errors=True)
+        report_kept_packs(app_dir)
+        return True
 
     if not args.skip_build:
         try:
@@ -194,19 +335,52 @@ def main() -> int:
             print("PyInstaller is not installed. Run:")
             print(f"    {Path(sys.executable).name} -m pip install pyinstaller")
             return 1
+        if fresh_dist is not None:
+            shutil.rmtree(fresh_dist, ignore_errors=True)
         print("-- running PyInstaller (several minutes; MediaPipe/Vosk are large) --")
         result = subprocess.run(cmd, cwd=ROOT)
         if result.returncode != 0:
             print("PyInstaller FAILED — see output above.")
             return result.returncode
-
-    app_dir = DIST / APP_NAME
+        if fresh_dist is not None and not finish_swap():
+            return 1
+    elif fresh_dist is not None and (fresh_dist / APP_NAME).is_dir():
+        # A previous --keep-packs build finished but its swap was blocked
+        # (BHR.exe was running) — possibly PARTIALLY (a blocked swap can have
+        # moved some entries already), so any leftover dir means unfinished
+        # work. Finish it now instead of rebuilding.
+        print("-- found a pending build in dist/_fresh --")
+        if not finish_swap():
+            return 1
     if not (app_dir / f"{APP_NAME}.exe").exists():
         print(f"ERROR: {app_dir / (APP_NAME + '.exe')} not found — build first.")
         return 1
 
     scenes_root = args.scenes_root if args.scenes_root.is_absolute() \
         else ROOT / args.scenes_root
+
+    # The .bhrx project is the single source of truth: re-export it so the
+    # staged scenes/ always matches the authored experience. The exporter is
+    # incremental (frames re-extract only when counts mismatch; sounds resolve
+    # from assets/), so an up-to-date export is quick.
+    default_export = (ROOT / "export" / "generated").resolve()
+    if args.skip_export:
+        print("-- --skip-export: staging the existing scenes root as-is --")
+    elif scenes_root.resolve() != default_export:
+        print(f"-- custom --scenes-root, skipping the .bhrx export --")
+    else:
+        if not args.project.exists():
+            print(f"ERROR: {args.project} not found — the .bhrx project is the "
+                  f"build's source of truth (or pass --skip-export).")
+            return 1
+        print(f"-- exporting {args.project.name} -> {scenes_root} --")
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / "export_experience.py"),
+             str(args.project), "--out", str(scenes_root)], cwd=ROOT)
+        if result.returncode != 0:
+            print("export_experience.py FAILED — see output above.")
+            return result.returncode
+
     if not (scenes_root / "sequence.json").exists():
         print(f"ERROR: {scenes_root} has no sequence.json — not a scenes tree.")
         return 1

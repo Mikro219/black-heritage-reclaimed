@@ -25,13 +25,19 @@ SUCCESS_LINGER_S = 1.2    # let the green flash land before the next card
 
 def _steps() -> list:
     """Tutorial steps. Each arms a real detector, so the tutorial doubles as a
-    live calibration check of the camera + pose pipeline."""
+    live calibration check of the camera + pose pipeline.
+
+    "figure" is the step's stable id: it keys the code-drawn vector figure the
+    render engine shows in the tutorial card's corner box (RenderEngine
+    ._FIGURES). It is deliberately the only per-step id — the cg window id
+    stays "tutorial_<index>" (_on_cg_detected and tests key off that)."""
     return [
         {
             "title": "Welcome!",
             "prompt": "Raise BOTH hands above your shoulders. "
                       "When the screen flashes green, you did it!",
             "icon": "open_r",
+            "figure": "raise_both",
             "type": "presence_bilateral",
             "params": {"y_threshold": "shoulder", "hold_ms": 500},
         },
@@ -39,6 +45,7 @@ def _steps() -> list:
             "title": "Pointing",
             "prompt": "Point at the glowing box and hold still.",
             "icon": "point_r",
+            "figure": "point_target",
             # region_rect is RAW camera space; the card target_rect is the same
             # box in player/screen space (mirrored x).
             "type": "point_target_held",
@@ -50,6 +57,7 @@ def _steps() -> list:
             "title": "Point LEFT",
             "prompt": "Reach out and point to the LEFT side of the screen.",
             "icon": "point_l",
+            "figure": "point_left",
             "type": "point_region",
             "params": {"directions": ["left"], "hold_ms": 500},
         },
@@ -57,6 +65,7 @@ def _steps() -> list:
             "title": "Point RIGHT",
             "prompt": "Now point to the RIGHT side of the screen.",
             "icon": "point_r",
+            "figure": "point_right",
             "type": "point_region",
             "params": {"directions": ["right"], "hold_ms": 500},
         },
@@ -64,17 +73,13 @@ def _steps() -> list:
             "title": "Point DOWN",
             "prompt": "Point DOWN toward the ground.",
             "icon": "point_r",
+            "figure": "point_down",
             "type": "directional_point",
             "params": {"directions": ["down", "down_left", "down_right"],
                        "hold_ms": 500},
         },
-        {
-            "title": "Reach IN",
-            "prompt": "Reach straight toward the screen, like you're touching it.",
-            "icon": "point_r",
-            "type": "forward_point",
-            "params": {"target_region": "center", "hold_ms": 400},
-        },
+        # "Reach IN" (forward_point) removed August 2026 per Mike — the
+        # z-approach read was unreliable as a first-contact teaching step.
     ]
 
 
@@ -135,6 +140,7 @@ class TutorialEngine:
             "title":  step.get("title", ""),
             "prompt": "Nice!" if self._succeeded else step.get("prompt", ""),
             "icon":   step.get("icon"),
+            "figure": step.get("figure"),
             "target_rect": None if self._succeeded else step.get("target_rect"),
             "step":   self._step_i + 1,
             "total":  len(self._steps),

@@ -1,4 +1,4 @@
-/* BHR Experience Builder — theme from assets/Experience Builder (standalone).html
+/* BHR Experience Builder — theme from the original design mockup (in git history: assets/docs/Experience Builder (standalone).html)
    (mockup 1A workspace, block style "A · Tinted header"). */
 
 :root {
@@ -502,6 +502,32 @@ input, select, textarea { font-family: inherit; }
 
 /* block strip: block-local time, playhead, window bars */
 #tl-track-wrap { flex: 1; position: relative; margin: 0 12px 8px; min-height: 0; display: flex; flex-direction: column; }
+/* Shared horizontal scroller: everything time-aligned (ruler, window track,
+   audio lanes, caption lane) lives here so one zoom scale + scroll position
+   drives them all. Inner width is set by JS to viewport × zoom. */
+#tl-hscroll { flex: 1; min-height: 0; position: relative; overflow-x: auto; overflow-y: auto; }
+#tl-hscroll-inner { position: relative; min-width: 100%; min-height: 100%; display: flex; flex-direction: column; }
+#tl-zoom { display: flex; align-items: center; gap: 1px; }
+#tl-zoom-val { font: 600 10px var(--mono); color: var(--text-mute); min-width: 34px; text-align: center; }
+
+/* right-click context menu (timeline bars) */
+.ctx-menu {
+  position: fixed; z-index: 1000; min-width: 156px; padding: 4px;
+  background: var(--panel); border: 1px solid var(--border-2); border-radius: 8px;
+  box-shadow: 0 18px 44px -14px rgba(0,0,0,.82);
+}
+.ctx-item {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 6px 10px; border: 0; background: none; border-radius: 5px;
+  color: var(--text); font: 500 12px 'IBM Plex Sans', sans-serif;
+  text-align: left; cursor: pointer;
+}
+.ctx-item:hover { background: var(--panel-2); }
+.ctx-item:disabled { color: var(--text-faint); cursor: default; background: none; }
+.ctx-item.danger { color: var(--red); }
+.ctx-item.danger:hover { background: rgba(239,68,68,.12); }
+.ctx-item .msr { font-size: 16px; }
+.ctx-sep { height: 1px; background: var(--border); margin: 4px 2px; }
 #tl-ruler {
   position: relative; height: 16px; flex: none;
   font-family: var(--mono); font-size: 9px; color: var(--text-mute);
@@ -724,10 +750,10 @@ input, select, textarea { font-family: inherit; }
 
 /* ── Timeline audio lanes (layered stem audio, July 2026) ─────────────── */
 #tl-audio-lanes {
-  /* lanes soak up extra height when the strip is dragged taller; scroll
-     rather than clip when squeezed */
+  /* lanes soak up extra height when the strip is dragged taller; the shared
+     #tl-hscroll handles any overflow so lanes never clip the time axis */
   flex: 1; display: flex; flex-direction: column; gap: 2px; margin-top: 4px;
-  min-height: 94px; overflow-y: auto; overflow-x: hidden;
+  min-height: 94px;
 }
 .tl-alane { display: flex; align-items: stretch; flex: 1 1 22px; min-height: 22px; position: relative; }
 /* the label OVERLAYS the lane so the track spans the full width and lines up
@@ -769,4 +795,53 @@ input, select, textarea { font-family: inherit; }
 .tl-aclip .a-resize::after {
   content: ''; position: absolute; right: 2px; top: 25%; bottom: 25%; width: 2px;
   background: rgba(231,235,242,.4); border-radius: 2px;
+}
+
+/* ── Captions lane ── */
+.tl-clane { display: flex; align-items: stretch; flex: 1 1 24px; min-height: 24px; position: relative; }
+/* label OVERLAYS the track (like the audio lanes) so the caption track spans
+   the full width and lines up 1:1 with the ruler / windows / audio clips above */
+.tl-clane .clane-label {
+  position: absolute; left: 5px; top: 50%; transform: translateY(-50%); z-index: 3;
+  display: flex; align-items: center; gap: 4px; padding: 1px 5px; border-radius: 4px;
+  background: rgba(13,17,23,.78);
+  font: 700 9px var(--mono); color: var(--green); letter-spacing: .04em;
+}
+.cap-add-btn {
+  border: 1px solid rgba(52,211,153,.5); background: rgba(52,211,153,.12); color: var(--green);
+  border-radius: 4px; width: 15px; height: 15px; line-height: 1; cursor: pointer; font-size: 12px; padding: 0;
+}
+.cap-add-btn:hover { background: rgba(52,211,153,.24); }
+.tl-clane .clane-track { position: relative; flex: 1; min-width: 0;
+  background: rgba(52,211,153,.03); border-top: 1px solid var(--line, rgba(231,235,242,.06)); }
+.tl-cap {
+  position: absolute; top: 2px; bottom: 2px; border-radius: 4px; padding: 0 5px;
+  display: flex; align-items: center; cursor: grab; min-width: 16px; overflow: hidden;
+  font: 600 9.5px 'IBM Plex Sans', sans-serif; color: var(--text); white-space: nowrap;
+  background: rgba(52,211,153,.16); border: 1px solid rgba(52,211,153,.5); border-left-width: 3px;
+}
+.tl-cap.placed { border-left-color: var(--amber); }
+.tl-cap:hover { filter: brightness(1.25); }
+.tl-cap .c-name { overflow: hidden; text-overflow: ellipsis; }
+.tl-cap .c-resize { position: absolute; right: 0; top: 0; bottom: 0; width: 7px; cursor: ew-resize; }
+.tl-cap .c-resize::after {
+  content: ''; position: absolute; right: 2px; top: 25%; bottom: 25%; width: 2px;
+  background: rgba(231,235,242,.4); border-radius: 2px;
+}
+
+/* ── Caption editor on-frame box ── */
+.cap-stage { position: relative; flex: none; aspect-ratio: 16/9; width: 100%;
+  background: #05070a; border-radius: 8px; overflow: hidden; }
+.cap-stage video, .cap-stage canvas.frame { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+#cap-region {
+  position: absolute; border: 2px solid var(--green); background: rgba(52,211,153,.18);
+  cursor: move; display: none; align-items: center; justify-content: center;
+}
+#cap-region .cap-region-text {
+  padding: 1px 5px; font: 700 10px 'IBM Plex Sans', sans-serif; color: #eafff5;
+  text-align: center; overflow: hidden; text-shadow: 0 1px 3px #000;
+}
+#cap-region .cap-rz {
+  position: absolute; right: -5px; bottom: -5px; width: 12px; height: 12px;
+  background: var(--green); border: 2px solid #06231a; border-radius: 3px; cursor: nwse-resize;
 }

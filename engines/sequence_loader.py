@@ -91,6 +91,11 @@ class Shot:
     # When non-empty, audio_file is suppressed — the stems replace the baked mix.
     audio_events: list
 
+    # Captions (Experience Builder authored / script-generated). Each entry:
+    # {at_s, duration_s, text, rect?}. rect is optional screen-space
+    # {x,y,w,h} placement; absent -> the render engine's default bottom band.
+    captions: list
+
     # Status flags
     assets_pending: bool        # True if frames_dir is None or contains no image files
 
@@ -215,6 +220,9 @@ def load_sequence(scenes_root: Path, config: dict) -> list[Shot]:
         if audio_events:
             audio_file = None
 
+        captions = _parse_captions(
+            raw.get("captions") or shot_meta.get("captions"))
+
         # assets_pending: frames dir absent or empty
         if frames_dir is None:
             assets_pending = True
@@ -243,6 +251,7 @@ def load_sequence(scenes_root: Path, config: dict) -> list[Shot]:
             audio_dir=audio_dir,
             audio_file=audio_file,
             audio_events=audio_events,
+            captions=captions,
             assets_pending=assets_pending,
             segments_todo=segments_todo,
             interaction_todo=interaction_todo,
@@ -339,7 +348,13 @@ def _section(title: str) -> None:
 # ---------------------------------------------------------------------------
 
 def _find_act_dir(scenes_root: Path, act_id: str) -> Optional[Path]:
-    """Return the first directory matching scenes_root/act_<id>_*, or None."""
+    """Return the act-level directory for act_id.
+
+    Generated trees (Aug 2026) use one flat "scenes" dir holding every scene;
+    the legacy layout is one dir per act named act_<id>_<name>."""
+    flat = scenes_root / "scenes"
+    if flat.is_dir():
+        return flat
     prefix = f"act_{act_id}_"
     try:
         for entry in scenes_root.iterdir():
@@ -348,6 +363,13 @@ def _find_act_dir(scenes_root: Path, act_id: str) -> Optional[Path]:
     except OSError:
         pass
     return None
+
+
+def _shot_dir(act_dir: Path, shot_id: str) -> Path:
+    """The per-shot directory: scene_<id> (generated trees, Aug 2026),
+    falling back to the legacy shot_<id> name."""
+    d = act_dir / f"scene_{shot_id}"
+    return d if d.is_dir() else act_dir / f"shot_{shot_id}"
 
 
 def _load_act_config(act_dir: Optional[Path]) -> dict:
@@ -366,7 +388,7 @@ def _load_act_config(act_dir: Optional[Path]) -> dict:
 def _load_shot_metadata(act_dir: Optional[Path], shot_id: str) -> dict:
     if act_dir is None:
         return {}
-    meta = act_dir / f"shot_{shot_id}" / "metadata.json"
+    meta = _shot_dir(act_dir, shot_id) / "metadata.json"
     if not meta.exists():
         return {}
     try:
@@ -381,14 +403,14 @@ def _load_shot_metadata(act_dir: Optional[Path], shot_id: str) -> dict:
 def _resolve_frames_dir(act_dir: Optional[Path], shot_id: str) -> Optional[Path]:
     if act_dir is None:
         return None
-    d = act_dir / f"shot_{shot_id}" / "frames"
+    d = _shot_dir(act_dir, shot_id) / "frames"
     return d if d.is_dir() else None
 
 
 def _resolve_audio_dir(act_dir: Optional[Path], shot_id: str) -> Optional[Path]:
     if act_dir is None:
         return None
-    d = act_dir / f"shot_{shot_id}" / "audio"
+    d = _shot_dir(act_dir, shot_id) / "audio"
     return d if d.is_dir() else None
 
 
@@ -396,12 +418,35 @@ def _resolve_audio_file(act_dir: Optional[Path], shot_id: str,
                         filename: Optional[str]) -> Optional[Path]:
     if act_dir is None or not filename:
         return None
-    p = act_dir / f"shot_{shot_id}" / filename
+    p = _shot_dir(act_dir, shot_id) / filename
     return p if p.exists() else None
 
 
 _AUDIO_ROLES = {"music", "ambience", "sfx", "vo"}
 _BED_ROLES   = {"music", "ambience"}   # sustain (looping bed) by default
+
+
+def _parse_captions(raw_captions) -> list:
+    """Normalise a shot's captions list. Each entry: {at_s, duration_s, text,
+    rect?}. `rect` (screen-space {x,y,w,h}) is optional — absent means the
+    render engine draws the default bottom band. Malformed entries are dropped."""
+    if not isinstance(raw_captions, list):
+        return []
+    out = []
+    for c in raw_captions:
+        if not isinstance(c, dict) or not str(c.get("text", "")).strip():
+            continue
+        entry = {
+            "at_s":       float(c.get("at_s", 0.0) or 0.0),
+            "duration_s": float(c.get("duration_s", 0.0) or 0.0),
+            "text":       str(c["text"]),
+        }
+        rect = c.get("rect")
+        if isinstance(rect, dict) and all(k in rect for k in ("x", "y", "w", "h")):
+            entry["rect"] = {k: float(rect[k]) for k in ("x", "y", "w", "h")}
+        out.append(entry)
+    out.sort(key=lambda e: e["at_s"])
+    return out
 
 
 def _parse_audio_events(raw_events, act_dir: Optional[Path], shot_id: str,
@@ -422,7 +467,7 @@ def _parse_audio_events(raw_events, act_dir: Optional[Path], shot_id: str,
         fname = str(e["file"])
         path = None
         if act_dir is not None:
-            candidate = act_dir / f"shot_{shot_id}" / "audio" / fname
+            candidate = _shot_dir(act_dir, shot_id) / "audio" / fname
             if candidate.exists():
                 path = candidate
         if path is None:

@@ -1,4 +1,4 @@
-﻿"""
+"""
 RenderEngine — Pygame-based frame sequencer and display layer.
 
 Serves the shot-driven runtime: loads each shot's frame pack through the
@@ -14,14 +14,33 @@ import os
 import random
 import time
 import pygame
-from collections import OrderedDict
+from collections import OrderedDict, deque
 from pathlib import Path
 from typing import Optional
 
 from .frame_cache import FrameCacheManager
+# Player-facing colours live in one place. Keep this module's imports cheap:
+# engines.detectors.rules.* pulls in every rule module AND the Orbbec SDK
+# (~3s + stdout noise), which the render layer and tests/test_render.py must
+# not pay for — any pose math needed here is done inline against landmark
+# indices, mirroring engines/detectors/rules/pose_helpers.py.
+from .palette import PALETTE as P
 
 # Max converted Surfaces kept in RAM per shot (LRU). 240 frames at 1080p ≈ 1.9 GB.
 SURFACE_LRU_CAP = 240
+
+# Main-thread stall reporting. Anything on the render/player thread that blocks
+# for this long shows as a frozen picture while the audio runs on — the class of
+# bug behind "the frames freeze when the OI window opens". Costs one
+# perf_counter pair; only prints when something is actually slow.
+SLOW_MS = 60.0
+
+
+def warn_slow(label: str, t0: float) -> float:
+    ms = (time.perf_counter() - t0) * 1000.0
+    if ms >= SLOW_MS:
+        print(f"[perf] {label} blocked the main thread for {ms:.0f}ms")
+    return ms
 
 
 class FrameView:
@@ -101,6 +120,21 @@ class RenderEngine:
         self._audio_pos0:  float = 0.0            # offset it started at (s)
         self._audio_epoch: float = 0.0            # monotonic time it started
         self._music_active: bool = False          # audio runs on mixer.music
+        # Baked master audio held back by master_audio_offset_ms: monotonic
+        # time it should start, or None. Serviced from update().
+        self._pending_audio_at: Optional[float] = None
+        self._pending_audio_pos: float = 0.0      # where in the file to start
+        self._shot_id: Optional[str] = None       # selects the per-shot offset
+        # Scheduled one-shot clips (choice pick/switch audio): each entry is
+        # {at, path, source_offset_s, duration_s, gain, channel}. Serviced from
+        # update(), shifted by pause/resume, dropped on shot_load.
+        self._pending_clips: list = []
+        self._clip_slices: OrderedDict = OrderedDict()   # (path,off,dur) -> Sound
+        self._last_update_t: float = 0.0                 # frame-gap watchdog
+        self._gap_mute_until: float = 0.0                # watchdog print rate limit
+        self._pace_times: deque = deque(maxlen=240)      # update() timestamps, ~2s
+        self._pace_report_t: float = 0.0                 # pacing print rate limit
+        self._last_audio_resync: float = 0.0             # re-sync cooldown
 
         # Look-ahead frame cache (continuous background preload of all shots with art)
         self._cache: Optional[FrameCacheManager] = None
@@ -108,10 +142,10 @@ class RenderEngine:
         self._loading_kind: str = "playback"       # kind of the incoming shot (debug only)
 
         # OI flash overlay (full-screen surface pre-allocated once in init_display)
-        self._flash_color: tuple = (0, 255, 80)
+        self._flash_color: tuple = P.SUCCESS
         self._flash_start: float = 0.0
         self._flash_until: float = 0.0
-        self._flash_alpha: int   = 80   # peak alpha (0-255)
+        self._flash_alpha: int   = P.SUCCESS_ALPHA   # peak alpha (0-255)
         self._flash_overlay: Optional[pygame.Surface] = None
 
         # Frame-gated OI window (1-based frame numbers, matching filenames)
@@ -142,6 +176,13 @@ class RenderEngine:
         # bottom-right skeleton mini-panel WITHOUT the rest of the debug overlay.
         self._show_skeleton: bool = False
 
+        # Captions (Experience Builder authored / script-generated). Stashed per
+        # shot from Shot.captions; drawn against the shot playhead. Font + cache
+        # built lazily on first draw.
+        self._captions: list = []
+        self._caption_font = None
+        self._caption_render_cache: dict = {}
+
         # Hand-icon cursors (July 2026): illustrated hands from assets/hand_icons/
         # replace the old crosshair+label cursors. Keyed "open"/"fist"/"point"/
         # "knock" + "_l"/"_r". Per-side last-seen state persists through Hands
@@ -159,6 +200,17 @@ class RenderEngine:
         self._cursor_fade_alpha: float = 0.0
         self._cursor_fade_mode: str = "grab"
         self._cursor_fade_t: float = time.monotonic()
+        # Per-side aim, latched alongside the mode. The gesture engine clears
+        # its active window BEFORE emitting the detection, so on the firing
+        # frame debug_info() reports active_params={} — without this the icon
+        # would snap upright for the whole fade-out (and the green flash).
+        # Two hands carry two independent radial angles, hence per-side.
+        self._cursor_fade_angle: dict = {"L": None, "R": None}
+
+        # Torso centre (screen space) for radial point cursors, latched through
+        # pose dropouts — see _torso_center_screen.
+        self._torso_screen: Optional[tuple] = None
+        self._torso_t: float = 0.0
 
         # Star-trail particle layer (July 2026): tiny 4-point stars trail the
         # visitor's hands while a directional_draw window is armed. Sprites are
@@ -181,6 +233,7 @@ class RenderEngine:
         self.event_bus.subscribe("prefetch_shot", self._on_prefetch_shot)
         self.event_bus.subscribe("oi_flash",          self._on_oi_flash)
         self.event_bus.subscribe("play_sfx",          self._on_play_sfx)
+        self.event_bus.subscribe("play_clip",         self._on_play_clip)
         self.event_bus.subscribe("set_frame_window",  self._on_set_frame_window)
         self.event_bus.subscribe("play_segment",      self._on_play_segment)
 
@@ -203,7 +256,7 @@ class RenderEngine:
         self._build_star_sprites()
         self._load_hand_icons()
 
-    _STAR_COLOR = (255, 210, 90)   # the player-layer amber
+    _STAR_COLOR = P.LANTERN   # the player-layer amber (alias — see engines/palette.py)
 
     def _build_star_sprites(self) -> None:
         """Pre-render the 4-point star sprites used by the comet indicator and
@@ -225,7 +278,7 @@ class RenderEngine:
                     r = r_out if i % 2 == 0 else r_in
                     pts.append((cx + r * math.cos(ang), cy + r * math.sin(ang)))
                 pygame.draw.polygon(surf, self._STAR_COLOR, pts)
-                pygame.draw.circle(surf, (255, 250, 235), (int(cx), int(cy)),
+                pygame.draw.circle(surf, P.NORTH_STAR, (int(cx), int(cy)),
                                    max(1, int(r_in * 0.7)))
                 rots.append(surf)
             self._star_sprites.append(rots)
@@ -234,7 +287,7 @@ class RenderEngine:
         g = pygame.Surface((36, 36), pygame.SRCALPHA)
         pygame.draw.circle(g, (*self._STAR_COLOR, 45), (18, 18), 16)
         pygame.draw.circle(g, (*self._STAR_COLOR, 110), (18, 18), 10)
-        pygame.draw.circle(g, (255, 250, 235, 230), (18, 18), 5)
+        pygame.draw.circle(g, (*P.NORTH_STAR, 230), (18, 18), 5)
         self._hand_glow = g
 
     def _load_hand_icons(self) -> None:
@@ -293,6 +346,14 @@ class RenderEngine:
         display option, K key) — independent of the full debug overlay."""
         self._show_skeleton = not self._show_skeleton
         print(f"[RenderEngine] skeleton_panel={'on' if self._show_skeleton else 'off'}")
+
+    def toggle_captions(self) -> None:
+        """Flip subtitle display (pause-menu option, C key). Session-scoped:
+        flips the in-memory `captions_enabled` config flag that gates
+        `_draw_captions`; the config.json default is untouched on disk."""
+        on = not self.config.get("captions_enabled", True)
+        self.config["captions_enabled"] = on
+        print(f"[RenderEngine] captions={'on' if on else 'off'}")
 
     # ------------------------------------------------------------------
     # Master volume
@@ -383,6 +444,10 @@ class RenderEngine:
             self._flash_start += delta
             self._flash_until += delta
         self._audio_epoch += delta   # keep the audio-position estimate honest
+        if self._pending_audio_at is not None:
+            self._pending_audio_at += delta   # a held-back track waits out the pause
+        for clip in self._pending_clips:
+            clip["at"] += delta               # ... and so do delayed pick sounds
         if self._music_active:
             try:
                 pygame.mixer.music.unpause()
@@ -399,44 +464,87 @@ class RenderEngine:
 
         sw, sh = self._screen.get_size()
         veil = pygame.Surface((sw, sh), pygame.SRCALPHA)
-        veil.fill((0, 0, 0, 120))
+        veil.fill(P.VEIL_RGBA)
         self._screen.blit(veil, (0, 0))
 
         if self._font:
-            title = self._font.render("|| PAUSED", True, (255, 255, 255))
-            self._screen.blit(title, ((sw - title.get_width()) // 2, sh // 2 - 70))
-        if self._small_font:
-            hint = self._small_font.render(
-                "Space: resume    S: skip prologue    K: skeleton panel    "
-                "D: debug    F: fullscreen", True, (200, 200, 200))
-            self._screen.blit(hint, ((sw - hint.get_width()) // 2, sh // 2 - 34))
+            title = self._font.render("|| PAUSED", True, P.NORTH_STAR)
+            self._screen.blit(title, ((sw - title.get_width()) // 2, sh // 2 - 116))
 
         self._draw_volume_slider(sw, sh)
+        self._draw_pause_keys(sw, sh, sh // 2 + 30)
+
+    def _draw_pause_keys(self, sw: int, sh: int, top: int) -> None:
+        """Operator key reference, laid out as two labelled columns.
+
+        It used to be one run-on line of six items, which is unreadable at a
+        glance on a projected wall. Keys are amber (the interactive colour),
+        actions are dim: the eye finds the key first, then reads across."""
+        font = self._small_font
+        if not font:
+            return
+        cap_state = "ON" if self.config.get("captions_enabled", True) else "OFF"
+        columns = (
+            ("PLAYBACK", (("Space", "resume"),
+                          ("S", "skip prologue / epilogue"),
+                          ("Esc", "quit"))),
+            ("DISPLAY", (("C", f"captions  {cap_state}"),
+                         ("K", "skeleton panel"),
+                         ("D", "debug overlay"),
+                         ("F", "fullscreen"))),
+        )
+
+        line_h = font.get_linesize() + 4
+        gutter = 12          # key column -> action column
+        col_gap = 54         # between the two columns
+        # Size each column to its own content so the two blocks sit evenly.
+        metrics = []
+        for header, rows in columns:
+            kw = max(font.size(k)[0] for k, _ in rows)
+            aw = max(font.size(a)[0] for _, a in rows)
+            metrics.append((max(kw + gutter + aw, font.size(header)[0]), kw))
+        total_w = sum(w for w, _ in metrics) + col_gap
+        x = (sw - total_w) // 2
+
+        for (header, rows), (col_w, key_w) in zip(columns, metrics):
+            head = font.render(header, True, P.LANTERN_DIM)
+            self._screen.blit(head, (x, top))
+            y = top + line_h + 2
+            for key, action in rows:
+                ks = font.render(key, True, P.LANTERN)
+                # Right-align the key against the gutter so the actions line up.
+                self._screen.blit(ks, (x + key_w - ks.get_width(), y))
+                self._screen.blit(font.render(action, True, P.LINEN_DIM),
+                                  (x + key_w + gutter, y))
+                y += line_h
+            x += col_w + col_gap
 
     def _draw_volume_slider(self, sw: int, sh: int) -> None:
         """Volume slider for the pause menu. Up/Down adjust; the bar is drag-clickable."""
         bar_w, bar_h = 360, 8
         bx = (sw - bar_w) // 2
-        by = sh // 2 + 20
+        by = sh // 2 - 30
         rect = pygame.Rect(bx, by, bar_w, bar_h)
         self._volume_slider_rect = rect
 
         if self._small_font:
             label = self._small_font.render(
-                f"Volume  {int(round(self._volume * 100))}%   (Up / Down)", True, (220, 220, 220))
+                f"Volume  {int(round(self._volume * 100))}%   (Up / Down)", True, P.LINEN_DIM)
             self._screen.blit(label, ((sw - label.get_width()) // 2, by - 26))
 
         # Track
-        pygame.draw.rect(self._screen, (90, 90, 90), rect, border_radius=4)
-        # Fill
+        pygame.draw.rect(self._screen, P.TRACK, rect, border_radius=4)
+        # Fill — amber, like every other live interactive value. It used to be a
+        # green inches away from the success-flash green, on the one screen an
+        # operator stares at; green now means exactly one thing.
         fill_w = int(bar_w * self._volume)
         if fill_w > 0:
-            pygame.draw.rect(self._screen, (90, 200, 120),
+            pygame.draw.rect(self._screen, P.LANTERN,
                              pygame.Rect(bx, by, fill_w, bar_h), border_radius=4)
         # Knob
         kx = bx + fill_w
-        pygame.draw.circle(self._screen, (240, 240, 240), (kx, by + bar_h // 2), 9)
-        pygame.draw.circle(self._screen, (60, 60, 60), (kx, by + bar_h // 2), 9, 2)
+        pygame.draw.circle(self._screen, P.LINEN, (kx, by + bar_h // 2), 9)
+        pygame.draw.circle(self._screen, P.NIGHT_DEEP, (kx, by + bar_h // 2), 9, 2)
 
     def update(self, pose_data=None,
                gesture_debug: dict | None = None,
@@ -445,6 +553,42 @@ class RenderEngine:
                tutorial_card: dict | None = None):
         if not self._screen:
             return
+
+        # Frame-gap watchdog: reports a stall wherever it happened in the main
+        # loop (player, bus handlers, frame decode), which the per-operation
+        # timers above then attribute. A frozen picture while the audio runs on
+        # always shows up here first. Threshold is 80ms (2.5 dropped frames at
+        # 30fps): the first-gesture freeze produced NO logs at the old 150ms —
+        # a sequence of sub-150ms slow iterations reads as a freeze on screen
+        # but is invisible to a single-gap check. Rate-limited so the print
+        # itself can't feed a stall loop.
+        t_now = time.perf_counter()
+        if self._last_update_t:
+            gap_ms = (t_now - self._last_update_t) * 1000.0
+            if gap_ms >= 500.0:
+                # Mode switch (camera setup, boot screen) — not a pacing
+                # problem. Stale history must not fake a degradation report.
+                self._pace_times.clear()
+            if gap_ms >= 80.0 and not self._paused and t_now >= self._gap_mute_until:
+                self._gap_mute_until = t_now + 0.5
+                print(f"[perf] frame gap {gap_ms:.0f}ms "
+                      f"(shot {self._shot_id}, frame {self._frame_index})",
+                      flush=True)
+        self._last_update_t = t_now
+
+        # Rolling pacing monitor: catches SUSTAINED degradation no single-gap
+        # check can see — e.g. a second of 60-80ms iterations halves the frame
+        # rate (a visible stutter) without one gap crossing the watchdog. One
+        # line at most every 2s, only while a shot is actually on screen.
+        self._pace_times.append(t_now)
+        if not self._paused and self._frames:
+            n = sum(1 for t in self._pace_times if t_now - t <= 1.0)
+            if 2 <= n <= 20 and t_now - self._pace_report_t >= 2.0 \
+                    and t_now - self._pace_times[0] >= 1.0:
+                self._pace_report_t = t_now
+                print(f"[perf] pacing: {n} updates in the last second "
+                      f"(target ~30, shot {self._shot_id}, "
+                      f"frame {self._frame_index})", flush=True)
 
         # Tutorial runs while the shot player (and its time anchors) stay paused:
         # draw the code-rendered card, the live hand cursors and the success flash
@@ -478,6 +622,8 @@ class RenderEngine:
         #    stays flat regardless of shot length. Until ready, the previous shot's
         #    last frame stays frozen on screen.
         self._service_loading()
+        self._service_pending_audio()
+        self._service_pending_clips()
 
         playing = bool(self._frames) and self._loading_dir is None
 
@@ -575,6 +721,7 @@ class RenderEngine:
         self._draw_star_trail(pose_data, gesture_debug)
         self._draw_interaction_indicator(gesture_debug)
         self._draw_hand_cursors(pose_data, gesture_debug)
+        self._draw_captions()
 
         if self._debug:
             self._draw_oi_target_flag(gesture_debug)
@@ -648,27 +795,114 @@ class RenderEngine:
         if sound is not None:
             self._sound_cache.move_to_end(key)
             return sound
+        t0 = time.perf_counter()
         try:
             sound = pygame.mixer.Sound(key)
         except Exception as exc:
             print(f"[RenderEngine] audio load failed: {key}: {exc}")
             return None
+        # Decoding a whole shot's audio.mp3 is hundreds of ms of PCM — never do
+        # it on a frame the visitor is watching.
+        warn_slow(f"decode {os.path.basename(key)}", t0)
         self._sound_cache[key] = sound
         while len(self._sound_cache) > self._SOUND_CACHE_MAX:
             self._sound_cache.popitem(last=False)
         return sound
 
+    def master_audio_offset_ms(self, shot_id=None) -> int:
+        """Lip-sync trim for this shot's BAKED master audio, in ms.
+
+        Only baked whole-file audio (`audio.mp3`) is affected: shots built from
+        layered `audio_events` are frame-anchored to the picture and can't
+        drift, so trimming them would only break something that works.
+
+        POSITIVE holds the audio back (the fix when audio runs ahead of the
+        lips); NEGATIVE starts the file that far in, so it runs earlier.
+        `master_audio_offset_ms_by_shot["<id>"]` overrides the global
+        `master_audio_offset_ms`; null/absent falls back to the global. Read at
+        shot start, so tuning is an edit + relaunch — no re-export."""
+        per_shot = self.config.get("master_audio_offset_ms_by_shot") or {}
+        val = per_shot.get(str(shot_id)) if shot_id is not None else None
+        if val is None:
+            val = self.config.get("master_audio_offset_ms", 0)
+        try:
+            return int(val)
+        except (TypeError, ValueError):
+            print(f"[RenderEngine] bad master audio offset {val!r} — using 0")
+            return 0
+
     def _begin_audio(self) -> None:
-        if self._pending_audio:
-            sound = self._load_sound(self._pending_audio)
-            if sound is not None:
-                ch = pygame.mixer.Channel(0)
-                ch.set_volume(self._volume)
-                ch.play(sound)
-                self._audio_path  = self._pending_audio
-                self._audio_pos0  = 0.0
-                self._audio_epoch = time.monotonic()
-            self._pending_audio = None
+        """Start (or schedule) the shot's baked audio.mp3 at the top of the shot."""
+        self._sync_shot_audio_to_picture(0.0)
+
+    def _sync_shot_audio_to_picture(self, picture_s: float) -> None:
+        """Place the shot's baked audio for picture position `picture_s`,
+        honouring the master offset.
+
+        ONE positioner for every entry point — shot start AND every seek
+        (start-at-shot, skip-prologue, skip-epilogue). The offset used to live
+        only in the shot-start path, so skipping the prologue re-started the
+        audio through _seek_shot_audio and silently threw the trim away.
+
+        A positive offset means the audio should LAG the picture, so the audio
+        target is `picture_s - offset`. When that is still negative (near the
+        top of the shot) there is nothing to play yet: hold the start until the
+        offset has elapsed, then begin at 0."""
+        path = self._pending_audio or self._audio_path
+        if not path:
+            return
+        offset_s = self.master_audio_offset_ms(self._shot_id) / 1000.0
+        target = picture_s - offset_s
+        self._pending_audio = path
+        if target < 0.0:
+            # Not due yet — silence anything already running so the old
+            # position can't leak through the wait.
+            self._silence_shot_audio()
+            self._pending_audio_at = time.monotonic() - target
+            self._pending_audio_pos = 0.0
+            print(f"[RenderEngine] shot {self._shot_id} master audio held "
+                  f"{-target:.3f}s (offset {offset_s * 1000:.0f}ms)")
+            return
+        self._pending_audio_at = None
+        self._pending_audio_pos = target
+        self._start_pending_audio()
+
+    def _silence_shot_audio(self) -> None:
+        """Stop whatever is carrying the shot's baked audio, leaving the
+        layered audio_events channels (3+) alone."""
+        self._stop_music()
+        try:
+            pygame.mixer.Channel(0).stop()
+        except Exception:
+            pass
+
+    def _start_pending_audio(self) -> None:
+        """Play the pending baked audio at `_pending_audio_pos` seconds in,
+        streamed on mixer.music (see below — never a decoded Sound)."""
+        path = self._pending_audio
+        pos = max(0.0, self._pending_audio_pos or 0.0)
+        self._pending_audio = None
+        self._pending_audio_at = None
+        self._pending_audio_pos = 0.0
+        if not path:
+            return
+        # Always stream via mixer.music. The old pos-0 path decoded the WHOLE
+        # mp3 into a Channel-0 Sound — 689ms measured on the main thread for
+        # shot 01's 5-minute master track, seen as a picture freeze at every
+        # baked shot start, with the picture clock running through the stall
+        # so the audio then lagged by the same ~700ms for the rest of the
+        # shot (under the 2s drift net — never self-corrected). The music
+        # stream decodes incrementally (~1ms to start) and can seek, so one
+        # path serves shot starts and skips alike.
+        self._audio_path = path
+        self._seek_shot_audio(pos)
+
+    def _service_pending_audio(self) -> None:
+        """Start a delayed master audio track once its offset has elapsed."""
+        if self._pending_audio_at is None or self._paused:
+            return
+        if time.monotonic() >= self._pending_audio_at:
+            self._start_pending_audio()
 
     def _stop_music(self) -> None:
         if self._music_active:
@@ -685,15 +919,27 @@ class RenderEngine:
         offset."""
         if not self._audio_path:
             return
+        t0 = time.perf_counter()
         try:
             pygame.mixer.Channel(0).stop()
             pygame.mixer.music.load(self._audio_path)
             pygame.mixer.music.set_volume(self._volume)
-            pygame.mixer.music.play(start=max(0.0, pos_s))
+            # The stop+load above can cost ~100ms on a long mp3 while the
+            # picture clock keeps running. Starting at the position computed
+            # BEFORE the load bakes that latency in as permanent extra audio
+            # lag — it sits far below the 2s drift net, so it never
+            # self-corrects, and after a prologue skip it landed on top of
+            # master_audio_offset_ms (a 50ms trim played as ~150ms). Fold the
+            # elapsed time into the start position so the stream begins where
+            # the picture is NOW.
+            start = max(0.0, pos_s + (time.perf_counter() - t0))
+            pygame.mixer.music.play(start=start)
+            warn_slow(f"music.load+seek {os.path.basename(str(self._audio_path))}", t0)
             self._music_active = True
-            self._audio_pos0   = pos_s
+            self._audio_pos0   = start
             self._audio_epoch  = time.monotonic()
-            print(f"[RenderEngine] shot audio re-synced to {pos_s:.1f}s")
+            print(f"[RenderEngine] shot audio re-synced to {start:.1f}s "
+                  f"(+{(start - pos_s) * 1000:.0f}ms load latency)")
         except Exception as exc:
             print(f"[RenderEngine] shot audio seek failed: {exc}")
 
@@ -702,9 +948,14 @@ class RenderEngine:
         if shot is None:
             return
         self._fps = getattr(shot, "fps", 24)
+        self._captions = getattr(shot, "captions", []) or []
         self._loading_kind = getattr(shot, "kind", "playback")
+        self._shot_id = getattr(shot, "shot", None)
         audio_file = getattr(shot, "audio_file", None)
         self._pending_audio = str(audio_file) if audio_file else None
+        self._pending_audio_at = None   # drop any unfired delay from the last shot
+        self._pending_clips.clear()     # ... and any pick sound still counting down
+        self._last_audio_resync = 0.0   # a fresh shot may re-sync immediately
         self._stop_music()          # a seeked shot's audio must not outlive it
         self._audio_path = None
 
@@ -747,7 +998,7 @@ class RenderEngine:
         return (w, h)
 
     def _on_oi_flash(self, data: dict):
-        self._flash_color = data.get("color", (0, 255, 80))
+        self._flash_color = data.get("color", P.SUCCESS)
         duration_ms = data.get("duration_ms", 800)
         self._flash_start = time.monotonic()
         self._flash_until = self._flash_start + duration_ms / 1000.0
@@ -768,6 +1019,101 @@ class RenderEngine:
             ch.play(sound)
         except Exception as exc:
             print(f"[RenderEngine] SFX play failed: {exc}")
+
+    _CLIP_SLICE_MAX = 12
+
+    def _slice_sound(self, path, source_offset_s: float, duration_s: float):
+        """A Sound covering [source_offset_s, +duration_s) of `path`.
+
+        Cut from the decoded PCM (Sounds can't seek, and pre-rendering trimmed
+        files would mean a re-export every time someone nudges a number), so
+        offset/duration stay tunable in the Builder alone. duration_s <= 0
+        means "to the end of the file". Slices are LRU-cached — a choice pick
+        can fire many times per visit."""
+        offset = max(0.0, float(source_offset_s or 0.0))
+        dur = max(0.0, float(duration_s or 0.0))
+        if offset <= 0.0 and dur <= 0.0:
+            return self._load_sound(path)
+        key = (str(path), round(offset, 3), round(dur, 3))
+        hit = self._clip_slices.get(key)
+        if hit is not None:
+            self._clip_slices.move_to_end(key)
+            return hit
+        base = self._load_sound(path)
+        if base is None:
+            return None
+        init = pygame.mixer.get_init()
+        if not init:
+            return base
+        # get_raw() on a long file copies the whole decoded buffer — cheap for a
+        # UI blip, very much not for a 5-minute bed.
+        t0 = time.perf_counter()
+        freq, size, channels = init
+        frame_bytes = max(1, channels * (abs(size) // 8))
+        raw = base.get_raw()
+        start = int(offset * freq) * frame_bytes
+        if start >= len(raw):
+            print(f"[RenderEngine] clip offset {offset:.2f}s is past the end of "
+                  f"{os.path.basename(str(path))} — playing from the start")
+            start = 0
+        end = len(raw) if dur <= 0.0 else min(len(raw),
+                                              start + int(dur * freq) * frame_bytes)
+        try:
+            sound = pygame.mixer.Sound(buffer=raw[start:end])
+        except Exception as exc:
+            print(f"[RenderEngine] clip slice failed: {exc}")
+            return base
+        warn_slow(f"slice {os.path.basename(str(path))}", t0)
+        self._clip_slices[key] = sound
+        while len(self._clip_slices) > self._CLIP_SLICE_MAX:
+            self._clip_slices.popitem(last=False)
+        return sound
+
+    def _on_play_clip(self, data: dict):
+        """Play a one-shot clip with optional delay / source offset / duration.
+
+        Used by the choice blocks' pick & switch audio. `delay_s` waits before
+        starting (the visitor's gesture lands, then the sound answers it)."""
+        path = data.get("path")
+        if not path or not os.path.exists(str(path)):
+            if path:
+                print(f"[RenderEngine] clip not found: {path}")
+            return
+        entry = {
+            "path": str(path),
+            "source_offset_s": float(data.get("source_offset_s", 0.0) or 0.0),
+            "duration_s": float(data.get("duration_s", 0.0) or 0.0),
+            "gain": float(data.get("gain", 1.0) or 1.0),
+            "channel": int(data.get("channel", 1)),
+        }
+        delay = max(0.0, float(data.get("delay_s", 0.0) or 0.0))
+        if delay > 0.0:
+            entry["at"] = time.monotonic() + delay
+            self._pending_clips.append(entry)
+        else:
+            self._play_clip_now(entry)
+
+    def _play_clip_now(self, entry: dict) -> None:
+        sound = self._slice_sound(entry["path"], entry["source_offset_s"],
+                                  entry["duration_s"])
+        if sound is None:
+            return
+        try:
+            ch = pygame.mixer.Channel(entry["channel"])
+            ch.set_volume(max(0.0, min(1.0, entry["gain"])) * self._volume)
+            ch.play(sound)
+        except Exception as exc:
+            print(f"[RenderEngine] clip play failed: {exc}")
+
+    def _service_pending_clips(self) -> None:
+        if not self._pending_clips or self._paused:
+            return
+        now = time.monotonic()
+        due = [c for c in self._pending_clips if c["at"] <= now]
+        if due:
+            self._pending_clips = [c for c in self._pending_clips if c["at"] > now]
+            for entry in due:
+                self._play_clip_now(entry)
 
     def _on_set_frame_window(self, data: dict):
         self._oi_frame_start = data.get("start")
@@ -791,13 +1137,44 @@ class RenderEngine:
 
         # Baked-audio re-sync: if this segment start is far from where the
         # shot's audio.mp3 currently is (a seek — start-at-shot / skip-prologue),
-        # restart the audio at the matching offset. Contiguous play-through
-        # transitions land within the tolerance and never restart.
-        if self._audio_path and self._seg_start and not self._seg_loop:
+        # re-place the audio for the new picture position. Contiguous
+        # play-through transitions land within the tolerance and never restart.
+        # Routed through _sync_shot_audio_to_picture so the master offset
+        # survives a skip (it used to be applied only at shot start).
+        if self._seg_start and not self._seg_loop:
+            t0_sync = time.perf_counter()
             expected = max(0.0, (self._seg_start - 1) / max(1, self._fps))
-            playing  = self._audio_pos0 + (time.monotonic() - self._audio_epoch)
-            if abs(expected - playing) > 2.0:
-                self._seek_shot_audio(expected)
+            if self._pending_audio:
+                # Still waiting to start: the queued position is now wrong.
+                self._sync_shot_audio_to_picture(expected)
+            elif self._audio_path:
+                playing = self._audio_pos0 + (time.monotonic() - self._audio_epoch)
+                drift = abs(expected - playing)
+                # Rate-limited: a re-sync reloads the WHOLE master mp3 into the
+                # music stream, which blocks the main thread long enough to be
+                # seen as a freeze. If real drift ever sits above the threshold
+                # this would otherwise fire at every segment boundary — each
+                # stall adding drift, so it never recovers. Seeks are one-off,
+                # so a cooldown costs them nothing.
+                now = time.monotonic()
+                if drift > 2.0 and now - self._last_audio_resync >= 10.0:
+                    self._last_audio_resync = now
+                    print(f"[RenderEngine] audio re-sync: picture {expected:.1f}s "
+                          f"vs audio {playing:.1f}s (drift {drift:.1f}s)")
+                    self._sync_shot_audio_to_picture(expected)
+                elif drift > 2.0:
+                    print(f"[RenderEngine] audio drift {drift:.1f}s — re-sync "
+                          f"suppressed (cooling down)")
+            # An audio (re)placement above blocks the main thread — the mp3
+            # seek-scan inside music.play(start=) alone measured ~100ms — and
+            # the picture anchor was set BEFORE the stall, so the picture
+            # would jump the stall forward while the audio starts at the
+            # pre-stall position: ~100ms of extra audio lag on every seek,
+            # invisible to the 2s drift net. Shift the anchor by the measured
+            # stall so picture and audio both start "now", aligned.
+            blocked = time.perf_counter() - t0_sync
+            if blocked >= 0.005:
+                self._seg_anchor += blocked
 
     # ------------------------------------------------------------------
     # Drawing helpers
@@ -897,7 +1274,7 @@ class RenderEngine:
     # the tracking visuals were confusing players mid-trace (Scene 4/5 punch list).
     _NO_CURSOR_TYPES = {"directional_draw"}
 
-    _DOT_COLORS = {"L": (60, 220, 90), "R": (70, 160, 255)}   # green / blue
+    _DOT_COLORS = {"L": P.HAND_L, "R": P.HAND_R}   # green / blue — matches the tinted PNGs
 
     # Pose landmark indices per side: wrist + the pose "hand point" (index).
     _POSE_SIDE_POINTS = {"L": (15, 19), "R": (16, 20)}
@@ -920,9 +1297,10 @@ class RenderEngine:
             return
         gd = gesture_debug or {}
         active_type = gd.get("active_type")
+        active_params = gd.get("active_params") or {}
         # A window can force its icon via params {"cursor": ...}: an icon name,
         # "dots" (plain tracking dots) or "hidden" (no cursor at all).
-        override = (gd.get("active_params") or {}).get("cursor")
+        override = active_params.get("cursor")
         window_open = (bool(active_type)
                        and not gd.get("input_locked")
                        and active_type not in self._NO_CURSOR_TYPES
@@ -938,6 +1316,11 @@ class RenderEngine:
             self._cursor_fade_alpha = max(
                 0.0, self._cursor_fade_alpha - dt / self._CURSOR_FADE_OUT_S)
         if self._cursor_fade_alpha <= 0.0:
+            # Fully hidden — the next window starts from a clean aim. This is
+            # the only reset point: clearing on window-open would blank a still
+            # valid angle on a frame where the pose happens to be stale.
+            self._cursor_fade_angle["L"] = None
+            self._cursor_fade_angle["R"] = None
             return
 
         if window_open:
@@ -957,6 +1340,9 @@ class RenderEngine:
             mode = self._cursor_fade_mode
 
         w, h = self._screen.get_size()
+        # Computed every frame (four attribute reads) so the latch stays warm
+        # between windows and a radial window opens already aimed.
+        torso = self._torso_center_screen(pose_data, w, h)
 
         if pose_data:
             for side, (wrist_i, index_i) in self._POSE_SIDE_POINTS.items():
@@ -987,31 +1373,133 @@ class RenderEngine:
                 icon_shape = mode             # explicit (incl. cursor override)
             else:
                 icon_shape = state["shape"]   # grab: "open" | "fist"
-            # Mirror chirality (playtest-verified per art set): the open/fist
-            # art is drawn anatomically, so on the mirrored display pose side L
-            # needs the *_r art (a mirror flips handedness). The point/knock
-            # art was authored already-mirrored — same-side art is correct.
-            if icon_shape in ("open", "fist"):
-                art_side = "r" if side == "L" else "l"
-            else:
-                art_side = side.lower()
+            # All four icon families are colour-tinted per side (green *_l for
+            # the green-dot L hand, blue *_r for the blue-dot R hand), so art
+            # side must follow the tracked side — same-side for EVERY shape.
+            # (open/fist used to flip L<->r "for mirror chirality", which put
+            # the blue fist on the green hand and vice versa — the playtest
+            # "swapped hands on the fist" report.)
+            art_side = side.lower()
             # "dots" mode draws the plain tracking dots instead of an icon.
             icon = (None if mode == "dots"
                     else self._hand_icons.get(f"{icon_shape}_{art_side}"))
             # Stale (pose dropout) dims the cursor; the window fade multiplies.
             alpha = int(255 * fade * (0.47 if age > 0.5 else 1.0))
             if icon is None:
-                color = self._DOT_COLORS.get(side, (220, 220, 220))
+                color = self._DOT_COLORS.get(side, P.LINEN)
                 r = 10
                 dot = pygame.Surface((r * 2 + 2, r * 2 + 2), pygame.SRCALPHA)
                 pygame.draw.circle(dot, (*color, alpha), (r + 1, r + 1), r)
                 self._screen.blit(dot, (x - r - 1, y - r - 1))
                 continue
+            # The point hand is drawn finger-up; rotate it to aim at the target
+            # (region box), radially out from the torso on a left/right choice,
+            # or along a declared direction — so it reads as "point THERE".
+            if mode == "point":
+                if window_open:
+                    ang = self._point_icon_angle(active_params, x, y, w, h,
+                                                 torso=torso)
+                    self._cursor_fade_angle[side] = ang
+                else:
+                    # Hold the last aim through the fade-out.
+                    ang = self._cursor_fade_angle.get(side)
+                # `is not None`, not truthiness: 0.0 is a legitimate aim (hand
+                # straight above the torso centre, or direction "up").
+                if ang is not None:
+                    icon = pygame.transform.rotate(icon, ang)
             if alpha < 255:
                 icon = icon.copy()
                 icon.set_alpha(alpha)
             self._screen.blit(icon, (x - icon.get_width() // 2,
                                      y - icon.get_height() // 2))
+
+    def _draw_captions(self) -> None:
+        """Subtitle overlay: draw the caption(s) active at the shot playhead.
+
+        Each caption {at_s, duration_s, text, rect?} is authored in the
+        Experience Builder (rect = screen-space placement) or generated from
+        the script; without a rect it lands in a default bottom band. Gated by
+        config `captions_enabled` (default on)."""
+        if not self._captions or not self._screen:
+            return
+        if not self.config.get("captions_enabled", True):
+            return
+        frame = getattr(self, "_frame_index", None)
+        if frame is None:
+            return
+        t = frame / max(1, self._fps)
+        active = [c for c in self._captions
+                  if c["at_s"] <= t < c["at_s"] + max(0.1, c["duration_s"])]
+        if not active:
+            return
+        w, h = self._screen.get_size()
+        if self._caption_font is None:
+            if not pygame.font.get_init():
+                pygame.font.init()
+            # Preference chain resolves to the first installed face; on the
+            # Windows kiosk that's Segoe UI Semibold (clean, wide counters —
+            # reads well against moving art on a projected wall).
+            self._caption_font = pygame.font.SysFont(
+                "segoeuisemibold,segoeui,trebuchetms,tahoma,arial",
+                max(18, int(h * 0.040)))
+        for cap in active:
+            rect = cap.get("rect")
+            if rect:
+                rx, ry = int(rect["x"] * w), int(rect["y"] * h)
+                rw, rh = int(rect["w"] * w), int(rect["h"] * h)
+            else:
+                rw, rh = int(w * 0.80), int(h * 0.16)
+                rx, ry = (w - rw) // 2, int(h * 0.80)
+            self._blit_caption(cap["text"], rx, ry, rw, rh)
+
+    def _blit_caption(self, text: str, rx: int, ry: int, rw: int, rh: int) -> None:
+        """One caption card inside the placement rect: word-wrapped text on a
+        rounded, semi-opaque panel sized to the text (not the whole rect),
+        centred in the rect, with a soft drop shadow under the glyphs."""
+        font = self._caption_font
+        pad_x = max(14, int(rw * 0.028))
+        pad_y = max(8, pad_x // 2)
+        maxw = max(1, rw - 2 * pad_x)
+        lines, cur = [], ""
+        for word in str(text).split():
+            trial = (cur + " " + word).strip()
+            if not cur or font.size(trial)[0] <= maxw:
+                cur = trial
+            else:
+                lines.append(cur)
+                cur = word
+        if cur:
+            lines.append(cur)
+        lh = font.get_linesize()
+        text_w = max((font.size(ln)[0] for ln in lines), default=1)
+        card_w = min(rw, text_w + 2 * pad_x)
+        card_h = lh * max(1, len(lines)) + 2 * pad_y
+
+        card = pygame.Surface((card_w, card_h), pygame.SRCALPHA)
+        radius = max(3, min(8, card_h // 8))   # gently rounded, not pill-shaped
+        pygame.draw.rect(card, P.CAPTION_BG_RGBA,
+                         pygame.Rect(0, 0, card_w, card_h), border_radius=radius)
+        pygame.draw.rect(card, P.EDGE_RGBA,
+                         pygame.Rect(0, 0, card_w, card_h), width=1,
+                         border_radius=radius)
+
+        y = pad_y
+        for ln in lines:
+            surf = font.render(ln, True, P.LINEN)
+            shadow = font.render(ln, True, (0, 0, 0))
+            shadow.set_alpha(P.SHADOW_ALPHA)
+            lx = (card_w - surf.get_width()) // 2
+            card.blit(shadow, (lx + 2, y + 2))
+            card.blit(surf, (lx, y))
+            y += lh
+
+        # Centre the card in the placement rect, clamped on-screen.
+        sw, sh = self._screen.get_size()
+        cx = rx + (rw - card_w) // 2
+        cy = ry + max(0, (rh - card_h) // 2)
+        cx = max(0, min(cx, sw - card_w))
+        cy = max(0, min(cy, sh - card_h))
+        self._screen.blit(card, (cx, cy))
 
     # 8-way direction unit-ish vectors (screen space) shared by the draw
     # indicator and the debug arrows.
@@ -1020,6 +1508,96 @@ class RenderEngine:
         "up_left": (-1, -1), "up_right": (1, -1),
         "down_left": (-1, 1), "down_right": (1, 1),
     }
+
+    # Torso reference frame for radial point cursors. Same landmark set as
+    # engines/detectors/rules/pose_helpers.geometry (shoulders + hips), read
+    # inline here to keep this module's imports cheap (see the import block).
+    _TORSO_LM = (11, 12, 23, 24)
+    _TORSO_TTL_S = 4.0    # matches the cursor last-seen ghost window
+
+    @staticmethod
+    def _icon_angle_from_vec(dx, dy):
+        """Rotation (deg, pygame CCW) that aims the finger-up icon along
+        (dx, dy), or None for the zero vector.
+
+        pygame.transform.rotate is CCW while screen-y is down, and the icon
+        points up (screen angle -90deg), so R = -90 - atan2(dy, dx)."""
+        if dx == 0 and dy == 0:
+            return None
+        return -90.0 - math.degrees(math.atan2(dy, dx))
+
+    @classmethod
+    def _wants_radial_point(cls, params) -> bool:
+        """True for a two-way LEFT/RIGHT choice window with no region_rect —
+        the decision blocks (shots 09/37/50), armed by the fork FSM as
+        point_region/directional_point with directions ["left","right"].
+
+        Those cursors aim radially OUT from the visitor's torso so each hand
+        reads as "push this way". Single-direction windows (the tutorial's
+        point LEFT/RIGHT/DOWN steps) deliberately stay upright."""
+        if params.get("region_rect"):
+            return False
+        dirs = params.get("directions")
+        return bool(dirs) and set(dirs) == {"left", "right"}
+
+    def _torso_center_screen(self, pose_data, sw, sh):
+        """Screen-space torso centre, or None when the pose can't supply one.
+
+        Definition mirrors engines/detectors/rules/pose_helpers.geometry: x
+        from the shoulder midpoint (steadier than hips under an occluding
+        arm), y from the mean of shoulder-y and hip-y — roughly sternum to
+        navel. x is mirrored like every other player-layer draw.
+
+        Stricter than geometry() in one way: all four landmarks must pass the
+        visibility gate. geometry() checks presence only, and a phantom hip
+        would swing every icon on screen. Latched for _TORSO_TTL_S so it
+        survives pose dropouts exactly like the cursor position does."""
+        now = time.monotonic()
+        pts = []
+        if pose_data:
+            for idx in self._TORSO_LM:
+                if idx >= len(pose_data):
+                    pts = []
+                    break
+                lm = pose_data[idx]
+                if getattr(lm, "visibility", 1.0) < 0.5:
+                    pts = []
+                    break
+                pts.append(lm)
+        if len(pts) == 4:
+            sh_l, sh_r, hip_l, hip_r = pts
+            mid_x = (sh_l.x + sh_r.x) / 2.0
+            mid_y = ((sh_l.y + sh_r.y) / 2.0 + (hip_l.y + hip_r.y) / 2.0) / 2.0
+            self._torso_screen = (int((1 - mid_x) * sw), int(mid_y * sh))
+            self._torso_t = now
+            return self._torso_screen
+        if (self._torso_screen is not None
+                and now - self._torso_t <= self._TORSO_TTL_S):
+            return self._torso_screen
+        return None
+
+    def _point_icon_angle(self, params, x, y, sw, sh, torso=None):
+        """Rotation (deg, pygame CCW) to aim the finger-up point icon at its
+        target: the mirrored centre of a `region_rect`, else radially outward
+        from the torso centre on a two-way left/right choice, else the
+        declared `direction`. Returns None (draw upright) when there's nothing
+        to aim at — including a hand sitting exactly on the torso centre."""
+        rect = params.get("region_rect")
+        direction = params.get("direction")
+        if rect:
+            # Same mirror the indicator ring / debug rect use (display_x = 1-raw_x).
+            tx = (1.0 - rect.get("x", 0.0) - rect.get("w", 0.0) / 2.0) * sw
+            ty = (rect.get("y", 0.0) + rect.get("h", 0.0) / 2.0) * sh
+            dx, dy = tx - x, ty - y
+        elif torso is not None and self._wants_radial_point(params):
+            # Radial: the ray from the body's centre through this hand, so the
+            # icon tilts left/right with the reach and up/down with its height.
+            dx, dy = x - torso[0], y - torso[1]
+        elif direction in self._DIR_VEC_8:
+            dx, dy = self._DIR_VEC_8[direction]
+        else:
+            return None
+        return self._icon_angle_from_vec(dx, dy)
 
     @staticmethod
     def _arrow_wings(ex, ey, ang, head):
@@ -1213,7 +1791,7 @@ class RenderEngine:
             a = seam
             pygame.draw.circle(fx, (*color, int(45 * a)), (int(px), int(py)), 16)
             pygame.draw.circle(fx, (*color, int(110 * a)), (int(px), int(py)), 10)
-            pygame.draw.circle(fx, (255, 250, 235, int(230 * a)),
+            pygame.draw.circle(fx, (*P.NORTH_STAR, int(230 * a)),
                                (int(px), int(py)), 5)
 
             self._screen.blit(fx, (0, 0))
@@ -1240,48 +1818,260 @@ class RenderEngine:
             # Soft pulsing ellipse ring around the target area
             ring = pygame.Surface((rx * 2 + 20, ry * 2 + 20), pygame.SRCALPHA)
             alpha = int(90 + 100 * pulse)
-            pygame.draw.ellipse(ring, (255, 210, 90, alpha),
+            pygame.draw.ellipse(ring, (*P.LANTERN, alpha),
                                 pygame.Rect(4, 4, rx * 2 + 12, ry * 2 + 12),
                                 width=5 + int(3 * pulse))
             self._screen.blit(ring, (cx - rx - 10, cy - ry - 10))
+
+    # ------------------------------------------------------------------
+    # Tutorial step figures (code-drawn vector art)
+    # ------------------------------------------------------------------
+    #
+    # A stylised person performing the step's gesture, drawn in a UNIT box
+    # (u, v in 0..1) and scaled into the card's corner panel — same spirit as
+    # _POSE_CONNECTIONS below, but hand-authored rather than tracked. Only the
+    # arms and the accent change per pose, so six poses cost six dict entries
+    # instead of six drawing functions.
+    #
+    # MIRROR NOTE: this is a DIAGRAM IN SCREEN SPACE, not an anatomical figure.
+    # "point_left" reaches toward the LEFT OF THE BOX because the prompt says
+    # "point to the LEFT side of the screen" and the visitor sees themselves
+    # mirrored. Do not "correct" it to anatomical left.
+    _FIG_HEAD = (0.50, 0.17, 0.075)          # cu, cv, radius (in box height)
+    _FIG_SPINE = ((0.50, 0.255), (0.50, 0.58))
+    _FIG_LEGS = (((0.50, 0.58), (0.39, 0.86)), ((0.50, 0.58), (0.61, 0.86)))
+    _FIG_SHOULDER = {"L": (0.395, 0.33), "R": (0.605, 0.33)}
+    # Arms hanging at rest — the default for any side a pose doesn't pose.
+    _FIG_REST = {"L": ((0.34, 0.45), (0.32, 0.58)),
+                 "R": ((0.66, 0.45), (0.68, 0.58))}
+
+    # figure key -> arms {side: (elbow_uv, hand_uv)}, which sides are "doing"
+    # the gesture, the accent mark, and the caption under the figure.
+    _FIGURES = {
+        "raise_both": {
+            "arms": {"L": ((0.33, 0.24), (0.30, 0.06)),
+                     "R": ((0.67, 0.24), (0.70, 0.06))},
+            "active": ("L", "R"), "accent": "spark_hands",
+            "caption": "Both hands up",
+        },
+        "point_target": {
+            "arms": {"R": ((0.68, 0.34), (0.76, 0.30))},
+            "active": ("R",), "accent": "target_box",
+            "caption": "Point and hold",
+        },
+        "point_left": {
+            "arms": {"L": ((0.30, 0.33), (0.20, 0.29))},
+            "active": ("L",), "accent": "arrow_left",
+            "caption": "Point left",
+        },
+        "point_right": {
+            "arms": {"R": ((0.70, 0.33), (0.80, 0.29))},
+            "active": ("R",), "accent": "arrow_right",
+            "caption": "Point right",
+        },
+        "point_down": {
+            "arms": {"R": ((0.70, 0.42), (0.76, 0.58))},
+            "active": ("R",), "accent": "arrow_down",
+            "caption": "Point down",
+        },
+        # "reach_in" removed with the tutorial's Reach IN step (August 2026);
+        # the "ripple" accent drawer remains available for future figures.
+    }
+
+    @staticmethod
+    def _fig_pt(box, u: float, v: float):
+        """Unit-box (u, v) -> pixel point inside `box`."""
+        return (int(box.x + u * box.w), int(box.y + v * box.h))
+
+    def _tutorial_figure_box(self, sw: int, sh: int):
+        """Panel rect for the step figure — bottom-RIGHT of the tutorial card.
+
+        Moves to the bottom-LEFT when the K-key skeleton mini-panel owns that
+        corner: swapping corners is the only rule that holds at every
+        resolution (the panel is a fixed 240x180, so shrinking or stacking
+        breaks on small displays). Always fully on screen."""
+        fw = max(200, int(sw * 0.20))
+        fh = max(180, int(sh * 0.30))
+        m  = max(8, int(sh * 0.03))
+        corner_taken = self._debug or self._show_skeleton
+        bx = m if corner_taken else sw - fw - m
+        by = sh - fh - m
+        bx = max(0, min(bx, max(0, sw - fw)))
+        by = max(0, min(by, max(0, sh - fh)))
+        return pygame.Rect(bx, by, fw, fh)
+
+    def _draw_step_figure(self, figure, box) -> None:
+        """Panel + stick figure + accent + caption for one tutorial step.
+
+        STATIC — no animation. The figure is a reference diagram the visitor
+        reads once; a moving one competes with the live hand cursors and reads
+        as noise on a projected wall.
+
+        Everything is drawn into an inset ART rect, never the panel rect, so
+        no limb or arrowhead can crowd the border, and the caption gets a
+        reserved band of its own. No-op for a missing or unknown figure key."""
+        spec = self._FIGURES.get(figure) if figure else None
+        if spec is None or not self._screen:
+            return
+
+        panel = pygame.Surface((box.w, box.h), pygame.SRCALPHA)
+        radius = max(4, int(box.h * 0.06))
+        pygame.draw.rect(panel, (*P.CLOTH, 235), panel.get_rect(),
+                         border_radius=radius)
+        pygame.draw.rect(panel, P.EDGE_RGBA, panel.get_rect(), width=1,
+                         border_radius=radius)
+        self._screen.blit(panel, box.topleft)
+
+        # Inset drawing area: breathing room on every side, plus a caption band.
+        pad = max(8, int(min(box.w, box.h) * 0.10))
+        font = getattr(self, "_tut_label_font", None) or self._small_font
+        cap_h = (font.get_linesize() + pad // 2) if font else pad
+        art = pygame.Rect(box.x + pad, box.y + pad,
+                          box.w - 2 * pad, box.h - 2 * pad - cap_h)
+        if art.w <= 0 or art.h <= 0:
+            return
+
+        stroke = max(2, int(art.h * 0.028))
+        active = spec.get("active", ())
+        arms = {**self._FIG_REST, **spec["arms"]}
+
+        def line(a, b, color, w):
+            pygame.draw.line(self._screen, color, self._fig_pt(art, *a),
+                             self._fig_pt(art, *b), w)
+
+        # Body — dim, so the acting limb reads first.
+        cu, cv, r = self._FIG_HEAD
+        pygame.draw.circle(self._screen, P.LANTERN_DIM, self._fig_pt(art, cu, cv),
+                           max(3, int(r * art.h)), stroke)
+        line(*self._FIG_SPINE, P.LANTERN_DIM, stroke)
+        for a, b in self._FIG_LEGS:
+            line(a, b, P.LANTERN_DIM, stroke)
+
+        for side, (elbow, hand) in arms.items():
+            color = P.LANTERN if side in active else P.LANTERN_DIM
+            w = stroke + 1 if side in active else stroke
+            line(self._FIG_SHOULDER[side], elbow, color, w)
+            line(elbow, hand, color, w)
+            if side in active:
+                pygame.draw.circle(self._screen, color,
+                                   self._fig_pt(art, *hand),
+                                   max(2, int(art.h * 0.022)))
+
+        self._draw_figure_accent(spec, arms, art, stroke)
+
+        caption = spec.get("caption")
+        if caption and font:
+            surf = font.render(caption, True, P.LINEN_DIM)
+            self._screen.blit(surf, (box.x + (box.w - surf.get_width()) // 2,
+                                     box.bottom - pad // 2 - cap_h))
+
+    # Accent -> the direction its arrow points (screen space).
+    _ACCENT_DIR = {"arrow_left": (-1.0, 0.0), "arrow_right": (1.0, 0.0),
+                   "arrow_down": (0.0, 1.0)}
+
+    def _draw_figure_accent(self, spec, arms, art, stroke: int) -> None:
+        """The mark that says what the gesture DOES: a directional arrow off
+        the hand, the box being pointed at, sparks over raised hands, or
+        rings travelling toward the viewer. Static, and sized to stay inside
+        the art rect."""
+        accent = spec.get("accent")
+        active = spec.get("active", ())
+        hands = [arms[s][1] for s in active if s in arms]
+        if not hands:
+            return
+
+        if accent in self._ACCENT_DIR:
+            dx, dy = self._ACCENT_DIR[accent]
+            hx, hy = hands[0]
+            sx, sy = self._fig_pt(art, hx + dx * 0.04, hy + dy * 0.04)
+            ex, ey = self._fig_pt(art, hx + dx * 0.15, hy + dy * 0.15)
+            pygame.draw.line(self._screen, P.LANTERN, (sx, sy), (ex, ey),
+                             stroke + 1)
+            ang = math.atan2(ey - sy, ex - sx)
+            head = max(6, int(art.h * 0.055))
+            # Shared arrowhead helper — wings land behind the tip.
+            for wing in self._arrow_wings(ex, ey, ang, head):
+                pygame.draw.line(self._screen, P.LANTERN, (ex, ey), wing,
+                                 stroke + 1)
+
+        elif accent == "target_box":
+            hx, hy = hands[0]
+            bw, bh = int(art.w * 0.15), int(art.h * 0.15)
+            bx, by = self._fig_pt(art, hx + 0.05, hy - 0.07)
+            tgt = pygame.Surface((bw, bh), pygame.SRCALPHA)
+            tgt.fill((*P.LANTERN, 60))
+            self._screen.blit(tgt, (bx, by))
+            pygame.draw.rect(self._screen, P.LANTERN, (bx, by, bw, bh),
+                             max(2, stroke - 1))
+
+        elif accent == "spark_hands":
+            for hx, hy in hands:
+                pygame.draw.circle(self._screen, P.LANTERN,
+                                   self._fig_pt(art, hx, hy),
+                                   max(3, int(art.h * 0.030)))
+
+        elif accent == "ripple":
+            hx, hy = hands[0]
+            cx, cy = self._fig_pt(art, hx, hy)
+            # Concentric rings, brightest at the hand — motion toward the viewer.
+            for frac, alpha in ((0.055, 255), (0.105, 170), (0.155, 95)):
+                rad = int(art.h * frac)
+                if rad <= 0:
+                    continue
+                ring = pygame.Surface((rad * 2 + 4, rad * 2 + 4), pygame.SRCALPHA)
+                pygame.draw.circle(ring, (*P.LANTERN, alpha),
+                                   (rad + 2, rad + 2), rad, max(2, stroke - 1))
+                self._screen.blit(ring, (cx - rad - 2, cy - rad - 2))
+
+    def _tutorial_fonts(self, sh: int):
+        """Screen-relative tutorial fonts, rebuilt when the display height
+        changes. At 1080 these resolve to the 52/30px the card used when the
+        sizes were hard-coded; every other resolution now scales with it."""
+        if getattr(self, "_tut_font_h", None) != sh:
+            self._tut_title_font = pygame.font.SysFont(
+                "arial", max(28, int(sh * 0.048)), bold=True)
+            self._tut_prompt_font = pygame.font.SysFont(
+                "arial", max(18, int(sh * 0.028)))
+            self._tut_label_font = pygame.font.SysFont(
+                "arial", max(12, int(sh * 0.020)), bold=True)
+            self._tut_font_h = sh
+        return self._tut_title_font, self._tut_prompt_font, self._tut_label_font
 
     def _draw_tutorial_card(self, card: dict) -> None:
         """Full-screen code-rendered tutorial/calibration card. The card dict
         comes from TutorialEngine.card_info()."""
         sw, sh = self._screen.get_size()
-        self._screen.fill((12, 14, 24))
-
-        title_font = getattr(self, "_tut_title_font", None)
-        if title_font is None:
-            self._tut_title_font  = pygame.font.SysFont("arial", 52, bold=True)
-            self._tut_prompt_font = pygame.font.SysFont("arial", 30)
-            title_font = self._tut_title_font
+        self._screen.fill(P.NIGHT)
+        title_font, prompt_font, _ = self._tutorial_fonts(sh)
+        # One pulse for the whole card so the target box and the figure's
+        # arrow breathe in phase.
+        pulse = 0.5 + 0.5 * math.sin(time.monotonic() * 4.0)
 
         title = card.get("title", "")
         if title:
-            surf = title_font.render(title, True, (255, 235, 200))
+            surf = title_font.render(title, True, P.NORTH_STAR)
             self._screen.blit(surf, ((sw - surf.get_width()) // 2, int(sh * 0.14)))
 
         prompt = card.get("prompt", "")
         if prompt:
-            for li, line in enumerate(self._wrap_text(prompt, self._tut_prompt_font,
+            lh = prompt_font.get_linesize()
+            for li, line in enumerate(self._wrap_text(prompt, prompt_font,
                                                       int(sw * 0.7))):
-                surf = self._tut_prompt_font.render(line, True, (230, 230, 230))
+                surf = prompt_font.render(line, True, P.LINEN)
                 self._screen.blit(surf, ((sw - surf.get_width()) // 2,
-                                         int(sh * 0.26) + li * 40))
+                                         int(sh * 0.26) + li * lh))
 
         # Optional on-card target box (player-space rect) for the pointing steps.
         rect = card.get("target_rect")
         if rect:
-            pulse = 0.5 + 0.5 * math.sin(time.monotonic() * 4.0)
             rx0 = int(rect["x"] * sw)
             ry0 = int(rect["y"] * sh)
             rw  = int(rect["w"] * sw)
             rh  = int(rect["h"] * sh)
             fill = pygame.Surface((rw, rh), pygame.SRCALPHA)
-            fill.fill((255, 210, 90, 30 + int(30 * pulse)))
+            fill.fill((*P.LANTERN, 30 + int(30 * pulse)))
             self._screen.blit(fill, (rx0, ry0))
-            pygame.draw.rect(self._screen, (255, 210, 90),
+            pygame.draw.rect(self._screen, P.LANTERN,
                              (rx0, ry0, rw, rh), 4 + int(2 * pulse))
 
         # Optional big demo icon (e.g. the open-hand illustration).
@@ -1294,14 +2084,19 @@ class RenderEngine:
                 self._screen.blit(big, ((sw - big.get_width()) // 2,
                                         int(sh * 0.44)))
 
+        # Corner box: a static vector figure performing this step's gesture,
+        # for visitors who won't read the prompt.
+        self._draw_step_figure(card.get("figure"),
+                               self._tutorial_figure_box(sw, sh))
+
         if self._small_font:
             step = card.get("step")
             total = card.get("total")
             if step is not None:
                 surf = self._small_font.render(f"Step {step} of {total}", True,
-                                               (170, 170, 170))
+                                               P.LINEN_DIM)
                 self._screen.blit(surf, ((sw - surf.get_width()) // 2, int(sh * 0.86)))
-            hint = self._small_font.render("S: skip tutorial", True, (120, 120, 120))
+            hint = self._small_font.render("S: skip tutorial", True, P.LINEN_FAINT)
             self._screen.blit(hint, ((sw - hint.get_width()) // 2, int(sh * 0.90)))
 
     # MediaPipe Pose: upper-body skeleton for the debug panel.
@@ -1395,16 +2190,25 @@ class RenderEngine:
         pygame.display.flip()
         return body_ok
 
+    # Panel geometry — the tutorial figure box reads this to avoid the corner.
+    _MINI_PANEL_SIZE = (240, 180)
+    _MINI_PANEL_MARGIN = 10
+
     def _draw_hand_mini_panel(self, pose_data=None):
         """Pose-skeleton preview in bottom-right corner — keeps the main screen
-        clean."""
+        clean.
+
+        DELIBERATELY UNTHEMED: this and the other diagnostic surfaces (debug
+        overlay, camera setup, the tuners) are instruments, not part of the
+        piece. They keep their high-contrast diagnostic colours — don't
+        "finish the job" by running engines/palette.py through them."""
         if not self._screen:
             return
         sw, sh = self._screen.get_size()
-        panel_w, panel_h = 240, 180
+        panel_w, panel_h = self._MINI_PANEL_SIZE
         pad = 10
-        px = sw - panel_w - 10
-        py = sh - panel_h - 10
+        px = sw - panel_w - self._MINI_PANEL_MARGIN
+        py = sh - panel_h - self._MINI_PANEL_MARGIN
 
         bg = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
         bg.fill((0, 0, 0, 210))

@@ -6,8 +6,9 @@ clock.  ShotSequencePlayer emits "shot_audio_lines" when entering PLAY/PLAY_INTR
 this adapter catches that event and plays each AL-XX-YYY file sequentially on
 pygame mixer channel 0.
 
-It does NOT use NarrationEngine.load_scene() or NarrationEngine.start() — those
-belong to the legacy dialogue-cue-driven model (scene_manager.py + narration_engine.py).
+The legacy dialogue-cue-driven model (a scene manager + narration engine that
+owned the clock) was removed in the July 2026 cleanup; this adapter is all
+that remains of the narration layer.
 
 VoiceEngine compatibility: a "dialogue_cue" event is emitted for each line so that
 VoiceEngine._on_dialogue_cue can open VI windows.  Once shot metadata has vi_config

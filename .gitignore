@@ -43,6 +43,18 @@ assets/video/
 assets/audio/stems/
 assets/audio/voice_lines/
 
-# Local backups of the Experience Builder project
+# Local backups of the Experience Builder project (scripts write
+# *.alignbak / *.capbak / *.<name>bak snapshots next to the .bhrx)
 *.pre_simplify.json
 *.bhrx.backup.json
+*.bhrx.json.*bak
+
+# Icon source art (2 MB webp; the .ico built from it may be tracked later)
+assets/bhr_icon.webp
+
+# Local-only (Aug 2026): keep CI config, the assets tree, and the state
+# notes out of git. Files already tracked under assets/ (hand icons, docs)
+# stay tracked — an ignore rule never untracks.
+.github/
+assets/
+State.md

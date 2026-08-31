@@ -2,9 +2,9 @@
 main.py — Black Heritage Reclaimed entry point.
 
 Boot sequence:
-  1. Resolve host profile (CLI --profile flag → BHR_HOST_PROFILE env var → hostname → auto)
-  2. Load config.json + merge host profile
-  3. Init Pygame + display (fullscreen/windowed per profile)
+  1. Load config.json (the "host" section carries the hardware binding —
+     camera/mic/display/performance + on-site tuning; formerly config/host_profiles/)
+  2. Init Pygame + display (fullscreen/windowed per config["host"]["display"])
   4. Wire up EventBus and all engines
   5. Run calibration (Scene 1 hand-tracking liveness check)
   6. Enter the main loop: process camera frame → update engines → render
@@ -13,7 +13,6 @@ Boot sequence:
 import argparse
 import json
 import os
-import socket
 import sys
 import time
 from collections import deque
@@ -74,15 +73,24 @@ class MetaVoice:
 
 
 # Frozen (PyInstaller) builds: __file__ points inside the bundled _internal dir,
-# so resolve ROOT to the folder holding BHR.exe — config.json, config/, scenes/,
+# so resolve ROOT to the folder holding BHR.exe — config.json, scenes/,
 # models/ and assets/ are deployed next to the exe (see scripts/build_exe.py).
 if getattr(sys, "frozen", False):
     ROOT = Path(sys.executable).parent
+    SCENES_ROOT = ROOT / "scenes"                    # staged by build_exe.py
 else:
     ROOT = Path(__file__).parent
+    # The .bhrx export is the single source of truth (Aug 2026): dev runs
+    # default to the generated tree (scripts/export_experience.py output).
+    SCENES_ROOT = ROOT / "export" / "generated"
 CONFIG_PATH = ROOT / "config.json"
-PROFILES_DIR = ROOT / "config" / "host_profiles"
-SCENES_ROOT = ROOT / "scenes"
+
+# Report any main-loop iteration slower than this, broken down by phase.
+# A frozen picture with the audio running on is always a stall here.
+try:
+    LOOP_SLOW_MS = float(os.environ.get("BHR_SLOW_MS", "60")) * 2.5
+except ValueError:
+    LOOP_SLOW_MS = 150.0
 
 
 def load_config() -> dict:
@@ -90,27 +98,10 @@ def load_config() -> dict:
         return json.load(f)
 
 
-def resolve_profile_name(cli_name: str | None) -> str:
-    """Return the profile name to load, following the precedence chain."""
-    if cli_name:
-        return cli_name
-    if env := os.environ.get("BHR_HOST_PROFILE"):
-        return env
-    hostname = socket.gethostname().lower()
-    for path in PROFILES_DIR.glob("*.json"):
-        if path.stem.lower() in hostname or hostname in path.stem.lower():
-            return path.stem
-    return "auto"
-
-
-def load_profile(name: str) -> dict:
-    path = PROFILES_DIR / f"{name}.json"
-    if not path.exists():
-        fallback = PROFILES_DIR / "auto.json"
-        print(f"[main] Profile '{name}' not found, falling back to auto.", file=sys.stderr)
-        path = fallback
-    with open(path, encoding="utf-8") as f:
-        return json.load(f)
+def host_profile(config: dict) -> dict:
+    """The hardware-binding section of config.json (camera/mic/display/
+    performance + on-site tuning). Formerly config/host_profiles/<name>.json."""
+    return config.get("host", {})
 
 
 def open_camera(profile: dict, config: dict | None = None):
@@ -147,7 +138,7 @@ def open_camera(profile: dict, config: dict | None = None):
         _set_cap_props(cap, w, h, fps)
 
     if not cap or not cap.isOpened():
-        raise RuntimeError(f"[main] Failed to open camera (profile: {profile.get('profile_name')})")
+        raise RuntimeError("[main] Failed to open camera (check config.json \"host\" camera section)")
     return cap
 
 
@@ -219,12 +210,12 @@ def detector_test(detector_name: str, params: dict):
         print(f"[detector-test] Unknown detector '{detector_name}'. Available: {sorted(REGISTRY)}")
         return
 
-    profile_name = resolve_profile_name(None)
-    profile = load_profile(profile_name)
+    config = load_config()
+    profile = host_profile(config)
     cam_cfg = profile.get("camera", {})
     w, h = cam_cfg.get("resolution", [1280, 720])
     # Same camera selection as the main runtime (Orbbec first when enabled).
-    cap = open_camera(profile, load_config())
+    cap = open_camera(profile, config)
 
     mp_pose = mp.solutions.pose
     pose = mp_pose.Pose(model_complexity=1, enable_segmentation=False,
@@ -305,6 +296,49 @@ def detector_test(detector_name: str, params: dict):
     _cv2.destroyAllWindows()
 
 
+def _run_prewarm(config: dict, scenes_root: Path) -> None:
+    """Build every shot's framecache.npy pack at the display resolution, then
+    return. Ship this + run once on a fresh machine (`BHR.exe --prewarm`) so
+    the first real run has no cold-JPEG-decode stutter; packs persist on disk.
+
+    Mirrors scripts/prewarm_frame_cache.py but resolves ROOT/resolution the way
+    the app does, so it works inside the frozen exe (which has no scripts/)."""
+    from engines.frame_cache import FrameCacheManager
+    display_cfg = config.get("_profile", {}).get("display", {})
+    res = display_cfg.get("resolution") or config.get("resolution", [1920, 1080])
+    w, h = int(res[0]), int(res[1])
+    frame_dirs = sorted(d for d in (list(scenes_root.glob("scenes/scene_*/frames"))
+                                    + list(scenes_root.glob("act_*/shot_*/frames")))
+                        if d.is_dir())
+    if not frame_dirs:
+        print(f"[prewarm] no scenes/scene_*/frames under {scenes_root}")
+        return
+    total = sum(1 for d in frame_dirs for _ in d.glob("*.jpg"))
+    print(f"[prewarm] {len(frame_dirs)} shots ({total} frames, "
+          f"~{total * w * h * 3 / 1e9:.1f} GB of packs) at {w}x{h}", flush=True)
+    cache = FrameCacheManager((w, h))
+    built = skipped = failed = 0
+    t0 = time.monotonic()
+    for i, d in enumerate(frame_dirs, 1):
+        shot = d.parent.name
+        paths = cache._ensure_paths(d)
+        if not paths:
+            continue
+        pack = cache._pack_path(d)
+        if pack.exists() and cache._pack_valid(pack, len(paths)):
+            skipped += 1
+            continue
+        print(f"[prewarm] {i}/{len(frame_dirs)} building {shot} "
+              f"({len(paths)} frames)...", flush=True)
+        if cache._build_pack(pack, paths):
+            built += 1
+        else:
+            failed += 1
+            print(f"[prewarm] {shot}: pack build FAILED")
+    print(f"[prewarm] done in {time.monotonic() - t0:.0f}s — {built} built, "
+          f"{skipped} already valid, {failed} failed", flush=True)
+
+
 def _run_dry_run(config: dict, scenes_root=None) -> None:
     """
     Console-only dry-run: walk all 78 shots through ShotSequencePlayer.
@@ -373,19 +407,22 @@ def _run_dry_run(config: dict, scenes_root=None) -> None:
 
 def main():
     parser = argparse.ArgumentParser(description="Black Heritage Reclaimed")
-    parser.add_argument("--profile", metavar="NAME", help="Host profile name")
     parser.add_argument("--start-shot", metavar="SHOT", default=None,
                         help="Shot number to start at (e.g. 09). Skips all earlier shots. "
                              "On an exported tree with a shot_map.json, this is the "
                              "ORIGINAL master-timeline shot number (tracker 01-79) and "
                              "seeks into the exported shot that contains it.")
     parser.add_argument("--scenes", metavar="DIR", default=None,
-                        help="Alternate scenes root (a folder containing sequence.json), "
-                             "e.g. export/scenes_generated from the Experience Builder. "
-                             "Default: the live scenes/ tree.")
+                        help="Alternate scenes root (a folder containing sequence.json). "
+                             "Default: export/generated (the .bhrx export), or the "
+                             "staged scenes/ folder in a frozen build.")
     parser.add_argument("--dry-run", action="store_true",
                         help="Console-only: walk all 78 shots through ShotSequencePlayer "
                              "with no camera, display, or audio, then exit")
+    parser.add_argument("--prewarm", action="store_true",
+                        help="Build every shot's frame-cache pack at the display "
+                             "resolution, then exit (run once on a fresh machine "
+                             "to remove first-run stutter; packs persist on disk)")
     parser.add_argument("--detector-test", metavar="DETECTOR",
                         help="Run live detector test for the named detector and exit")
     parser.add_argument("--detector-params", metavar="JSON", default="{}",
@@ -413,12 +450,16 @@ def main():
         detector_test(args.detector_test, params)
         return
 
-    profile_name = resolve_profile_name(args.profile)
-    profile = load_profile(profile_name)
     config = load_config()
+    profile = host_profile(config)
     config["_profile"] = profile
+    if not profile:
+        print("[main] WARNING: config.json has no \"host\" section — "
+              "camera/mic/display fall back to built-in defaults", file=sys.stderr)
 
-    print(f"[main] Using host profile: {profile.get('profile_name', profile_name)}", file=sys.stderr)
+    if args.prewarm:
+        _run_prewarm(config, scenes_root)
+        return
 
     pygame.init()
     pygame.mixer.init(frequency=44100, size=-16, channels=2, buffer=512)
@@ -554,6 +595,9 @@ def main():
             if event.type == pygame.KEYDOWN and event.key == pygame.K_k:
                 # Skeleton-in-corner display option (independent of debug overlay).
                 render.toggle_skeleton()
+            if event.type == pygame.KEYDOWN and event.key == pygame.K_c:
+                # Captions on/off (pause-menu option; works any time).
+                render.toggle_captions()
             if event.type == pygame.KEYDOWN and event.key == pygame.K_s:
                 if tutorial.active:
                     tutorial.skip()
@@ -637,16 +681,28 @@ def main():
             print("[main] tutorial done — RESUMED")
         tutorial_was_active = tutorial.active
 
+        # Per-phase timing: a stall anywhere on the main thread freezes the
+        # picture while the audio runs on. Only prints when a loop iteration is
+        # actually slow, and then names the phase — so it can't be missed the
+        # way a stall outside the instrumented calls was.
+        _t = time.perf_counter
+        _phase = {}
+        _p0 = _t()
+
         if tutorial.active:
             # Detection runs, the shot player stays frozen.
             gesture.update()
             tutorial.update()
         elif not paused:
             gesture.update()
+            _phase["gesture"] = _t()
             player.update()
+            _phase["player"] = _t()
             narration_adapter.update()
             audio_mixer.update()
+            _phase["audio"] = _t()
 
+        _p1 = _t()
         render.update(
             pose_data=gesture.fresh_pose_lm(),
             gesture_debug=gesture.debug_info(),
@@ -654,6 +710,17 @@ def main():
             narration_debug=player.debug_info(),
             tutorial_card=tutorial.card_info() if tutorial.active else None,
         )
+        _p2 = _t()
+
+        if (_p2 - _p0) * 1000.0 >= LOOP_SLOW_MS:
+            parts, prev = [], _p0
+            for name in ("gesture", "player", "audio"):
+                if name in _phase:
+                    parts.append(f"{name} {(_phase[name] - prev) * 1000:.0f}ms")
+                    prev = _phase[name]
+            parts.append(f"render {(_p2 - _p1) * 1000:.0f}ms")
+            print(f"[perf] slow loop {(_p2 - _p0) * 1000:.0f}ms — "
+                  + "  ".join(parts), flush=True)
 
         clock.tick(render_fps)
 

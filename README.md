@@ -295,7 +295,7 @@ main.py                  boot, key handling, main loop
 config.json              every tunable value (see Configuration)
 engines/
   shot_sequence_player   the runtime spine: shot FSMs, holds, branching
-  sequence_loader        scenes/sequence.json + per-shot metadata -> Shot objects
+  sequence_loader        export/generated sequence.json + per-scene metadata -> Shot objects
   render_engine          frame playback, hand-icon cursors, pause menu, tutorial cards
   gesture_engine         camera + MediaPipe Pose thread (pose-only), detector dispatch, depth fusion
   voice_engine           Vosk keyword spotting + hum/whisper DSP
