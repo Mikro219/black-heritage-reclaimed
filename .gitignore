@@ -58,3 +58,6 @@ assets/bhr_icon.webp
 .github/
 assets/
 State.md
+
+# Local Claude Code session config
+.claude/

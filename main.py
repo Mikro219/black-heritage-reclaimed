@@ -234,6 +234,8 @@ def detector_test(detector_name: str, params: dict):
         ret, frame = cap.read()
         if not ret:
             continue
+        if getattr(cap, "frame_is_rgb", False):   # Orbbec delivers RGB now
+            frame = _cv2.cvtColor(frame, _cv2.COLOR_RGB2BGR)
 
         rgb = _cv2.cvtColor(frame, _cv2.COLOR_BGR2RGB)
         pose_results = pose.process(rgb)
@@ -296,10 +298,13 @@ def detector_test(detector_name: str, params: dict):
     _cv2.destroyAllWindows()
 
 
-def _run_prewarm(config: dict, scenes_root: Path) -> None:
-    """Build every shot's framecache.npy pack at the display resolution, then
+def _run_prewarm(config: dict, scenes_root: Path, shots: str = "") -> None:
+    """Build shots' framecache.npy packs at the display resolution, then
     return. Ship this + run once on a fresh machine (`BHR.exe --prewarm`) so
     the first real run has no cold-JPEG-decode stutter; packs persist on disk.
+    `shots` is an optional comma list of shot ids ("01,02,09") — packs are
+    raw RGB, so a full prewarm is a serious disk spend; the staged .bat uses
+    the recommended set (shot 01 + the choice clusters).
 
     Mirrors scripts/prewarm_frame_cache.py but resolves ROOT/resolution the way
     the app does, so it works inside the frozen exe (which has no scripts/)."""
@@ -310,8 +315,13 @@ def _run_prewarm(config: dict, scenes_root: Path) -> None:
     frame_dirs = sorted(d for d in (list(scenes_root.glob("scenes/scene_*/frames"))
                                     + list(scenes_root.glob("act_*/shot_*/frames")))
                         if d.is_dir())
+    if shots:
+        wanted = {s.strip().zfill(2) for s in shots.split(",") if s.strip()}
+        frame_dirs = [d for d in frame_dirs
+                      if d.parent.name.split("_")[-1] in wanted]
     if not frame_dirs:
-        print(f"[prewarm] no scenes/scene_*/frames under {scenes_root}")
+        print(f"[prewarm] no scenes/scene_*/frames under {scenes_root}"
+              + (f" matching --shots {shots}" if shots else ""))
         return
     total = sum(1 for d in frame_dirs for _ in d.glob("*.jpg"))
     print(f"[prewarm] {len(frame_dirs)} shots ({total} frames, "
@@ -420,9 +430,13 @@ def main():
                         help="Console-only: walk all 78 shots through ShotSequencePlayer "
                              "with no camera, display, or audio, then exit")
     parser.add_argument("--prewarm", action="store_true",
-                        help="Build every shot's frame-cache pack at the display "
+                        help="Build shots' frame-cache packs at the display "
                              "resolution, then exit (run once on a fresh machine "
                              "to remove first-run stutter; packs persist on disk)")
+    parser.add_argument("--shots", metavar="IDS", default=None,
+                        help="With --prewarm: comma list of shot ids to build "
+                             "(e.g. 01,02,09). Default: every shot — mind the "
+                             "disk budget")
     parser.add_argument("--detector-test", metavar="DETECTOR",
                         help="Run live detector test for the named detector and exit")
     parser.add_argument("--detector-params", metavar="JSON", default="{}",
@@ -458,7 +472,7 @@ def main():
               "camera/mic/display fall back to built-in defaults", file=sys.stderr)
 
     if args.prewarm:
-        _run_prewarm(config, scenes_root)
+        _run_prewarm(config, scenes_root, shots=args.shots or "")
         return
 
     pygame.init()
@@ -477,7 +491,13 @@ def main():
     narration_adapter = NarrationAdapter(config, bus, shots)
     audio_mixer       = ShotAudioMixer(config, bus,
                                        frame_provider=lambda: render.playback_frame)
-    tutorial          = TutorialEngine(config, bus, gesture)
+    # Any shipped detect.mp3 works for the tutorial's success ping (they are
+    # all copies of the global detect sound).
+    detect_sfx = next(iter(scenes_root.glob("scenes/*/audio/detect.mp3")),
+                      None) or next(iter(
+                          scenes_root.glob("act_*/*/audio/detect.mp3")), None)
+    tutorial          = TutorialEngine(config, bus, gesture,
+                                       detect_sfx=detect_sfx)
 
     # Start the continuous look-ahead frame cache: preloads every shot with art in
     # the background (forward from the current shot) so future shots are fully ready.

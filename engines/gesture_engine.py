@@ -115,7 +115,8 @@ class GestureEngine:
         self._frame_lock = threading.Lock()
         self._pub_pose_lm = None
         self._pub_pose_time: float = 0.0
-        self._pub_frame = None            # latest BGR camera frame (setup screen)
+        self._pub_frame = None            # latest camera frame, native channel
+        self._pub_frame_is_rgb = False    # order (setup screen converts lazily)
         self._pub_seq: int = 0            # increments on each new inference result
         self._last_consumed_seq: int = -1  # last seq the main thread dispatched
 
@@ -199,11 +200,20 @@ class GestureEngine:
                 time.sleep(0.005)   # camera hiccup — don't spin at 100% CPU
                 continue
 
+            # Native channel order: cv2.VideoCapture delivers BGR; the Orbbec
+            # shim delivers the sensor's RGB (frame_is_rgb = True) so MediaPipe
+            # gets it without a per-frame cvtColor round trip.
+            src_is_rgb = bool(getattr(cap, "frame_is_rgb", False))
+
             # Publish the raw frame regardless of lock state — the camera-setup
             # screen needs the live view before the experience starts. Reference
-            # only, no copy: cap.read() returns a fresh array each call.
+            # only, no copy: cap.read() returns a fresh array each call. The
+            # frame is published in its NATIVE order plus a flag;
+            # latest_camera_frame() converts to BGR lazily, so the conversion
+            # is only paid while the setup screen is actually reading frames.
             with self._frame_lock:
                 self._pub_frame = frame
+                self._pub_frame_is_rgb = src_is_rgb
 
             # Always drain the camera to keep the USB pipeline fresh. While
             # input is locked we need no detections, but we do keep the model
@@ -211,7 +221,7 @@ class GestureEngine:
             if not self._should_run_pose(time.monotonic()):
                 continue
 
-            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            rgb = frame if src_is_rgb else cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             t_inf = time.perf_counter()
             pose_results = self._pose.process(rgb)
             # Measured: process() releases the GIL, so a slow inference here
@@ -266,9 +276,18 @@ class GestureEngine:
 
     def latest_camera_frame(self):
         """Newest raw BGR camera frame (or None before the first read). Used by
-        the camera-setup screen; published even while input is locked."""
+        the camera-setup screen; published even while input is locked.
+
+        The frame is stored in its source's native channel order (the Orbbec
+        shim is RGB); the BGR contract of this accessor is preserved by
+        converting HERE, so the cost lands only on the setup screen's reads
+        instead of on every captured frame."""
         with self._frame_lock:
-            return self._pub_frame
+            frame = self._pub_frame
+            is_rgb = self._pub_frame_is_rgb
+        if frame is not None and is_rgb:
+            return cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+        return frame
 
     def fresh_pose_lm(self):
         """Pose landmarks for the render overlay, or None if none were detected
@@ -445,8 +464,13 @@ class GestureEngine:
                                           <= self._player_max_mm):
                 self._player_gated = True
                 pose_lm = None
-                fusion = PoseDepth(depth_sampler, None,
-                                   phantom_behind_mm=self._phantom_behind_mm)
+                # Reuse the object with its pose nulled (available -> False,
+                # every sample path returns None) instead of constructing a
+                # second PoseDepth that discards the first's patch cache.
+                # _torso is cleared too so a direct torso_depth_mm() matches
+                # the no-pose contract.
+                fusion._pose = None
+                fusion._torso = None
         context["_pose_lm"] = pose_lm
         context["_pose_depth"] = fusion
         # Compute live pose-derived thresholds (brow line, shoulder height, mouth/ear

@@ -238,6 +238,12 @@ class RenderEngine:
         self._torso_screen: Optional[tuple] = None
         self._torso_t: float = 0.0
 
+        # Per-frame draw caches (steady-state costs measured Aug 2026):
+        # pulsing target rings per (size, pulse bucket), rotated/faded cursor
+        # icons per (icon, angle bucket, alpha bucket).
+        self._ring_cache: dict = {}
+        self._rot_icon_cache: dict = {}
+
         # Star-trail particle layer (July 2026): tiny 4-point stars trail the
         # visitor's hands while a directional_draw window is armed. Sprites are
         # pre-rendered in init_display; particles are dicts with position,
@@ -492,25 +498,41 @@ class RenderEngine:
         self._paused = False
 
     def _draw_paused_overlay(self) -> None:
-        """Re-blit the held frame and a dimmed PAUSED banner over it."""
-        if self._frames and 0 <= self._frame_index < len(self._frames):
-            self._screen.blit(self._frames[self._frame_index], (0, 0))
-        else:
-            self._screen.fill((0, 0, 0))
+        """Re-blit the held frame and a dimmed PAUSED banner over it.
 
+        The whole screen is static while paused (the kiosk idles here between
+        visitors), yet it was re-composited from scratch every frame — a fresh
+        full-screen SRCALPHA veil plus per-glyph text, ~6-10ms/frame of pure
+        waste. Composite once into a cached surface, invalidated by anything
+        that can change the picture (frame, volume, captions flag, size)."""
         sw, sh = self._screen.get_size()
-        veil = pygame.Surface((sw, sh), pygame.SRCALPHA)
-        veil.fill(P.VEIL_RGBA)
-        self._screen.blit(veil, (0, 0))
+        key = (self._frame_index if self._frames else None, self._volume,
+               bool(self.config.get("captions_enabled", True)), sw, sh)
+        cached = getattr(self, "_pause_cache", None)
+        if cached is None or cached[0] != key:
+            comp = pygame.Surface((sw, sh))
+            if self._frames and 0 <= self._frame_index < len(self._frames):
+                comp.blit(self._frames[self._frame_index], (0, 0))
+            else:
+                comp.fill((0, 0, 0))
+            veil = pygame.Surface((sw, sh), pygame.SRCALPHA)
+            veil.fill(P.VEIL_RGBA)
+            comp.blit(veil, (0, 0))
 
-        # Serif display title — the camera/tutorial redesign's type ladder
-        # applied to the pause screen.
-        title = self._serif_font(max(30, int(sh * 0.062))).render(
-            "Paused", True, P.NORTH_STAR)
-        self._screen.blit(title, ((sw - title.get_width()) // 2, sh // 2 - 130))
-
-        self._draw_volume_slider(sw, sh)
-        self._draw_pause_keys(sw, sh, sh // 2 + 30)
+            screen, self._screen = self._screen, comp   # draw helpers -> comp
+            try:
+                # Serif display title — the camera/tutorial redesign's type
+                # ladder applied to the pause screen.
+                title = self._serif_font(max(30, int(sh * 0.062))).render(
+                    "Paused", True, P.NORTH_STAR)
+                comp.blit(title, ((sw - title.get_width()) // 2, sh // 2 - 130))
+                self._draw_volume_slider(sw, sh)
+                self._draw_pause_keys(sw, sh, sh // 2 + 30)
+            finally:
+                self._screen = screen
+            cached = (key, comp)
+            self._pause_cache = cached
+        self._screen.blit(cached[1], (0, 0))
 
     def _draw_pause_keys(self, sw: int, sh: int, top: int) -> None:
         """Operator key reference, laid out as two labelled columns.
@@ -750,8 +772,7 @@ class RenderEngine:
         if now < self._flash_until and self._flash_overlay is not None:
             duration = self._flash_until - self._flash_start
             progress = (now - self._flash_start) / duration if duration > 0 else 1.0
-            import math as _math
-            alpha = int(self._flash_alpha * _math.sin(progress * _math.pi))
+            alpha = int(self._flash_alpha * math.sin(progress * math.pi))
             alpha = max(0, min(255, alpha))
             self._flash_overlay.fill((*self._flash_color, alpha))
             self._screen.blit(self._flash_overlay, (0, 0))
@@ -998,6 +1019,10 @@ class RenderEngine:
         shot = data.get("shot")
         if shot is None:
             return
+        # prefetch_shot only ever carries the NEXT shot, so the FIRST shot of
+        # a run (and any seek target) would still decode its entry sounds on
+        # the main thread — warm the loading shot's own sounds too.
+        self._on_prefetch_shot({"shot": shot})
         self._fps = getattr(shot, "fps", 24)
         self._captions = getattr(shot, "captions", []) or []
         self._loading_kind = getattr(shot, "kind", "playback")
@@ -1397,7 +1422,6 @@ class RenderEngine:
                 "up_left":    (-1, -1), "up_right":   ( 1, -1),
                 "down_left":  (-1,  1), "down_right": ( 1,  1),
             }
-            import math as _math
             ax = sw // 2
             ay = sh - 80          # near bottom-centre
             arrow_len = 50
@@ -1406,13 +1430,13 @@ class RenderEngine:
                 vec = _DIR_VEC.get(d)
                 if not vec:
                     continue
-                mag = _math.hypot(*vec)
+                mag = math.hypot(*vec)
                 dx = int(vec[0] / mag * arrow_len)
                 dy = int(vec[1] / mag * arrow_len)
                 ex, ey = ax + dx, ay + dy
                 pygame.draw.line(self._screen, COLOR, (ax, ay), (ex, ey), 3)
                 head = 12
-                ang  = _math.atan2(dy, dx)
+                ang  = math.atan2(dy, dx)
                 for hx, hy in self._arrow_wings(ex, ey, ang, head):
                     pygame.draw.line(self._screen, COLOR, (ex, ey),
                                      (int(hx), int(hy)), 2)
@@ -1566,12 +1590,29 @@ class RenderEngine:
                 # `is not None`, not truthiness: 0.0 is a legitimate aim (hand
                 # straight above the torso centre, or direction "up").
                 if ang is not None:
-                    icon = pygame.transform.rotate(icon, ang)
+                    icon = self._rotated_icon(icon, ang, alpha)
+                    alpha = 255   # baked into the cached copy
             if alpha < 255:
-                icon = icon.copy()
-                icon.set_alpha(alpha)
+                icon = self._rotated_icon(icon, 0.0, alpha)
             self._screen.blit(icon, (x - icon.get_width() // 2,
                                      y - icon.get_height() // 2))
+
+    def _rotated_icon(self, icon, ang: float, alpha: int) -> pygame.Surface:
+        """Rotated + faded cursor icon from a small cache. transform.rotate +
+        copy()/set_alpha ran per hand per frame (~0.3-0.8ms); 5-degree angle
+        buckets and 16 alpha steps are invisible at cursor size."""
+        ang_b = int(round(ang / 5.0)) * 5 % 360
+        alpha_b = min(255, (alpha // 16) * 16 + 15)
+        key = (id(icon), ang_b, alpha_b)
+        out = self._rot_icon_cache.get(key)
+        if out is None:
+            out = pygame.transform.rotate(icon, ang_b) if ang_b else icon.copy()
+            if alpha_b < 255:
+                out.set_alpha(alpha_b)
+            if len(self._rot_icon_cache) >= 128:
+                self._rot_icon_cache.pop(next(iter(self._rot_icon_cache)))
+            self._rot_icon_cache[key] = out
+        return out
 
     def _draw_captions(self) -> None:
         """Subtitle overlay: draw the caption(s) active at the shot playhead.
@@ -1671,11 +1712,10 @@ class RenderEngine:
 
         card = pygame.Surface((card_w, card_h), pygame.SRCALPHA)
         radius = max(3, min(8, card_h // 8))   # gently rounded, not pill-shaped
+        # Borderless (Aug 2026, Mike's call): just the semi-opaque panel — the
+        # drop shadow under the glyphs carries the separation from the frame.
         pygame.draw.rect(card, P.CAPTION_BG_RGBA,
                          pygame.Rect(0, 0, card_w, card_h), border_radius=radius)
-        pygame.draw.rect(card, P.EDGE_RGBA,
-                         pygame.Rect(0, 0, card_w, card_h), width=1,
-                         border_radius=radius)
 
         y = pad_y
         for ln in lines:
@@ -1894,20 +1934,39 @@ class RenderEngine:
         elif not active:
             self._trail_last_pos = {"L": None, "R": None}
 
+        # Pre-alpha'd sprite variants + one batched blits() call: set_alpha on
+        # the shared sprite plus 200 individual blits cost ~0.5-1ms/frame.
         alive = []
+        blits = []
         for p in self._trail_particles:
             age = now - p["born"]
             if age >= p["life"]:
                 continue
             k = 1.0 - age / p["life"]
-            sprite = self._star_sprites[p["size_i"]][p["rot_i"]]
-            sprite.set_alpha(int(250 * k ** 1.5))   # ease-out fade
+            a_b = min(7, int((k ** 1.5) * 8))       # 8 fade steps (ease-out)
+            sprite = self._star_alpha_sprite(p["size_i"], p["rot_i"], a_b)
             x = p["x"] + p["vx"] * age
             y = p["y"] + p["vy"] * age
-            self._screen.blit(sprite, (int(x - sprite.get_width() / 2),
-                                       int(y - sprite.get_height() / 2)))
+            blits.append((sprite, (int(x - sprite.get_width() / 2),
+                                   int(y - sprite.get_height() / 2))))
             alive.append(p)
+        if blits:
+            self._screen.blits(blits)
         self._trail_particles = alive
+
+    def _star_alpha_sprite(self, size_i: int, rot_i: int, a_b: int):
+        """Star sprite pre-faded to one of 8 alpha buckets (48 tiny surfaces,
+        built lazily, so the draw loop never mutates the shared sprites)."""
+        cache = getattr(self, "_star_alpha_cache", None)
+        if cache is None:
+            cache = self._star_alpha_cache = {}
+        key = (size_i, rot_i, a_b)
+        sprite = cache.get(key)
+        if sprite is None:
+            sprite = self._star_sprites[size_i][rot_i].copy()
+            sprite.set_alpha(int(250 * (a_b + 0.5) / 8))
+            cache[key] = sprite
+        return sprite
 
         # The pen dot rides on top of its trail.
         if self._hand_glow is not None:
@@ -2026,12 +2085,24 @@ class RenderEngine:
             cy = int((rect["y"] + rect["h"] / 2) * sh)
             rx = max(30, int(rect["w"] * sw / 2))
             ry = max(30, int(rect["h"] * sh / 2))
-            # Soft pulsing ellipse ring around the target area
-            ring = pygame.Surface((rx * 2 + 20, ry * 2 + 20), pygame.SRCALPHA)
-            alpha = int(90 + 100 * pulse)
-            pygame.draw.ellipse(ring, (*P.LANTERN, alpha),
-                                pygame.Rect(4, 4, rx * 2 + 12, ry * 2 + 12),
-                                width=5 + int(3 * pulse))
+            # Soft pulsing ellipse ring around the target area. Authored rects
+            # reach ~900x530 px: allocating + filling that SRCALPHA surface
+            # every frame cost 2-4ms for the life of the window, so the ring
+            # is cached per (size, pulse bucket) — 8 buckets read as a smooth
+            # pulse at 30fps.
+            bucket = min(7, int(pulse * 8))
+            key = (rx, ry, bucket)
+            ring = self._ring_cache.get(key)
+            if ring is None:
+                b = bucket / 7.0
+                ring = pygame.Surface((rx * 2 + 20, ry * 2 + 20),
+                                      pygame.SRCALPHA)
+                pygame.draw.ellipse(ring, (*P.LANTERN, int(90 + 100 * b)),
+                                    pygame.Rect(4, 4, rx * 2 + 12, ry * 2 + 12),
+                                    width=5 + int(3 * b))
+                if len(self._ring_cache) >= 32:   # a few window sizes at most
+                    self._ring_cache.pop(next(iter(self._ring_cache)))
+                self._ring_cache[key] = ring
             self._screen.blit(ring, (cx - rx - 10, cy - ry - 10))
 
     # ------------------------------------------------------------------
@@ -2211,14 +2282,16 @@ class RenderEngine:
                                  stroke + 1)
 
         elif accent == "target_box":
+            # Oval, matching the card's glowing target and the runtime's
+            # pulsing target rings.
             hx, hy = hands[0]
             bw, bh = int(art.w * 0.15), int(art.h * 0.15)
             bx, by = self._fig_pt(art, hx + 0.05, hy - 0.07)
             tgt = pygame.Surface((bw, bh), pygame.SRCALPHA)
-            tgt.fill((*P.LANTERN, 60))
+            pygame.draw.ellipse(tgt, (*P.LANTERN, 60), tgt.get_rect())
             self._screen.blit(tgt, (bx, by))
-            pygame.draw.rect(self._screen, P.LANTERN, (bx, by, bw, bh),
-                             max(2, stroke - 1))
+            pygame.draw.ellipse(self._screen, P.LANTERN, (bx, by, bw, bh),
+                                max(2, stroke - 1))
 
         elif accent == "spark_hands":
             for hx, hy in hands:
@@ -2300,7 +2373,8 @@ class RenderEngine:
         step, total = card.get("step"), card.get("total")
         if step and total:
             side = max(7, int(sh * 0.020))
-            gap = side + max(6, int(sh * 0.012))
+            # A rotated square spans 2*side — centres need that plus daylight.
+            gap = side * 2 + max(10, int(sh * 0.020))
             cx0 = sw // 2 - gap * (total - 1) // 2
             cy = int(sh * 0.115)
             for i in range(total):
@@ -2329,27 +2403,25 @@ class RenderEngine:
         # Optional on-card target box (player-space rect) for the pointing steps.
         rect = card.get("target_rect")
         if rect:
+            # Drawn as a glowing OVAL inscribed in the detection rect — the
+            # detector still tests the rect, but the visitor-facing target
+            # speaks the same circular language as the runtime's pulsing
+            # target rings.
             rx0 = int(rect["x"] * sw)
             ry0 = int(rect["y"] * sh)
             rw  = int(rect["w"] * sw)
             rh  = int(rect["h"] * sh)
             fill = pygame.Surface((rw, rh), pygame.SRCALPHA)
-            fill.fill((*P.LANTERN, 30 + int(30 * pulse)))
+            pygame.draw.ellipse(fill, (*P.LANTERN, 30 + int(30 * pulse)),
+                                fill.get_rect())
             self._screen.blit(fill, (rx0, ry0))
-            pygame.draw.rect(self._screen, P.LANTERN,
-                             (rx0, ry0, rw, rh), 4 + int(2 * pulse))
+            pygame.draw.ellipse(self._screen, P.LANTERN,
+                                (rx0, ry0, rw, rh), 4 + int(2 * pulse))
 
-        # Optional big demo icon (e.g. the open-hand illustration).
-        icon_key = card.get("icon")
-        if icon_key:
-            icon = self._hand_icons.get(icon_key)
-            if icon:
-                big = pygame.transform.smoothscale(
-                    icon, (icon.get_width() * 2, icon.get_height() * 2))
-                self._screen.blit(big, ((sw - big.get_width()) // 2,
-                                        int(sh * 0.44)))
+        # (The old big background hand icon is gone — the centred step figure
+        # is the demonstration now, and the icon drew right behind it.)
 
-        # Corner box: a static vector figure performing this step's gesture,
+        # Centred panel: a static vector figure performing this step's gesture,
         # for visitors who won't read the prompt.
         self._draw_step_figure(card.get("figure"),
                                self._tutorial_figure_box(sw, sh))
@@ -2415,15 +2487,13 @@ class RenderEngine:
         self._cam_overlay = overlay
         return overlay
 
-    def draw_camera_setup(self, frame_bgr, pose_lm) -> bool:
-        """Camera-setup screen (config.json "camera_setup"), Lantern Vignette
-        design (1a): the mirrored live view sunk into a lantern-lit vignette,
-        the tracked skeleton on top, corner brackets, and a serif prompt on a
-        bottom gradient. Confirmed by ENTER/Space or the voice command
-        "ready" (handled in main.py). Returns the body-in-frame verdict.
+    def draw_camera_setup_1a(self, frame_bgr, pose_lm) -> bool:
+        """Lantern Vignette camera-setup design (1a) — KEPT but NOT CALLED.
 
-        Owns the whole frame: fills, draws and flips — the caller skips the
-        normal render update while this screen is active."""
+        The live screen is draw_camera_setup below (1c North Star Arch,
+        Mike's pick Aug 2026); to revert to 1a, swap which method main.py's
+        caller reaches (rename this back over draw_camera_setup). Same
+        contract: mirrored live view, skeleton, body-in-frame verdict."""
         if not self._screen:
             return False
         import numpy as np
@@ -2505,6 +2575,130 @@ class RenderEngine:
                 [("ENTER · SPACE · OR SAY ", P.LINEN_FAINT),
                  ('"READY"', P.LANTERN)], 3)
             self._screen.blit(hint, ((sw - hint.get_width()) // 2, int(sh * 0.925)))
+
+        pygame.display.flip()
+        return body_ok
+
+    def _arch_mask(self, w: int, h: int) -> pygame.Surface:
+        """Arch-shaped alpha mask (rounded-semicircle top, near-square feet)
+        for the North Star Arch viewport. Cached per size."""
+        cached = getattr(self, "_arch_mask_cache", None)
+        if cached is not None and cached.get_size() == (w, h):
+            return cached
+        mask = pygame.Surface((w, h), pygame.SRCALPHA)
+        pygame.draw.rect(mask, (255, 255, 255, 255), mask.get_rect(),
+                         border_top_left_radius=w // 2,
+                         border_top_right_radius=w // 2,
+                         border_bottom_left_radius=max(3, h // 72),
+                         border_bottom_right_radius=max(3, h // 72))
+        self._arch_mask_cache = mask
+        return mask
+
+    def draw_camera_setup(self, frame_bgr, pose_lm) -> bool:
+        """Camera-setup screen (config.json "camera_setup"), North Star Arch
+        design (1c): the mirrored live view held inside an arched window
+        under a glowing North Star on the night ground, with the skeleton
+        drawn inside the arch. Confirmed by ENTER/Space or the voice command
+        "ready" (handled in main.py). Returns the body-in-frame verdict.
+        (1a Lantern Vignette is kept above as draw_camera_setup_1a.)
+
+        Owns the whole frame: fills, draws and flips — the caller skips the
+        normal render update while this screen is active."""
+        if not self._screen:
+            return False
+        import numpy as np
+
+        sw, sh = self._screen.get_size()
+        self._screen.fill(P.NIGHT)
+
+        # Arch geometry (design: 220x290 in a 450-high canvas, centred).
+        ah = int(sh * 0.62)
+        aw = int(ah * (220 / 290))
+        ax = (sw - aw) // 2
+        ay = int(sh * 0.155)
+
+        # Body-in-frame verdict: head and both ankles confidently inside view.
+        def _in_frame(idx):
+            if pose_lm is None or idx >= len(pose_lm):
+                return False
+            lm = pose_lm[idx]
+            return (getattr(lm, "visibility", 0.0) >= 0.5
+                    and 0.02 <= lm.x <= 0.98 and 0.02 <= lm.y <= 0.98)
+        body_ok = _in_frame(0) and _in_frame(27) and _in_frame(28)
+
+        # Compose feed + skeleton on an arch-sized layer, then mask to shape.
+        comp = pygame.Surface((aw, ah), pygame.SRCALPHA)
+        comp.fill((*P.NIGHT_DEEP, 255))
+        ox = oy = 0
+        dw, dh = aw, ah
+        if frame_bgr is not None:
+            # BGR -> RGB and mirror in one slice so the view behaves like a
+            # mirror; scaled to COVER the arch (crop, don't letterbox).
+            rgb = np.ascontiguousarray(frame_bgr[:, ::-1, ::-1])
+            fh, fw = rgb.shape[:2]
+            surf = pygame.image.frombuffer(rgb.tobytes(), (fw, fh), "RGB")
+            scale = max(aw / fw, ah / fh)
+            dw, dh = int(fw * scale), int(fh * scale)
+            ox, oy = (aw - dw) // 2, (ah - dh) // 2
+            comp.blit(pygame.transform.scale(surf, (dw, dh)), (ox, oy))
+        if pose_lm is not None:
+            pts = [(ox + int((1 - lm.x) * dw), oy + int(lm.y * dh))
+                   for lm in pose_lm]
+            def _vis(idx):
+                return (idx < len(pose_lm)
+                        and getattr(pose_lm[idx], "visibility", 0.0) >= 0.5)
+            # Lantern skeleton; success green stays the learned "you did it".
+            color = P.SUCCESS if body_ok else P.LANTERN
+            for a, b in self._POSE_CONNECTIONS_FULL:
+                if _vis(a) and _vis(b):
+                    pygame.draw.line(comp, color, pts[a], pts[b], 2)
+            for idx in range(len(pose_lm)):
+                if _vis(idx):
+                    pygame.draw.circle(comp, color, pts[idx], 3)
+        comp.blit(self._arch_mask(aw, ah), (0, 0),
+                  special_flags=pygame.BLEND_RGBA_MULT)
+        self._screen.blit(comp, (ax, ay))
+        # Arch outline — a thin lantern seam.
+        pygame.draw.rect(self._screen, P.LANTERN_DIM,
+                         (ax, ay, aw, ah), 1,
+                         border_top_left_radius=aw // 2,
+                         border_top_right_radius=aw // 2,
+                         border_bottom_left_radius=max(3, ah // 72),
+                         border_bottom_right_radius=max(3, ah // 72))
+
+        # The North Star above the arch: soft lantern glow + 4-point star.
+        cx, cy = sw // 2, int(ay - sh * 0.055)
+        r = max(6, int(sh * 0.020))
+        glow = pygame.Surface((r * 8, r * 8), pygame.SRCALPHA)
+        for i in range(6):   # many faint rings read as one soft halo
+            gr = int(r * (3.4 - i * 0.45))
+            pygame.draw.circle(glow, (*P.LANTERN, 8 + i * 7),
+                               (r * 4, r * 4), gr)
+        self._screen.blit(glow, (cx - r * 4, cy - r * 4))
+        ri = max(2, int(r * 0.30))
+        pygame.draw.polygon(self._screen, P.NORTH_STAR,
+                            [(cx, cy - r), (cx + ri, cy - ri), (cx + r, cy),
+                             (cx + ri, cy + ri), (cx, cy + r),
+                             (cx - ri, cy + ri), (cx - r, cy),
+                             (cx - ri, cy - ri)])
+
+        # Prompt: serif italic line + tracked hint under the arch.
+        if pose_lm is None:
+            msg = "Step into the lantern's view."
+        elif not body_ok:
+            msg = "Let the frame hold all of you."
+        else:
+            msg = "The frame holds all of you — continue when ready."
+        prompt_font = self._serif_font(max(18, int(sh * 0.048)), italic=True)
+        line = prompt_font.render(msg, True,
+                                  P.SUCCESS if body_ok else P.LINEN)
+        self._screen.blit(line, ((sw - line.get_width()) // 2, int(sh * 0.835)))
+        if self._small_font:
+            hint = self._tracked_label(
+                self._small_font,
+                [("ENTER · SPACE · SAY ", P.LINEN_FAINT),
+                 ('"READY"', P.LANTERN)], 3)
+            self._screen.blit(hint, ((sw - hint.get_width()) // 2, int(sh * 0.915)))
 
         pygame.display.flip()
         return body_ok

@@ -1,7 +1,7 @@
 """
 prewarm_frame_cache.py — Build every shot's framecache.npy pack ahead of time.
 
-    py -3.12 scripts/prewarm_frame_cache.py --scenes export/generated --shots 02,03,04,09,10,12
+    py -3.12 scripts/prewarm_frame_cache.py --scenes export/generated --shots 01,02,03,04,09,10,12
     py -3.12 scripts/prewarm_frame_cache.py --scenes export/generated   (ALL shots — mind the disk!)
     py -3.12 scripts/prewarm_frame_cache.py --resolution 1920x1080
 
@@ -13,9 +13,10 @@ prewarm pass after any frames export makes every run behave like a warm one.
 
 DISK BUDGET: packs are raw RGB — width x height x 3 bytes per frame. The full
 ~45k-frame experience is ~124 GB at 1280x720 and ~280 GB at 1920x1080. Prefer
---shots with the choice/fork shots (where a pick jumps into cold frames); the
-linear stretch shots build fine in the runtime's background window while the
-previous shot plays.
+--shots with SHOT 01 plus the choice/fork shots: 01 is a 9k-frame stretch
+whose build races the playhead on the mini PC (the first-OI freeze), and the
+fork shots jump into cold frames on a pick. Other linear shots build fine in
+the runtime's background window (now playhead-steered).
 
 Resolution must match the runtime's display resolution (config.json "host"
 display.resolution, else config.json "resolution") — a mismatched pack is

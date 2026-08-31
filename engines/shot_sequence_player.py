@@ -85,6 +85,7 @@ class ShotSequencePlayer:
         self._index        = 0
         self._player_state = PLAYER_IDLE
         self._shot_state: Optional[str] = None
+        self._timing_cache: dict = {}   # id(shot) -> merged timing dict
 
         # HOLD tracking
         self._hold_start:    float      = 0.0
@@ -578,7 +579,13 @@ class ShotSequencePlayer:
             return
 
         elapsed = now - self._hold_start
-        timing  = _effective_timing(shot, self.config)
+        # Memoised per shot object — this runs every HOLD tick (the longest-
+        # lived state in the piece) and the merge result never changes.
+        cached = self._timing_cache.get(id(shot))
+        if cached is None:
+            cached = _effective_timing(shot, self.config)
+            self._timing_cache[id(shot)] = cached
+        timing = cached
 
         # OI-only HOLD: advance when the OI window expires
         if self._oi_expiry is not None:

@@ -43,10 +43,31 @@ Integration plan (when the camera arrives)
 
 Depth conventions
 -----------------
-- `read()` returns depth in **millimetres** as float32, aligned to the color frame
-  (same pixel grid), 0.0 = no data (shadow/too close/too far).
-- `depth_at()` samples a small patch and returns the **median of valid pixels**,
-  so single-pixel dropouts on a moving hand don't spike the reading.
+- `read()` returns the RAW uint16 depth frame (a copy — the SDK buffer is
+  recycled), aligned to the color frame (same pixel grid), 0 = no data
+  (shadow/too close/too far). The uint16→mm factor is kept on the camera as
+  `depth_scale`; converting the whole 1280×720 frame to float32 mm every frame
+  (~3.7MB alloc + multiply on the capture thread) was pure waste when the only
+  consumer samples a few small patches.
+- `depth_at()` samples a small patch and returns the **median of valid pixels**
+  × `scale`, so single-pixel dropouts on a moving hand don't spike the reading.
+  Callers holding an already-scaled float frame (tests, old captures) omit
+  `scale` and get the identity behaviour.
+
+Color conventions
+-----------------
+- The Gemini delivers RGB and `read()` keeps it RGB (`OrbbecCapture.frame_is_rgb`
+  is True). The old RGB→BGR flip here was immediately undone by the gesture
+  engine's BGR→RGB cvtColor for MediaPipe — a full-frame round trip per frame
+  for nothing. Consumers that need BGR (cv2.imshow, the camera-setup screen)
+  convert at their edge; plain cv2.VideoCapture stays BGR and has no
+  `frame_is_rgb` attribute.
+
+SDK import is LAZY (Aug 2026): `pyorbbecsdk` costs ~3s + stdout noise at import
+time, and this module used to be dragged into every boot AND test run via
+`engines.depth.__init__` → `pose_helpers` → every detector rule. Availability
+is now computed with `importlib.util.find_spec` (no module execution); the real
+import happens inside the code paths that talk to hardware.
 
 SDK-version note: written against pyorbbecsdk v2 naming. If the installed SDK
 differs (v1 used the same names for everything used here except AlignFilter
@@ -56,23 +77,16 @@ _build_pipeline / read() only; the public surface (read/depth_at) must not chang
 
 from __future__ import annotations
 
+import importlib.util
 import threading
 from typing import Optional, Tuple
 
 import numpy as np
 
-try:  # pyorbbecsdk is optional until the hardware arrives
-    from pyorbbecsdk import (          # type: ignore
-        AlignFilter,
-        Config,
-        OBFormat,
-        OBSensorType,
-        OBStreamType,
-        Pipeline,
-    )
-    ORBBEC_AVAILABLE = True
-except ImportError:
-    ORBBEC_AVAILABLE = False
+# pyorbbecsdk is optional until the hardware arrives. find_spec only scans the
+# path finders — it never executes the module, so this stays instant even when
+# the SDK is installed (the ~3s import is paid only when a Gemini is opened).
+ORBBEC_AVAILABLE = importlib.util.find_spec("pyorbbecsdk") is not None
 
 
 class OrbbecGemini335:
@@ -81,7 +95,8 @@ class OrbbecGemini335:
     Usage:
         cam = OrbbecGemini335(resolution=(1280, 720), fps=30)
         cam.start()
-        color_bgr, depth_mm = cam.read()   # (H,W,3) uint8, (H,W) float32 mm
+        color_rgb, depth_raw = cam.read()  # (H,W,3) uint8 RGB, (H,W) uint16
+        mm = depth_at(depth_raw, 0.5, 0.5, scale=cam.depth_scale)
         ...
         cam.stop()
     """
@@ -95,12 +110,26 @@ class OrbbecGemini335:
         self._resolution = resolution
         self._fps = fps
         self._timeout_ms = timeout_ms
-        self._pipeline: Optional["Pipeline"] = None
-        self._align: Optional["AlignFilter"] = None
+        self._pipeline = None
+        self._align = None
+        # uint16 → millimetres factor of the last depth frame (usually 1.0 on
+        # the Gemini 335). Updated per read(); pass to depth_at(..., scale=).
+        self.depth_scale: float = 1.0
 
     # -- lifecycle ---------------------------------------------------------
 
     def start(self) -> None:
+        # Lazy SDK import — see module docstring. __init__ already verified
+        # availability via ORBBEC_AVAILABLE.
+        from pyorbbecsdk import (          # type: ignore
+            AlignFilter,
+            Config,
+            OBFormat,
+            OBSensorType,
+            OBStreamType,
+            Pipeline,
+        )
+
         self._pipeline = Pipeline()
         config = Config()
         w, h = self._resolution
@@ -127,10 +156,12 @@ class OrbbecGemini335:
     # -- capture -----------------------------------------------------------
 
     def read(self) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
-        """Return (color_bgr, depth_mm) or (None, None) on a dropped frameset.
+        """Return (color_rgb, depth_raw) or (None, None) on a dropped frameset.
 
-        color_bgr: (H, W, 3) uint8 — drop-in replacement for cv2.VideoCapture.read()
-        depth_mm:  (H, W)    float32 millimetres, 0.0 where invalid
+        color_rgb: (H, W, 3) uint8 RGB — the sensor's native order; no per-frame
+                   channel flip (consumers needing BGR convert at their edge)
+        depth_raw: (H, W)    uint16 sensor units, 0 where invalid; multiply by
+                   `self.depth_scale` for millimetres (depth_at does this)
         """
         if self._pipeline is None:
             raise RuntimeError("start() has not been called")
@@ -150,14 +181,14 @@ class OrbbecGemini335:
 
         cw, ch = color_frame.get_width(), color_frame.get_height()
         color = np.frombuffer(color_frame.get_data(), dtype=np.uint8)
-        color = color.reshape((ch, cw, 3))[:, :, ::-1].copy()   # RGB -> BGR
+        color = color.reshape((ch, cw, 3)).copy()   # native RGB; copy off SDK buffer
 
         dw, dh = depth_frame.get_width(), depth_frame.get_height()
         depth_raw = np.frombuffer(depth_frame.get_data(), dtype=np.uint16)
-        depth_raw = depth_raw.reshape((dh, dw))
-        depth_mm = depth_raw.astype(np.float32) * float(depth_frame.get_depth_scale())
+        depth_raw = depth_raw.reshape((dh, dw)).copy()   # SDK recycles the buffer
+        self.depth_scale = float(depth_frame.get_depth_scale())
 
-        return color, depth_mm
+        return color, depth_raw
 
 
 # ---------------------------------------------------------------------------
@@ -165,12 +196,18 @@ class OrbbecGemini335:
 # ---------------------------------------------------------------------------
 
 def depth_at(depth_mm: np.ndarray, x_norm: float, y_norm: float,
-             patch_px: int = 5) -> Optional[float]:
+             patch_px: int = 5, scale: float = 1.0) -> Optional[float]:
     """Median valid depth (mm) in a patch around a normalized coordinate.
 
     x_norm/y_norm are in RAW camera space (0-1, same space MediaPipe landmarks
     arrive in). Returns None when the patch has no valid depth (all zeros or
     coordinate out of frame).
+
+    `scale` converts stored units to millimetres and is applied AFTER slicing
+    the patch — so a raw uint16 frame plus its sensor scale costs a multiply on
+    a handful of pixels instead of a float32 conversion of the whole frame.
+    Pass 1.0 (the default) for a frame already in millimetres (float arrays,
+    tests).
     """
     h, w = depth_mm.shape[:2]
     cx = int(round(x_norm * (w - 1)))
@@ -182,13 +219,13 @@ def depth_at(depth_mm: np.ndarray, x_norm: float, y_norm: float,
     valid = patch[patch > 0]
     if valid.size == 0:
         return None
-    return float(np.median(valid))
+    return float(np.median(valid)) * float(scale)
 
 
 def landmark_depth_mm(depth_mm: np.ndarray, landmark,
-                      patch_px: int = 5) -> Optional[float]:
+                      patch_px: int = 5, scale: float = 1.0) -> Optional[float]:
     """Depth (mm) at a MediaPipe landmark (any object with .x/.y in 0-1)."""
-    return depth_at(depth_mm, landmark.x, landmark.y, patch_px)
+    return depth_at(depth_mm, landmark.x, landmark.y, patch_px, scale=scale)
 
 
 # ---------------------------------------------------------------------------
@@ -198,11 +235,16 @@ def landmark_depth_mm(depth_mm: np.ndarray, landmark,
 class OrbbecCapture:
     """Drop-in stand-in for cv2.VideoCapture backed by the Gemini 335.
 
-    read() returns (ret, bgr_frame) exactly like a webcam, so GestureEngine's
-    capture loop and the tuner work unchanged. The latest aligned depth frame is
-    kept under a lock; depth_mm_at(x, y) samples it from any thread (the gesture
-    engine injects it into detector context as "_depth_mm_at").
+    read() returns (ret, frame) like a webcam — but the frame is the sensor's
+    native RGB (`frame_is_rgb = True`; cv2.VideoCapture has no such attribute
+    and stays BGR), so consumers feeding MediaPipe skip a cvtColor and BGR
+    consumers convert at their edge. The latest aligned depth frame is kept
+    raw (uint16 + scale) under a lock; depth_mm_at(x, y) samples it in mm from
+    any thread (the gesture engine injects it into detector context as
+    "_depth_mm_at").
     """
+
+    frame_is_rgb = True   # native RGB frames — no per-frame BGR flip
 
     def __init__(self, resolution: Tuple[int, int] = (1280, 720), fps: int = 30):
         self._cam = OrbbecGemini335(resolution=resolution, fps=fps)
@@ -210,6 +252,7 @@ class OrbbecCapture:
         self._open = True
         self._lock = threading.Lock()
         self._depth: Optional[np.ndarray] = None
+        self._depth_scale: float = 1.0
 
     # -- cv2.VideoCapture surface ------------------------------------------
 
@@ -225,6 +268,7 @@ class OrbbecCapture:
         if depth is not None:
             with self._lock:
                 self._depth = depth
+                self._depth_scale = self._cam.depth_scale
         return True, color
 
     def set(self, prop, value) -> bool:   # resolution/fps are fixed at open
@@ -246,9 +290,10 @@ class OrbbecCapture:
         the most recent frame. None until the first depth frame arrives."""
         with self._lock:
             d = self._depth
+            scale = self._depth_scale
         if d is None:
             return None
-        return depth_at(d, x_norm, y_norm, patch_px)
+        return depth_at(d, x_norm, y_norm, patch_px, scale=scale)
 
 
 def try_open_orbbec(resolution: Tuple[int, int] = (1280, 720),
@@ -334,11 +379,13 @@ def _preview() -> None:
             color, depth = cam.read()
             if color is None:
                 continue
+            color = cv2.cvtColor(color, cv2.COLOR_RGB2BGR)   # imshow wants BGR
+            depth_mm = depth.astype(np.float32) * cam.depth_scale
             vis = cv2.applyColorMap(
-                cv2.convertScaleAbs(np.clip(depth, 0, 4000), alpha=255.0 / 4000.0),
+                cv2.convertScaleAbs(np.clip(depth_mm, 0, 4000), alpha=255.0 / 4000.0),
                 cv2.COLORMAP_JET,
             )
-            centre = depth_at(depth, 0.5, 0.5)
+            centre = depth_at(depth, 0.5, 0.5, scale=cam.depth_scale)
             label = f"centre: {centre:.0f} mm" if centre else "centre: --"
             cv2.putText(color, label, (12, 32), cv2.FONT_HERSHEY_SIMPLEX,
                         0.8, (0, 255, 80), 2)

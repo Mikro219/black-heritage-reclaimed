@@ -194,9 +194,12 @@ def stage_content(app_dir: Path, with_frames: bool, with_assets: bool,
     bat = app_dir / "Prewarm cache (run once).bat"
     bat.write_text(
         "@echo off\r\n"
-        "rem Builds the speed-up cache for every scene so the first show runs\r\n"
-        "rem smoothly. Run this ONCE after copying the BHR folder. Takes a while\r\n"
-        "rem and needs plenty of free disk. Safe to re-run.\r\n"
+        "rem Builds the speed-up cache for EVERY scene (including the long\r\n"
+        "rem opening scene 01) so the first show runs smoothly. Run this ONCE\r\n"
+        "rem after copying the BHR folder. Takes a while and needs plenty of\r\n"
+        "rem free disk. Safe to re-run (already-built scenes are skipped).\r\n"
+        "rem Low on disk? Build just the essentials instead:\r\n"
+        "rem     BHR.exe --prewarm --shots 01,02,03,04,09,10,12\r\n"
         'cd /d "%~dp0"\r\n'
         "BHR.exe --prewarm\r\n"
         "echo.\r\n"

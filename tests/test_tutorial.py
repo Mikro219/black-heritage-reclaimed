@@ -12,6 +12,25 @@ class FakeGesture:
     _input_locked = True
 
 
+class TestDetectSound(unittest.TestCase):
+    def test_success_plays_detect_sfx_when_wired(self):
+        bus = Bus()
+        tut = TutorialEngine({"tutorial_enabled": True}, bus, FakeGesture(),
+                             detect_sfx="/scenes/scene_01/audio/detect.mp3")
+        tut.begin()
+        bus.emit("cg_detected", {"gesture_id": "tutorial_0"})
+        sfx = [d for n, d in bus.log if n == "play_sfx"]
+        self.assertEqual(len(sfx), 1)
+        self.assertTrue(sfx[0]["path"].endswith("detect.mp3"))
+
+    def test_no_sfx_event_without_a_path(self):
+        bus = Bus()
+        tut = TutorialEngine({"tutorial_enabled": True}, bus, FakeGesture())
+        tut.begin()
+        bus.emit("cg_detected", {"gesture_id": "tutorial_0"})
+        self.assertFalse([d for n, d in bus.log if n == "play_sfx"])
+
+
 class TestTutorialFlow(unittest.TestCase):
     def setUp(self):
         self._linger, self._timeout = te.SUCCESS_LINGER_S, te.STEP_TIMEOUT_S

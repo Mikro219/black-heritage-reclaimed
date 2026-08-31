@@ -21,7 +21,16 @@ Set max_volume_dbfs: -25 on the shoofly cue to reject normal-volume speech (only
 true whispered "shoofly" passes). Any other VI cue that omits max_volume_dbfs gets
 no upper bound — the hum check and all other cues are unaffected.
 
-Keywords detected outside an open window are logged at INFO for on-site analytics.
+Perf (Aug 2026): the Vosk model is loaded on the voice thread (top of _run),
+not in __init__ — the ~0.5-1.5s model build used to sit on the main thread at
+boot. And the recognizer only consumes audio while at least one VI window is
+open and input is unlocked: most of the ~8-minute experience has zero windows,
+so feeding AcceptWaveform continuously burned ~10-20% of a core producing
+detections that _try_fire_windows discarded anyway. The recognizer is Reset()
+on the idle→active transition so stale audio can't carry into a fresh window.
+This deliberately DROPS the old "keywords detected outside an open window are
+logged at INFO for analytics" behaviour — off-window audio never reaches Vosk
+now. The hum/whisper DSP (RMS math, microseconds) stays always-on.
 
 Fallback to whisper.cpp (tiny.en / base.en) is documented but not built. Switch
 only if Vosk accuracy is insufficient after on-site grammar tuning — the interface
@@ -125,9 +134,16 @@ class VoiceEngine:
         self._last_heard: Optional[str] = None
         self._last_heard_time: float = 0.0
 
-        # Vosk
+        # Vosk. The model is built lazily at the top of the voice thread's
+        # _run() — NOT here — so the ~0.5-1.5s load never blocks boot. Every
+        # recognizer consumer already tolerates None (detection simply hasn't
+        # started yet).
         self._recognizer: Optional[object] = None
-        self._init_vosk()
+        # True while the recognizer is not being fed (no window open / input
+        # locked). The first chunk after the gate re-opens Reset()s the
+        # recognizer so audio from before the window can't carry in. Owned by
+        # the voice thread — no cross-thread recognizer calls.
+        self._vosk_idle: bool = True
 
         # Wire up event bus listeners if a bus was provided
         if event_bus:
@@ -222,6 +238,12 @@ class VoiceEngine:
     # -----------------------------------------------------------------------
 
     def _run(self) -> None:
+        # Build the Vosk model here, off the main thread — boot continues while
+        # the model loads; keyword windows opened before it's ready simply see
+        # no keywords for that first fraction of a second (hum DSP is live
+        # immediately).
+        self._init_vosk()
+
         mic_cfg = self.config.get("_profile", {}).get("microphone", {})
         sample_rate: int = mic_cfg.get("sample_rate", self._sample_rate)
         channels: int = mic_cfg.get("channels", 1)
@@ -271,8 +293,29 @@ class VoiceEngine:
         peak_dbfs = 20.0 * math.log10(peak) if peak > 1e-6 else -120.0
         self._check_hum(rms)
 
-        # Vosk keyword spotting
-        if self._recognizer and self._recognizer.AcceptWaveform(chunk):
+        # Vosk keyword spotting — gated to open windows. AcceptWaveform on
+        # every chunk for the whole run burned ~10-20% of a core while the
+        # experience mostly has NO voice window open; any keyword it found in
+        # that state was discarded by _try_fire_windows anyway. While gated we
+        # stop feeding the recognizer entirely and mark it idle; the first
+        # chunk after a window opens Reset()s it so pre-window audio can't
+        # complete into a stale keyword. (Reset happens HERE, on the voice
+        # thread, because KaldiRecognizer is not thread-safe — open_window
+        # runs on the main thread.)
+        if self._recognizer is None:
+            return
+        now = time.monotonic()
+        with self._lock:
+            self._prune_expired_locked(now)
+            window_open = bool(self._windows)
+        if self._input_locked or not window_open:
+            self._vosk_idle = True
+            return
+        if self._vosk_idle:
+            self._recognizer.Reset()
+            self._vosk_idle = False
+
+        if self._recognizer.AcceptWaveform(chunk):
             result = json.loads(self._recognizer.Result())
             text = result.get("text", "").strip().lower()
             if text and text != "[unk]":
@@ -303,6 +346,18 @@ class VoiceEngine:
     # Window matching and event emission
     # -----------------------------------------------------------------------
 
+    def _prune_expired_locked(self, now: float) -> None:
+        """Drop windows past their window_ms. Caller holds self._lock. Shared
+        by _try_fire_windows and the per-chunk Vosk gate (an expired window
+        must not keep the recognizer running)."""
+        expired = [
+            wid for wid, w in self._windows.items()
+            if (now - w.open_time) * 1000 > w.window_ms
+        ]
+        for wid in expired:
+            log.info("VI window expired: id=%s vi_id=%s", wid[:8], self._windows[wid].vi_config.get("id"))
+            del self._windows[wid]
+
     def _try_fire_windows(self, mode: str, matched: str, peak_dbfs: float = 0.0) -> None:
         if self._input_locked:
             return
@@ -311,14 +366,7 @@ class VoiceEngine:
         to_fire: list[tuple[str, _Window]] = []
 
         with self._lock:
-            # Expire stale windows
-            expired = [
-                wid for wid, w in self._windows.items()
-                if (now - w.open_time) * 1000 > w.window_ms
-            ]
-            for wid in expired:
-                log.info("VI window expired: id=%s vi_id=%s", wid[:8], self._windows[wid].vi_config.get("id"))
-                del self._windows[wid]
+            self._prune_expired_locked(now)
 
             # Find the first matching, un-fired window
             for wid, win in list(self._windows.items()):

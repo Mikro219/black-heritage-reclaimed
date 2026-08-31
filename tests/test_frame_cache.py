@@ -160,6 +160,28 @@ class TestWarmSegment(unittest.TestCase):
             self.assertEqual(cache._warm_ready.get(frames, {}), {})
             self.assertEqual(cache._warming, set())
 
+    def test_pack_page_warm_is_paced_past_the_burst(self):
+        """A long-span warm must throttle after the burst — an unthrottled
+        sweep starves the main thread's own page faults (192ms + sustained
+        80-124ms gaps in the exhibition log)."""
+        import numpy as np
+        from unittest import mock
+        from engines import frame_cache
+        from engines.frame_cache import FrameCacheManager
+        cache = FrameCacheManager((8, 4))
+        mm = np.zeros((frame_cache._WARM_BURST_FRAMES + 20, 4, 8, 3), np.uint8)
+        sleeps = []
+        with mock.patch.object(frame_cache.time, "sleep",
+                               side_effect=lambda s: sleeps.append(s)):
+            cache._warm_pack_pages(mm, 0, mm.shape[0] - 1)
+        self.assertTrue(sleeps, "past the burst the warm must yield the disk")
+        self.assertTrue(all(s <= 0.05 for s in sleeps))
+        sleeps.clear()
+        with mock.patch.object(frame_cache.time, "sleep",
+                               side_effect=lambda s: sleeps.append(s)):
+            cache._warm_pack_pages(mm, 0, frame_cache._WARM_BURST_FRAMES - 1)
+        self.assertFalse(sleeps, "a short burst-sized span stays immediate")
+
     def test_warm_touches_live_pack_without_closing_it(self):
         with tempfile.TemporaryDirectory() as tmp:
             d = Path(tmp) / "shot_01"
@@ -187,6 +209,108 @@ class TestWarmSegment(unittest.TestCase):
             cache.warm_segment(frames, 0, 9)
             _wait_warm_idle(cache)
             self.assertLessEqual(len(cache._warm_ready[frames]), 4)
+
+
+class TestIncrementalBuildServe(unittest.TestCase):
+    """A pack mid-build serves every frame the writer has passed — a long
+    unpacked shot must not run its whole length on the decode fallback."""
+
+    def _cache_with_building(self, tmp, n=6, done=3):
+        import numpy as np
+        from engines.frame_cache import FrameCacheManager
+        frames = Path(tmp) / "frames"
+        frames.mkdir()
+        for i in range(n):
+            Image.new("RGB", (64, 36), (i * 20, 0, 0)).save(
+                frames / f"{i:04d}.jpg")
+        cache = FrameCacheManager((64, 36))
+        cache.prioritize(frames)          # registers paths (no worker thread)
+        mm = np.zeros((n, 36, 64, 3), np.uint8)
+        written = bytearray(n)
+        for i in range(done):
+            mm[i, :, :, 1] = 100 + i      # builder-written rows are green-ish
+            written[i] = 1
+        cache._building[frames] = {"mm": mm, "written": written,
+                                   "hint": None, "count": done}
+        return cache, frames
+
+    def test_serves_written_rows_without_decoding(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cache, frames = self._cache_with_building(Path(tmp))
+            decodes = []
+            orig = cache._decode_frame
+            cache._decode_frame = lambda p: decodes.append(p) or orig(p)
+            data, size = cache.get_frame_bytes(frames, 1)
+            self.assertEqual(size, (64, 36))
+            self.assertEqual(data[1], 101, "must come from the building pack")
+            self.assertFalse(decodes, "no fallback decode for a written row")
+
+    def test_fallback_past_cursor_contributes_to_the_pack(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cache, frames = self._cache_with_building(Path(tmp))
+            data, size = cache.get_frame_bytes(frames, 5)   # beyond done=3
+            self.assertEqual(size, (64, 36))
+            self.assertEqual(data[0], 100, "red gradient = decoded from JPEG")
+            b = cache._building[frames]
+            self.assertTrue(b["written"][5],
+                            "the main-thread decode must land in the pack")
+            self.assertEqual(b["count"], 4)
+            self.assertEqual(int(b["mm"][5, 0, 0, 0]), 100)
+
+    def test_warm_segment_hints_the_builder_while_building(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cache, frames = self._cache_with_building(Path(tmp))
+            cache.warm_segment(frames, 4, 5)     # unwritten region -> hint
+            self.assertNotIn(frames, cache._warming,
+                             "no competing decoder thread while building")
+            self.assertEqual(cache._building[frames]["hint"], 4)
+            cache.warm_segment(frames, 1, 2)     # already written -> no hint
+            self.assertEqual(cache._building[frames]["hint"], 4)
+
+    def test_hint_reorders_the_build_and_wraps_to_fill(self):
+        from engines import frame_cache
+        from engines.frame_cache import FrameCacheManager, PACK_NAME
+        with tempfile.TemporaryDirectory() as tmp:
+            frames = Path(tmp) / "frames"
+            frames.mkdir()
+            for i in range(6):
+                Image.new("RGB", (32, 18)).save(frames / f"{i:04d}.jpg")
+            cache = FrameCacheManager((32, 18))
+            order = []
+            real_open = frame_cache.Image.open
+
+            def spy_open(p):
+                order.append(int(Path(p).stem))
+                if len(order) == 1:      # a "seek" lands mid-build
+                    cache._building[frames]["hint"] = 4
+                return real_open(p)
+
+            frame_cache.Image.open = spy_open
+            try:
+                ok = cache._build_pack(frames / PACK_NAME,
+                                       sorted(frames.glob("*.jpg")))
+            finally:
+                frame_cache.Image.open = real_open
+            self.assertTrue(ok)
+            self.assertEqual(order, [0, 4, 5, 1, 2, 3],
+                             "jump to the hint, then wrap to fill the gap")
+
+    def test_build_registers_progress_and_unregisters_on_finish(self):
+        import time as _time
+        from engines.frame_cache import FrameCacheManager, PACK_NAME
+        with tempfile.TemporaryDirectory() as tmp:
+            frames = Path(tmp) / "frames"
+            frames.mkdir()
+            for i in range(4):
+                Image.new("RGB", (32, 18)).save(frames / f"{i:04d}.jpg")
+            cache = FrameCacheManager((32, 18))
+            ok = cache._build_pack(frames / PACK_NAME,
+                                   sorted(frames.glob("*.jpg")))
+            self.assertTrue(ok)
+            self.assertNotIn(frames, cache._building,
+                             "finished build must unregister (Windows needs "
+                             "the mapping closed before os.replace)")
+            self.assertTrue((frames / PACK_NAME).exists())
 
 
 if __name__ == "__main__":

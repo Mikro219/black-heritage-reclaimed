@@ -36,27 +36,26 @@ def _steps() -> list:
             "title": "Welcome!",
             "prompt": "Raise BOTH hands above your shoulders. "
                       "When the screen flashes green, you did it!",
-            "icon": "open_r",
             "figure": "raise_both",
             "type": "presence_bilateral",
             "params": {"y_threshold": "shoulder", "hold_ms": 500},
         },
         {
             "title": "Pointing",
-            "prompt": "Point at the glowing box and hold still.",
-            "icon": "point_r",
+            "prompt": "Point at the glowing circle and hold still.",
             "figure": "point_target",
             # region_rect is RAW camera space; the card target_rect is the same
-            # box in player/screen space (mirrored x).
+            # box in player/screen space (mirrored x). Placed in the right
+            # third, below the prompt band and clear of the centred figure
+            # panel (title 0.17+, prompt 0.33+, figure x 0.40-0.60 y 0.50+).
             "type": "point_target_held",
-            "params": {"region_rect": {"x": 0.18, "y": 0.28, "w": 0.24, "h": 0.34},
+            "params": {"region_rect": {"x": 0.12, "y": 0.45, "w": 0.20, "h": 0.30},
                        "hold_ms": 500},
-            "target_rect": {"x": 0.58, "y": 0.28, "w": 0.24, "h": 0.34},
+            "target_rect": {"x": 0.68, "y": 0.45, "w": 0.20, "h": 0.30},
         },
         {
             "title": "Point LEFT",
             "prompt": "Reach out and point to the LEFT side of the screen.",
-            "icon": "point_l",
             "figure": "point_left",
             "type": "point_region",
             "params": {"directions": ["left"], "hold_ms": 500},
@@ -64,7 +63,6 @@ def _steps() -> list:
         {
             "title": "Point RIGHT",
             "prompt": "Now point to the RIGHT side of the screen.",
-            "icon": "point_r",
             "figure": "point_right",
             "type": "point_region",
             "params": {"directions": ["right"], "hold_ms": 500},
@@ -72,7 +70,6 @@ def _steps() -> list:
         {
             "title": "Point DOWN",
             "prompt": "Point DOWN toward the ground.",
-            "icon": "point_r",
             "figure": "point_down",
             "type": "directional_point",
             "params": {"directions": ["down", "down_left", "down_right"],
@@ -84,10 +81,15 @@ def _steps() -> list:
 
 
 class TutorialEngine:
-    def __init__(self, config: dict, event_bus, gesture_engine):
+    def __init__(self, config: dict, event_bus, gesture_engine,
+                 detect_sfx=None):
         self.config = config
         self.bus = event_bus
         self.gesture = gesture_engine
+        # Resolved path to detect.mp3 (main.py finds one in the scenes tree):
+        # step success then plays the same confirmation ping the experience
+        # uses, so the flash+sound pairing is learned from the first gesture.
+        self._detect_sfx = str(detect_sfx) if detect_sfx else None
         self.enabled = bool(config.get("tutorial_enabled", True))
         self.active = False
         self.done = False
@@ -139,7 +141,6 @@ class TutorialEngine:
         return {
             "title":  step.get("title", ""),
             "prompt": "Nice!" if self._succeeded else step.get("prompt", ""),
-            "icon":   step.get("icon"),
             "figure": step.get("figure"),
             "target_rect": None if self._succeeded else step.get("target_rect"),
             "step":   self._step_i + 1,
@@ -176,6 +177,8 @@ class TutorialEngine:
         print(f"[Tutorial] step {self._step_i + 1} SUCCESS")
         self._succeeded = True
         self.bus.emit("oi_flash", {})   # the green "you did it" flash
+        if self._detect_sfx:
+            self.bus.emit("play_sfx", {"path": self._detect_sfx, "channel": 2})
         self._advance_at = time.monotonic() + SUCCESS_LINGER_S
 
     def _finish(self) -> None:

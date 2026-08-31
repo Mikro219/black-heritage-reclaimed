@@ -88,7 +88,6 @@
       position: "absolute", boxSizing: "border-box",
       padding: ".28em .5em", borderRadius: "4px",
       background: "rgba(10,8,8,.72)", color: "#f8f5ee",
-      border: "1px solid rgba(255,245,225,.10)",
       font: `600 ${Math.max(9, Math.round(h * 0.062))}px 'IBM Plex Sans', 'Segoe UI', sans-serif`,
       lineHeight: "1.25", textAlign: "center", whiteSpace: "normal",
       textShadow: "0 1px 2px rgba(0,0,0,.7)",

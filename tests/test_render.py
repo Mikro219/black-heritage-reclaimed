@@ -167,7 +167,7 @@ class TestRenderEngine(unittest.TestCase):
                           gesture_debug={"active_type": "presence_bilateral",
                                          "active_params": {}},
                           tutorial_card={"title": "Welcome!", "prompt": "Raise hands",
-                                         "icon": "open_r", "step": 1, "total": 6,
+                                         "step": 1, "total": 6,
                                          "target_rect": {"x": 0.6, "y": 0.3,
                                                          "w": 0.2, "h": 0.3}})
         finally:

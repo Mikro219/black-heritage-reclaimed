@@ -111,11 +111,11 @@ detections, then export. See
 for the full tour and how blocks map to runtime shots.
 
 After an export with fresh frames, prewarm the frame cache so first plays
-don't stutter (packs are raw RGB — mind the disk budget, prefer the choice
-shots):
+don't stutter (packs are raw RGB — mind the disk budget; shot 01 and the
+choice shots matter most):
 
 ```bash
-py -3.12 scripts/prewarm_frame_cache.py --shots 02,03,04,09,10,12
+py -3.12 scripts/prewarm_frame_cache.py --shots 01,02,03,04,09,10,12
 ```
 
 ---

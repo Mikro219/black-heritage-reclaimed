@@ -1360,6 +1360,8 @@ def main():
         ret, frame = cap.read()
         if not ret:
             continue
+        if getattr(cap, "frame_is_rgb", False):   # Orbbec delivers RGB now
+            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
 
         # Mirror for natural feedback
         frame = cv2.flip(frame, 1)

@@ -35,6 +35,8 @@ PACK_NAME = "framecache.npy"
 
 _WARM_DECODE_MAX = 25   # frames pre-decoded per warm_segment call (fallback mode)
 _WARM_READY_CAP = 48    # per-dir bound on the pre-decoded ready-bytes dict
+_WARM_BURST_FRAMES = 60  # pack-page warm: immediate burst (~2s of frames) ...
+_WARM_RATE_FPS = 45.0    # ... then paced at 1.5x playback so disk keeps headroom
 
 
 class FrameCacheManager:
@@ -55,6 +57,22 @@ class FrameCacheManager:
 
         self._warm_ready: dict[Path, dict[int, bytes]] = {}  # dir -> {i: rgb bytes} (fallback pre-decodes)
         self._warming: set[Path] = set()                     # dirs with a warm thread in flight
+
+        # Packs mid-build, served INCREMENTALLY:
+        #   dir -> {"mm": writer memmap, "written": bytearray(n), "hint": int|None}
+        # Readers copy any written frame UNDER the lock and never keep a
+        # reference — the builder must be able to close the mapping and
+        # os.replace the .building file (Windows refuses the replace while
+        # any mapping is open). Without this, a long unpacked shot (scene_01
+        # is 9k frames) ran its ENTIRE length on the 30-45ms/frame decode
+        # fallback while the build ground on — the first-OI-window freeze.
+        # "hint" lets the playhead STEER the build order: a prologue skip
+        # jumps thousands of frames past the cursor, and a builder that keeps
+        # grinding the skipped region leaves the main thread decoding alone
+        # (exhibition log: 20fps pacing + 81-145ms gaps at the first OI after
+        # a skip). warm_segment sets the hint; the builder jumps there, then
+        # circles back for the skipped rows before finalising.
+        self._building: dict[Path, dict] = {}
 
     # ------------------------------------------------------------------
     # Public — main thread
@@ -145,6 +163,14 @@ class FrameCacheManager:
         with self._lock:
             mm = self._packs.get(d)
             paths = self._paths.get(d)
+            if mm is None:
+                # Pack still building: serve every frame the writer has
+                # already passed. Copy under the lock — the reference must
+                # not outlive it (see _building above).
+                b = self._building.get(d)
+                if (b is not None and 0 <= i < len(b["written"])
+                        and b["written"][i]):
+                    return bytes(b["mm"][i]), (self._w, self._h)
 
         if mm is not None:
             n = mm.shape[0]
@@ -161,10 +187,26 @@ class FrameCacheManager:
             if data is not None:
                 return data, (self._w, self._h)
             try:
-                return self._decode_frame(paths[i]), (self._w, self._h)
+                data = self._decode_frame(paths[i])
             except Exception as exc:
                 print(f"[FrameCache] decode fallback failed {paths[i].name}: {exc}")
                 return None
+            # Contribute the decode to a pack mid-build: when the playhead and
+            # the builder are neck-and-neck, every frame the playhead wins
+            # would otherwise be decoded TWICE (once here, once by the
+            # builder catching up).
+            with self._lock:
+                b = self._building.get(d)
+                if (b is not None and i < len(b["written"])
+                        and not b["written"][i]):
+                    try:
+                        b["mm"][i] = np.frombuffer(
+                            data, np.uint8).reshape(self._h, self._w, 3)
+                        b["written"][i] = 1
+                        b["count"] += 1
+                    except Exception:
+                        pass   # size mismatch etc. — builder will redo it
+            return data, (self._w, self._h)
         return None
 
     def warm_segment(self, frames_dir, start_idx: int, end_idx: int) -> None:
@@ -185,6 +227,16 @@ class FrameCacheManager:
                 paths = self._paths.get(d)
                 if mm is None and not paths:
                     return                    # unknown dir — nothing to warm
+                b = self._building.get(d) if mm is None else None
+                if b is not None:
+                    # Steer the builder to the played region instead of
+                    # spawning a competing decoder: after a seek (prologue
+                    # skip) the sequential cursor can be thousands of frames
+                    # behind the playhead.
+                    if not (0 <= start_idx < len(b["written"])
+                            and b["written"][start_idx]):
+                        b["hint"] = max(0, int(start_idx))
+                    return
                 if d in self._warming:
                     return                    # one warm per dir — no thread pile-up
                 self._warming.add(d)
@@ -237,12 +289,26 @@ class FrameCacheManager:
         """
         lo = max(0, start_idx)
         hi = min(mm.shape[0] - 1, end_idx)
+        # PACED: an unthrottled sweep of a long segment (~2.7GB for a 980-frame
+        # span at 720p) saturates the disk and STARVES the main thread's own
+        # page faults — exhibition log: a 192ms render stall at segment entry
+        # then 80-124ms gaps for ~5s while the sweep streamed. Touch a short
+        # burst immediately, then stay ahead of the playhead at ~1.5x playback
+        # rate so the disk keeps headroom for the render loop.
+        burst = _WARM_BURST_FRAMES
+        rate = _WARM_RATE_FPS
+        t0 = time.monotonic()
         sink = 0
-        for i in range(lo, hi + 1):
+        for k, i in enumerate(range(lo, hi + 1)):
             with self._lock:
                 if self._stop:
                     return
             sink += int(mm[i, :, 0, 0].sum())
+            if k >= burst:
+                target = t0 + (k - burst) / rate
+                delay = target - time.monotonic()
+                if delay > 0:
+                    time.sleep(min(delay, 0.05))
 
     def _warm_decode(self, d: Path, paths: list[Path],
                      start_idx: int, end_idx: int) -> None:
@@ -410,26 +476,63 @@ class FrameCacheManager:
             print(f"[FrameCache] cannot create pack {tmp}: {exc}")
             return False
 
+        d = pack.parent
+        written = bytearray(n)
+        state = {"mm": mm, "written": written, "hint": None, "count": 0}
+        with self._lock:
+            self._building[d] = state   # serve finished rows immediately
         try:
-            for i, p in enumerate(paths):
+            pos = 0
+            while True:
                 with self._lock:
                     if self._stop:
+                        self._building.pop(d, None)
                         del mm
                         tmp.unlink(missing_ok=True)
                         return False
+                    if state["count"] >= n:
+                        break   # main-thread contributions can finish it too
+                    # The playhead steers the order: jump to a seek target so
+                    # the main thread never decodes alone; skipped rows are
+                    # filled on the wrap-around before the pack finalises.
+                    hint = state["hint"]
+                    if hint is not None:
+                        state["hint"] = None
+                        if 0 <= hint < n and not written[hint]:
+                            pos = hint
+                if pos >= n:
+                    pos = 0
+                while written[pos]:
+                    pos += 1
+                    if pos >= n:
+                        pos = 0
+                p = paths[pos]
                 try:
                     img = Image.open(p).convert("RGB").resize((self._w, self._h))
-                    mm[i] = np.asarray(img, dtype=np.uint8)
+                    row = np.asarray(img, dtype=np.uint8)
                 except Exception as exc:
                     print(f"[FrameCache] skip {p.name}: {exc}")
-                    mm[i] = 0
+                    row = None
+                with self._lock:
+                    if not written[pos]:   # the main thread may have beaten us
+                        mm[pos] = row if row is not None else 0
+                        written[pos] = 1
+                        state["count"] += 1
+                pos += 1
             mm.flush()
+            # Readers copy under the lock and hold no reference, so popping
+            # here guarantees the mapping can close before the replace
+            # (Windows refuses os.replace under an open mapping).
+            with self._lock:
+                self._building.pop(d, None)
             del mm
             import os
             os.replace(tmp, pack)
             return True
         except Exception as exc:
             print(f"[FrameCache] build failed {pack.name}: {exc}")
+            with self._lock:
+                self._building.pop(d, None)
             try:
                 del mm
             except Exception:

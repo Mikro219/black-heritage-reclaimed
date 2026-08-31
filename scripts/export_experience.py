@@ -1350,23 +1350,40 @@ def export(project_path: Path, out_root: Path, do_frames: bool,
             video = resolve_video(project, block.get("media"), project_path,
                                   video_override)
             if video is None or audio_ffmpeg is None:
-                warn(f"shot {shot_id} ({block.get('name')!r}): master_audio "
-                     f"needs the source video and ffmpeg — audio skipped")
+                # Can't bake — but a previous export's file still plays.
+                if (shot_dir / "audio.wav").exists():
+                    meta["audio"] = "audio.wav"
+                elif (shot_dir / "audio.mp3").exists():
+                    meta["audio"] = "audio.mp3"
+                else:
+                    warn(f"shot {shot_id} ({block.get('name')!r}): "
+                         f"master_audio needs the source video and ffmpeg "
+                         f"— audio skipped")
             else:
-                meta["audio"] = "audio.mp3"
-                mp3 = shot_dir / "audio.mp3"
-                if not mp3.exists():
+                # WAV, not mp3 (Aug 2026): mixer.music seeking into an mp3
+                # decode-scans to the target (~316ms main-thread stall at a
+                # prologue skip); WAV seek is a constant-time file offset
+                # (measured 0.1ms). ~50MB per baked shot — nothing next to
+                # the frame packs.
+                meta["audio"] = "audio.wav"
+                wav = shot_dir / "audio.wav"
+                if not wav.exists():
                     dur = max(0.05, rng[1] - rng[0])
                     result = subprocess.run(
                         [audio_ffmpeg, "-hide_banner", "-loglevel", "error",
                          "-y", "-ss", f"{rng[0]:.3f}", "-t", f"{dur:.3f}",
-                         "-i", str(video), "-vn", "-c:a", "libmp3lame",
-                         "-q:a", "3", str(mp3)],
+                         "-i", str(video), "-vn", "-c:a", "pcm_s16le",
+                         "-ar", "44100", str(wav)],
                         capture_output=True, text=True)
                     if result.returncode != 0:
                         warn(f"shot {shot_id}: master-mix audio extraction "
                              f"failed: {result.stderr.strip()[:160]}")
-                        meta.pop("audio", None)
+                        # A previous export's mp3 still plays (with the
+                        # mp3-seek stall) — better than silence.
+                        if (shot_dir / "audio.mp3").exists():
+                            meta["audio"] = "audio.mp3"
+                        else:
+                            meta.pop("audio", None)
 
         with open(shot_dir / "metadata.json", "w", encoding="utf-8") as f:
             json.dump(meta, f, indent=2)
