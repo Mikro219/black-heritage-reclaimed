@@ -25,10 +25,15 @@
   let panning = null;
   wrap.addEventListener("mousedown", (e) => {
     if (e.target === wrap || e.target === svg || e.target === blocksLayer || e.target === graph) {
+      e.preventDefault();   // no text-selection drag while panning
       panning = { sx: e.clientX, sy: e.clientY, ox: view.x, oy: view.y };
       if (!e.shiftKey) EB.select(null);
     }
   });
+  // Nothing inside the canvas is meant to native-drag (library items live
+  // outside it) — a drag ghost here would swallow mousemove/mouseup and
+  // wedge the pan, so kill any that still starts (selected text, images).
+  wrap.addEventListener("dragstart", (e) => e.preventDefault());
   window.addEventListener("mousemove", (e) => {
     if (!panning) return;
     view.x = panning.ox + (e.clientX - panning.sx);

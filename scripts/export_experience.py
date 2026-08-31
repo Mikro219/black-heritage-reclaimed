@@ -1119,22 +1119,23 @@ def block_audio_events(block: dict, sounds_by_id: dict, project_path: Path,
             need_render = (offset > TRIM_OFFSET_S or cut
                            or abs(speed - 1.0) > 1e-3)
         file_name = src.name
-        if ffmpeg and need_render:
+        if need_render:
             name = trim_name(src, render_offset, render_dur, speed)
             out = pool / name
             if name not in rendered:
-                if out.exists() or render_trim(ffmpeg, src, render_offset,
-                                               render_dur, speed, out):
+                # A render left by a previous export is reused as-is — no
+                # ffmpeg needed for a metadata-only re-export.
+                if out.exists() or (ffmpeg and render_trim(
+                        ffmpeg, src, render_offset, render_dur, speed, out)):
                     rendered[name] = out
             if name in rendered:
                 file_name = name
             else:
+                if not ffmpeg:
+                    warn(f"block {block.get('name')!r}: {sound['name']!r} "
+                         f"needs a pre-render (offset/speed) but ffmpeg is "
+                         f"missing — plays untrimmed at normal speed")
                 _pool_copy(src, pool)
-        elif render_offset > TRIM_OFFSET_S or abs(speed - 1.0) > 1e-3:
-            warn(f"block {block.get('name')!r}: {sound['name']!r} needs a "
-                 f"pre-render (offset/speed) but ffmpeg is missing — plays "
-                 f"untrimmed at normal speed")
-            _pool_copy(src, pool)
         else:
             _pool_copy(src, pool)
 

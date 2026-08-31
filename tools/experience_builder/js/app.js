@@ -1,4 +1,30 @@
 /* Boot, toolbar, keyboard shortcuts, project save/open, export dialog. */
+
+/* Missed-mouseup guard. Every dragger in the builder (canvas pan, block
+   drag, edge connect, timeline/caption/region bars) arms on mousedown and
+   releases on a window "mouseup" — but that event never arrives when the
+   button is released outside the window (off-window release, native menu,
+   alt-tab), so the drag sticks to the cursor. Track presses at capture
+   level and, when a move arrives with no button held (or focus is lost
+   mid-press), synthesize the mouseup every armed dragger is waiting for. */
+(function () {
+  let pressed = false;
+  window.addEventListener("mousedown", () => { pressed = true; }, true);
+  window.addEventListener("mouseup", () => { pressed = false; }, true);
+  window.addEventListener("blur", () => {
+    if (!pressed) return;
+    pressed = false;
+    window.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+  });
+  window.addEventListener("mousemove", (e) => {
+    if (!pressed || e.buttons !== 0 || !e.isTrusted) return;
+    pressed = false;
+    window.dispatchEvent(new MouseEvent("mouseup", {
+      bubbles: true, clientX: e.clientX, clientY: e.clientY,
+    }));
+  }, true);
+})();
+
 (function () {
   const $ = (id) => document.getElementById(id);
 
@@ -99,14 +125,84 @@
   }
 
   /* ── export dialog ── */
-  function openExport() {
-    // save first so the exported command points at a real file
+  const SERVER = "http://127.0.0.1:8798";
+  let exporting = false;
+
+  async function serverAlive() {
+    try {
+      const ctl = new AbortController();
+      const t = setTimeout(() => ctl.abort(), 800);
+      const res = await fetch(SERVER + "/ping", { signal: ctl.signal });
+      clearTimeout(t);
+      return res.ok;
+    } catch { return false; }
+  }
+
+  async function openExport() {
     const warnings = validateForExport();
     $("export-warnings").textContent = warnings.join("  ·  ");
     const fname = (EB.project.name.replace(/[^\w\- ]+/g, "").trim().replace(/\s+/g, "_") || "project") + ".bhrx.json";
     $("export-cmd").textContent = `py -3.12 scripts/export_experience.py "${fname}"`;
+    $("export-log").hidden = true;
+    $("export-log").textContent = "";
     $("export-modal").classList.add("open");
-    saveProject();
+
+    // With the helper server running (scripts/builder_server.py), the dialog
+    // runs the export itself; otherwise it shows the command to run by hand.
+    const live = await serverAlive();
+    $("export-run-ui").hidden = !live;
+    $("export-cmd-ui").hidden = live;
+    $("export-run").hidden = !live;
+    if (!live) saveProject();   // manual path: save so the command has a file
+  }
+
+  async function runExport() {
+    if (exporting) return;
+    exporting = true;
+    const btn = $("export-run");
+    const log = $("export-log");
+    btn.disabled = true; btn.textContent = "Exporting…";
+    log.hidden = false; log.textContent = "";
+    const append = (txt) => {
+      log.textContent += txt;
+      log.scrollTop = log.scrollHeight;
+    };
+    try {
+      EB.project.name = $("tb-project-name").value.trim() || EB.project.name;
+      const res = await fetch(SERVER + "/export", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ project: EB.project,
+                               no_frames: $("export-no-frames").checked }),
+      });
+      if (!res.ok || !res.body) {
+        append(`server error: HTTP ${res.status} ${await res.text()}\n`);
+        return;
+      }
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      let tail = "";
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        const chunk = dec.decode(value, { stream: true });
+        append(chunk);
+        tail = (tail + chunk).slice(-64);
+      }
+      if (/\[exit 0\]\s*$/.test(tail)) {
+        EB.runtime.dirty = false;
+        EB.emit("project-changed");
+        EB.toast("Export finished — export/generated is up to date");
+      } else {
+        EB.toast("Export finished with errors — see the log", true);
+      }
+    } catch (err) {
+      append(`\nconnection lost: ${err.message}\n(the export may still be ` +
+             `running in the server terminal)\n`);
+    } finally {
+      exporting = false;
+      btn.disabled = false; btn.textContent = "Run export";
+    }
   }
 
   function validateForExport() {
@@ -145,6 +241,7 @@
     $("tb-save").addEventListener("click", saveProject);
     $("tb-open").addEventListener("click", openProject);
     $("tb-export").addEventListener("click", openExport);
+    $("export-run").addEventListener("click", runExport);
     $("export-close").addEventListener("click", () => $("export-modal").classList.remove("open"));
     $("export-ok").addEventListener("click", () => $("export-modal").classList.remove("open"));
     $("tb-undo").addEventListener("click", () => EB.undo());

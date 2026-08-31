@@ -33,6 +33,9 @@ from PIL import Image
 _IMAGE_EXTS = {".png", ".jpg", ".jpeg"}
 PACK_NAME = "framecache.npy"
 
+_WARM_DECODE_MAX = 25   # frames pre-decoded per warm_segment call (fallback mode)
+_WARM_READY_CAP = 48    # per-dir bound on the pre-decoded ready-bytes dict
+
 
 class FrameCacheManager:
     def __init__(self, resolution: tuple[int, int], keep_ahead: int = 2):
@@ -49,6 +52,9 @@ class FrameCacheManager:
         self._priority_idx: int = 0
         self._stop = False
         self._thread: Optional[threading.Thread] = None
+
+        self._warm_ready: dict[Path, dict[int, bytes]] = {}  # dir -> {i: rgb bytes} (fallback pre-decodes)
+        self._warming: set[Path] = set()                     # dirs with a warm thread in flight
 
     # ------------------------------------------------------------------
     # Public — main thread
@@ -112,6 +118,23 @@ class FrameCacheManager:
         with self._lock:
             return Path(frames_dir) in self._packs
 
+    def get_frame_buffer(self, frames_dir, i: int):
+        """Zero-copy view of frame i's raw RGB, or None when no pack is live.
+
+        Returns (buffer, (w, h)) where buffer is the frame's C-contiguous slice
+        of the pack mmap — hand it straight to pygame.image.frombuffer(...)
+        .convert() and DROP it; it aliases the mmap, which eviction closes.
+        The priority shot's pack is never evicted while it plays, so the wrap+
+        convert window is safe. Fallback (no pack) callers use get_frame_bytes.
+        """
+        d = Path(frames_dir)
+        with self._lock:
+            mm = self._packs.get(d)
+        if mm is None:
+            return None
+        i = max(0, min(i, mm.shape[0] - 1))
+        return mm[i], (self._w, self._h)
+
     def get_frame_bytes(self, frames_dir, i: int):
         """Return (raw_rgb_bytes, (w, h)) for frame i, or None if unavailable.
 
@@ -130,13 +153,124 @@ class FrameCacheManager:
 
         if paths:
             i = max(0, min(i, len(paths) - 1))
+            # A warm_segment() pre-decode may already hold this frame — use it
+            # (pop, so the dict stays small) instead of decoding on the main thread.
+            with self._lock:
+                ready = self._warm_ready.get(d)
+                data = ready.pop(i, None) if ready else None
+            if data is not None:
+                return data, (self._w, self._h)
             try:
-                img = Image.open(paths[i]).convert("RGB").resize((self._w, self._h))
-                return img.tobytes(), (self._w, self._h)
+                return self._decode_frame(paths[i]), (self._w, self._h)
             except Exception as exc:
                 print(f"[FrameCache] decode fallback failed {paths[i].name}: {exc}")
                 return None
         return None
+
+    def warm_segment(self, frames_dir, start_idx: int, end_idx: int) -> None:
+        """Warm frames [start_idx, end_idx] (inclusive; the SAME 0-based indices
+        get_frame_bytes serves) ahead of the render loop. Non-blocking, never raises.
+
+        Pack live: a throwaway thread touches the frames' mmap pages so a segment
+        jump doesn't stall the render loop on cold disk-bound page faults. No pack
+        yet (decode fallback — including while a .building pack is mid-build): the
+        thread pre-decodes up to _WARM_DECODE_MAX frames into a small ready-bytes
+        dict that get_frame_bytes consumes. Unknown dir, empty span, or a warm
+        already in flight for the dir: safe no-op.
+        """
+        try:
+            d = Path(frames_dir)
+            with self._lock:
+                mm = self._packs.get(d)
+                paths = self._paths.get(d)
+                if mm is None and not paths:
+                    return                    # unknown dir — nothing to warm
+                if d in self._warming:
+                    return                    # one warm per dir — no thread pile-up
+                self._warming.add(d)
+
+            def _warm():
+                try:
+                    if mm is not None:
+                        self._warm_pack_pages(mm, start_idx, end_idx)
+                    else:
+                        self._warm_decode(d, paths, start_idx, end_idx)
+                except Exception as exc:
+                    print(f"[FrameCache] warm_segment failed {d.parent.name}: {exc}")
+                finally:
+                    with self._lock:
+                        self._warming.discard(d)
+
+            threading.Thread(target=_warm, daemon=True,
+                             name="FrameCacheWarm").start()
+        except Exception:
+            with self._lock:
+                self._warming.discard(Path(frames_dir))
+
+    # ------------------------------------------------------------------
+    # Warm helpers — run on the throwaway warm thread
+    # ------------------------------------------------------------------
+
+    def _decode_frame(self, path: Path) -> bytes:
+        """Decode one source image to raw RGB bytes at display resolution.
+
+        draft() lets the JPEG decoder downscale in the DCT domain during the
+        decode itself (e.g. 1920 -> 960 for a 1280x720 target) — this path runs
+        on the MAIN thread's frame budget, where the old full-res decode +
+        bicubic resample cost 25-45ms/frame. A cheap BILINEAR pass then fixes
+        the exact size. draft() is a no-op for PNGs.
+        """
+        img = Image.open(path)
+        img.draft("RGB", (self._w, self._h))
+        img = img.convert("RGB")
+        if img.size != (self._w, self._h):
+            img = img.resize((self._w, self._h), Image.BILINEAR)
+        return img.tobytes()
+
+    def _warm_pack_pages(self, mm: np.memmap, start_idx: int, end_idx: int) -> None:
+        """Fault the frames' mmap pages in ahead of the render loop.
+
+        Reads one byte per row into a throwaway: rows stride w*3 bytes apart
+        (< the 4KB page at any display width), so every page a frame spans gets
+        touched. The mmap reference was grabbed under the lock by the caller;
+        the page touches deliberately run outside it.
+        """
+        lo = max(0, start_idx)
+        hi = min(mm.shape[0] - 1, end_idx)
+        sink = 0
+        for i in range(lo, hi + 1):
+            with self._lock:
+                if self._stop:
+                    return
+            sink += int(mm[i, :, 0, 0].sum())
+
+    def _warm_decode(self, d: Path, paths: list[Path],
+                     start_idx: int, end_idx: int) -> None:
+        """Pre-decode a short run of fallback frames into the ready-bytes dict."""
+        lo = max(0, start_idx)
+        hi = min(len(paths) - 1, end_idx, lo + _WARM_DECODE_MAX - 1)
+        if lo > hi:
+            return
+        with self._lock:
+            # A fresh warm supersedes stale pre-decodes for this dir — the
+            # render loop has jumped to a new segment.
+            self._warm_ready[d] = {}
+        for i in range(lo, hi + 1):
+            with self._lock:
+                if self._stop:
+                    return
+                ready = self._warm_ready.get(d)
+                if ready is None or len(ready) >= _WARM_READY_CAP:
+                    return
+            try:
+                data = self._decode_frame(paths[i])
+            except Exception as exc:
+                print(f"[FrameCache] warm decode skip {paths[i].name}: {exc}")
+                continue
+            with self._lock:
+                ready = self._warm_ready.get(d)
+                if ready is not None and len(ready) < _WARM_READY_CAP:
+                    ready[i] = data
 
     # ------------------------------------------------------------------
     # Window / eviction
@@ -250,6 +384,8 @@ class FrameCacheManager:
             # Only keep if still in the window (priority may have moved on).
             if frames_dir in self._window():
                 self._packs[frames_dir] = mm
+            # Fallback pre-decodes are dead weight once the pack serves frames.
+            self._warm_ready.pop(frames_dir, None)
         print(f"[FrameCache] pack ready {frames_dir.parent.name} ({n} frames)")
 
     def _pack_valid(self, pack: Path, n: int) -> bool:

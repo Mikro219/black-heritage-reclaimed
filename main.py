@@ -606,6 +606,23 @@ def main():
                     pygame.mixer.stop()
             if event.type == pygame.KEYDOWN and event.key == pygame.K_RIGHT and not paused:
                 player._advance()
+            if (event.type == pygame.KEYDOWN and event.key == pygame.K_r
+                    and not camera_setup_active):
+                # Restart from the beginning, any time mid-run — same reset as
+                # the end-of-experience loop: fresh visitor, fresh tutorial,
+                # PAUSED boot screen.
+                if tutorial.active:
+                    tutorial.skip()
+                tutorial_was_active = False   # a skip here must NOT auto-resume
+                final_since = None
+                pygame.mixer.stop()
+                player.start(0)
+                player.pause()
+                render.pause()
+                gesture.pause()
+                tutorial.done = False
+                paused = True
+                print("[main] restarted from the beginning — PAUSED (press Space)")
 
             # Pause-menu volume slider: Up/Down keys or click/drag on the bar.
             if paused:

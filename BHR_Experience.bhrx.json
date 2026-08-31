@@ -1884,7 +1884,10 @@
           "label": "Say gourd or follow",
           "detector": "voice",
           "params": {
-            "keyword": ["gourd", "follow"]
+            "keyword": [
+              "gourd",
+              "follow"
+            ]
           },
           "region": null,
           "appears_s": 32.967,

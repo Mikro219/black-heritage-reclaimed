@@ -64,6 +64,7 @@ start screen** and waits. For the next visitor, just press **Space** again.
 |---|---|
 | **Space** | Start — and pause / un-pause at any time |
 | **S** | Skip the tutorial, the introduction, or the ending credits |
+| **R** | Restart from the very beginning (for the next visitor) — it pauses on the start screen, press Space to begin |
 | **↑ / ↓ arrows** (while paused) | Volume up / down (you can also drag the on-screen slider with the mouse) |
 | **C** | Turn the on-screen captions (subtitles) on or off |
 | **F** | Switch between fullscreen and a window |

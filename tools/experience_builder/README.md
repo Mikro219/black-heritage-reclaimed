@@ -55,7 +55,18 @@ install). Everything runs locally; the MP4 never leaves your machine.
    semantics as the runtime. Esc exits.
 9. **Save / Export** — Ctrl+S saves the `.bhrx.json` project (autosaves a
    draft to the browser as you work; media files re-link on reopen). Export
-   shows the command that generates the runtime tree:
+   runs the export for you — **if the helper server is running**:
+
+   ```
+   py -3.12 scripts/builder_server.py
+   ```
+
+   Leave that in a terminal while authoring; the Export dialog then shows a
+   one-click **Run export** button (with a metadata-only checkbox) and
+   streams the exporter's output live into the dialog. The project is saved
+   to `BHR_Experience.bhrx.json` first, so the file on disk always matches
+   what was exported. Without the server, the dialog falls back to showing
+   the command to run by hand:
 
    ```
    py -3.12 scripts/export_experience.py "My_Experience.bhrx.json"

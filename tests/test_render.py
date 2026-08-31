@@ -1,5 +1,7 @@
 ﻿"""RenderEngine headless smoke: hand cursors, interaction indicators, tutorial
-card, pause/flash bookkeeping, segment overshoot carry, skeleton toggle."""
+card, pause/flash bookkeeping, segment overshoot carry, skeleton toggle,
+segment frame warm hint, prefetched entry sounds, caption card memo, and the
+draw-window FX dirty-rect composite."""
 
 import os
 import time
@@ -861,6 +863,416 @@ class TestChoiceClipPlayback(unittest.TestCase):
         self.assertEqual(r._pending_clips, [])     # never leaks into the next shot
 
 
+class _SpyFrames(list):
+    """Frame list that records every index the render loop actually reads."""
+
+    def __init__(self, n):
+        super().__init__(pygame.Surface((4, 4)) for _ in range(n))
+        self.reads = set()
+
+    def __getitem__(self, i):
+        if isinstance(i, int):
+            self.reads.add(i)
+        return super().__getitem__(i)
+
+
+class TestSegmentFrameWarm(unittest.TestCase):
+    """play_segment hands the cache a warm hint over EXACTLY the FrameView
+    index range the fetch path reads (update() indexes _seg_start + local,
+    clamped to the frame count), so a segment's first frames — and a loop's
+    wrap-around — never fault cold on a frame the visitor is watching."""
+
+    @classmethod
+    def setUpClass(cls):
+        pygame.init()
+        cls.bus = Bus()
+        cls.r = RenderEngine({"resolution": [320, 180],
+                              "timing_defaults": {"oi_window_ms": 6000}}, cls.bus)
+        cls.r.init_display()
+
+    @classmethod
+    def tearDownClass(cls):
+        pygame.quit()
+
+    def setUp(self):
+        self.calls = []
+        calls = self.calls
+
+        class _Cache:
+            def warm_segment(self, frames_dir, start, end):
+                calls.append((Path(frames_dir), start, end))
+        r = self.r
+        r._cache = _Cache()
+        r._current_frames_dir = Path("scenes/act_x/shot_01/frames")
+        r._loading_dir = None
+        r._fps = 24
+        r._captions = []
+        self.addCleanup(self._reset)
+
+    def _reset(self):
+        r = self.r
+        r._cache = None
+        r._current_frames_dir = None
+        r._frames = []
+        r._seg_start = r._seg_end = None
+        r._seg_overshoot = 0.0
+
+    def test_warm_range_matches_the_fetch_path(self):
+        from unittest import mock
+        r = self.r
+        frames = _SpyFrames(30)
+        r._frames = frames
+        self.bus.emit("play_segment", {"start": 5, "end": 12, "loop": False})
+        self.assertEqual(self.calls,
+                         [(Path("scenes/act_x/shot_01/frames"), 5, 12)])
+        # Drive the playhead across the whole segment on a controlled clock:
+        # the set of indices update() reads must be the warmed range, exactly.
+        base = time.monotonic()
+        with mock.patch("time.monotonic") as mono:
+            for k in range(8):
+                mono.return_value = base + k / 24 + 0.002
+                r._seg_anchor = base
+                r.update()
+        warmed = set(range(self.calls[0][1], self.calls[0][2] + 1))
+        self.assertEqual(frames.reads, warmed)
+
+    def test_warm_range_clamped_to_loaded_frames(self):
+        """A segment reaching past the frame count warms only what the fetch
+        path can actually index (it clamps to len(frames) - 1)."""
+        self.r._frames = _SpyFrames(10)
+        self.bus.emit("play_segment", {"start": 8, "end": 40, "loop": True})
+        self.assertEqual(self.calls[-1][1:], (8, 9))
+
+    def test_warm_hint_is_optional_and_fault_tolerant(self):
+        """warm_segment is advisory: a cache without the API (it lands in
+        frame_cache separately) or a throwing one must never break playback,
+        and a shot with no frames dir warms nothing."""
+        r = self.r
+        r._frames = _SpyFrames(30)
+        r._cache = object()                      # no warm_segment attr
+        self.bus.emit("play_segment", {"start": 1, "end": 5, "loop": True})
+
+        class _Boom:
+            def warm_segment(self, *a):
+                raise RuntimeError("boom")
+        r._cache = _Boom()
+        self.bus.emit("play_segment", {"start": 1, "end": 5, "loop": True})
+
+        class _Cache:
+            def warm_segment(self, *a):
+                raise AssertionError("must not be called without a frames dir")
+        r._cache = _Cache()
+        r._current_frames_dir = None
+        self.bus.emit("play_segment", {"start": 1, "end": 5, "loop": True})
+        self.assertEqual(self.calls, [])
+
+
+class TestPrefetchEntrySounds(unittest.TestCase):
+    """prefetch_shot pre-decodes every sound the next shot's FSM can fire at
+    state entry (on_enter_sfx / oi sfx / on_enter_audio slices) so the live
+    path only ever hits the LRUs — and a warm entry is never replaced."""
+
+    @classmethod
+    def setUpClass(cls):
+        pygame.init()
+        cls.bus = Bus()
+        cls.r = RenderEngine({"resolution": [320, 180],
+                              "timing_defaults": {"oi_window_ms": 6000}}, cls.bus)
+        cls.r.init_display()
+        # a real decodable file already shipped in the repo
+        cls.snd = None
+        for p in Path("assets/audio/stems").glob("*.mp3"):
+            cls.snd = str(p)
+            break
+
+    @classmethod
+    def tearDownClass(cls):
+        pygame.quit()
+
+    def setUp(self):
+        self.r._sound_cache.clear()
+        self.r._clip_slices.clear()
+
+    def _shot(self, name):
+        class _Shot:
+            shot, fps, kind = "07", 30, "interactive"
+            captions, audio_file, frames_dir = [], None, None
+            assets_pending = True
+            audio_dir = "assets/audio/stems"
+            interaction = {
+                "tier": "CG",
+                "interaction_fsm": {
+                    "initial": "waiting",
+                    "transitions": [],
+                    "states": {
+                        "waiting": {"segment": "idle_loop", "loop": True,
+                                    "on_enter_sfx": name},
+                        "left_selected": {"segment": "left_pick",
+                                          "on_enter_audio": {
+                                              "file": name, "delay_s": 0.1,
+                                              "source_offset_s": 0.2,
+                                              "duration_s": 0.5, "gain": 0.8}},
+                        "oi_1": {"segment": "oi_hold", "loop": True,
+                                 "oi": {"id": "beat", "sfx": name}},
+                    },
+                },
+            }
+        return _Shot()
+
+    def test_collect_walks_fsm_entry_sounds(self):
+        if not self.snd:
+            self.skipTest("no stem mp3 available")
+        name = os.path.basename(self.snd)
+        jobs = self.r._collect_entry_sounds(self._shot(name))
+        path = str(Path("assets/audio/stems") / name)
+        self.assertIn((path, 0.0, 0.0), jobs)      # on_enter_sfx + oi sfx
+        self.assertIn((path, 0.2, 0.5), jobs)      # on_enter_audio slice
+
+    def test_prefetch_predecodes_and_live_path_never_redecodes(self):
+        if not self.snd:
+            self.skipTest("no stem mp3 available")
+        from unittest import mock
+        r = self.r
+        name = os.path.basename(self.snd)
+        path = str(Path("assets/audio/stems") / name)
+        slice_key = (path, 0.2, 0.5)
+
+        self.bus.emit("prefetch_shot", {"shot": self._shot(name)})
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline and (
+                path not in r._sound_cache or slice_key not in r._clip_slices):
+            time.sleep(0.01)
+        self.assertIn(path, r._sound_cache)        # decoded off-thread
+        self.assertIn(slice_key, r._clip_slices)   # slice pre-built too
+
+        # The live path must serve the warmed entries without another decode.
+        decodes = []
+        real_sound = pygame.mixer.Sound
+
+        def counting(*a, **k):
+            decodes.append(a)
+            return real_sound(*a, **k)
+        with mock.patch.object(pygame.mixer, "Sound", side_effect=counting):
+            r._on_play_sfx({"path": path})
+            r._on_play_clip({"path": path, "source_offset_s": 0.2,
+                             "duration_s": 0.5})
+        self.assertEqual(decodes, [])
+
+    def test_prefetch_never_replaces_a_cached_entry(self):
+        """First decode wins — a cached Sound may already be playing on a
+        channel. The insert re-checks under the lock, so even a decode that
+        lost the race keeps the earlier entry."""
+        if not self.snd:
+            self.skipTest("no stem mp3 available")
+        from unittest import mock
+        r = self.r
+        sentinel = object()
+        fresh = pygame.mixer.Sound(self.snd)
+
+        def hijack(arg):
+            # Simulate the other thread winning between decode and insert.
+            r._sound_cache[str(arg)] = sentinel
+            return fresh
+        with mock.patch.object(pygame.mixer, "Sound", side_effect=hijack):
+            got = r._load_sound(self.snd)
+        self.assertIs(got, sentinel)
+        self.assertIs(r._sound_cache[self.snd], sentinel)
+
+        # And the worker never decodes over warm entries in the first place.
+        r._sound_cache[self.snd] = sentinel
+        r._clip_slices[(self.snd, 0.2, 0.5)] = sentinel
+        with mock.patch.object(pygame.mixer, "Sound",
+                               side_effect=AssertionError("re-decoded")):
+            r._prefetch_sounds_worker([(self.snd, 0.0, 0.0),
+                                       (self.snd, 0.2, 0.5)])
+        self.assertIs(r._sound_cache[self.snd], sentinel)
+        self.assertIs(r._clip_slices[(self.snd, 0.2, 0.5)], sentinel)
+
+    def test_missing_files_are_skipped_silently(self):
+        shot = self._shot("no_such_file_xyz.mp3")
+        self.assertEqual(self.r._collect_entry_sounds(shot), [])
+        self.r._on_prefetch_shot({"shot": shot})   # nothing to spawn, no raise
+        self.r._on_prefetch_shot({})               # no shot at all
+
+
+class _SpyFont:
+    """Counts render calls while delegating to a real font."""
+
+    def __init__(self, font):
+        self._font = font
+        self.renders = 0
+
+    def render(self, *a, **k):
+        self.renders += 1
+        return self._font.render(*a, **k)
+
+    def size(self, *a):
+        return self._font.size(*a)
+
+    def get_linesize(self):
+        return self._font.get_linesize()
+
+
+class TestCaptionCardMemo(unittest.TestCase):
+    """The finished caption card is memoised on (text, rect w, rect h) —
+    re-wrapping and re-rendering every visible frame cost 1.5-4ms/frame."""
+
+    @classmethod
+    def setUpClass(cls):
+        pygame.init()
+        cls.bus = Bus()
+        cls.r = RenderEngine({"resolution": [640, 360],
+                              "timing_defaults": {"oi_window_ms": 6000}}, cls.bus)
+        cls.r.init_display()
+
+    @classmethod
+    def tearDownClass(cls):
+        pygame.quit()
+
+    def test_caption_font_built_eagerly_in_init_display(self):
+        """The SysFont preference-chain lookup (20-60ms) belongs at boot, not
+        on the first captioned frame."""
+        self.assertIsNotNone(self.r._caption_font)
+
+    def test_card_rendered_once_for_identical_text_and_rect(self):
+        r = self.r
+        r._caption_render_cache.clear()
+        real = r._caption_font
+        spy = _SpyFont(real)
+        r._caption_font = spy
+        try:
+            r._blit_caption("wade in the water", 10, 10, 300, 80)
+            first = spy.renders
+            self.assertGreater(first, 0)
+            # same text + rect size, different position -> memo hit, no render
+            r._blit_caption("wade in the water", 60, 40, 300, 80)
+            self.assertEqual(spy.renders, first)
+            # a different rect width wraps differently -> a new card
+            r._blit_caption("wade in the water", 10, 10, 200, 80)
+            self.assertGreater(spy.renders, first)
+        finally:
+            r._caption_font = real
+
+    def test_memo_is_bounded_and_evicts_oldest(self):
+        r = self.r
+        r._caption_render_cache.clear()
+        for i in range(10):
+            r._blit_caption(f"line {i}", 0, 0, 300, 80)
+        self.assertLessEqual(len(r._caption_render_cache),
+                             RenderEngine._CAPTION_CARD_MAX)
+        self.assertNotIn(("line 0", 300, 80), r._caption_render_cache)
+        self.assertIn(("line 9", 300, 80), r._caption_render_cache)
+
+
+class _SpyFx(pygame.Surface):
+    """SRCALPHA overlay that records every fill (rect) it is asked for."""
+
+    def __init__(self, size):
+        super().__init__(size, pygame.SRCALPHA)
+        self.fills = []
+
+    def fill(self, color, rect=None, *a, **k):
+        self.fills.append(rect)
+        return super().fill(color, rect, *a, **k)
+
+
+class TestDrawFxDirtyRect(unittest.TestCase):
+    """The draw-window FX composite touches only the inked region: a
+    full-screen SRCALPHA fill + blit cost 8-18ms/frame at 1080p. The work
+    rect is this frame's draw bounds unioned with the previous frame's
+    (_fx_dirty latch) so moving ink erases cleanly; with no window armed the
+    overlay is not touched at all."""
+
+    @classmethod
+    def setUpClass(cls):
+        pygame.init()
+        cls.bus = Bus()
+        cls.r = RenderEngine({"resolution": [640, 360],
+                              "timing_defaults": {"oi_window_ms": 6000}}, cls.bus)
+        cls.r.init_display()
+
+    @classmethod
+    def tearDownClass(cls):
+        pygame.quit()
+
+    def setUp(self):
+        self._saved = self.r._fx_overlay
+        self.fx = _SpyFx((640, 360))
+        self.r._fx_overlay = self.fx
+        self.r._fx_dirty = None
+        self.addCleanup(self._restore)
+
+    def _restore(self):
+        self.r._fx_overlay = self._saved
+        self.r._fx_dirty = None
+
+    def test_fx_untouched_when_no_draw_window_is_armed(self):
+        r = self.r
+        r._draw_interaction_indicator(None)
+        r._draw_interaction_indicator({"active_type": None})
+        r._draw_interaction_indicator({"active_type": "directional_draw",
+                                       "input_locked": True})
+        r._draw_interaction_indicator({
+            "active_type": "point_target_held",
+            "active_params": {"region_rect": {"x": 0.4, "y": 0.3,
+                                              "w": 0.2, "h": 0.2}}})
+        self.assertEqual(self.fx.fills, [])
+        self.assertIsNone(r._fx_dirty)
+
+    def test_dirty_rect_unions_this_and_previous_frame(self):
+        r = self.r
+        gd_a = {"active_type": "directional_draw",
+                "active_params": {"direction": "right",
+                                  "indicator_xy": (0.25, 0.3)}}
+        gd_b = {"active_type": "directional_draw",
+                "active_params": {"direction": "right",
+                                  "indicator_xy": (0.72, 0.72)}}
+        r._draw_interaction_indicator(gd_a)
+        rect_a = r._fx_dirty.copy()
+        # first frame: the cleared region is exactly this frame's draw bounds
+        self.assertEqual(pygame.Rect(self.fx.fills[0]), rect_a)
+        # ... which contain the authored span centre
+        self.assertTrue(rect_a.collidepoint(int(0.25 * 640), int(0.3 * 360)))
+
+        r._draw_interaction_indicator(gd_b)
+        rect_b = r._fx_dirty.copy()
+        work = pygame.Rect(self.fx.fills[1])
+        self.assertEqual(work, rect_a.union(rect_b))   # both frames' ink swept
+        self.assertTrue(work.contains(rect_a))
+        self.assertTrue(work.contains(rect_b))
+
+    def test_comet_ink_erased_after_it_moves(self):
+        """Pixel contract: ink the comet leaves at frame N must be gone at
+        frame N+1 once it has moved on — the erase region includes the
+        previous frame's ink, not just this frame's."""
+        from unittest import mock
+        r = self.r
+        params = {"direction": "right", "indicator_xy": (0.5, 0.5)}
+        gd = {"active_type": "directional_draw", "active_params": params}
+        sx, sy, ex, ey = r._indicator_span(params, 640, 360)
+        period = 1.4
+
+        def head(now):
+            t = (now % period) / period
+            prog = t ** 0.85
+            return (sx + (ex - sx) * prog, sy + (ey - sy) * prog)
+
+        t0 = 700.0 + 0.42     # mid-loop: seam fade fully open
+        t1 = 700.0 + 0.98     # comet ~30px further along the span
+        with mock.patch("time.monotonic", return_value=t0):
+            r._draw_interaction_indicator(gd)
+        px, py = head(t0)
+        # 14px off the guide line: inside the 16px comet glow, clear of the
+        # line, the start ring, the arrowhead and the trail stars.
+        probe = (int(px), int(py) - 14)
+        self.assertGreater(self.fx.get_at(probe)[3], 0)   # ink at frame N
+        with mock.patch("time.monotonic", return_value=t1):
+            r._draw_interaction_indicator(gd)
+        self.assertEqual(self.fx.get_at(probe)[3], 0)     # erased at frame N+1
+        qx, qy = head(t1)
+        self.assertGreater(self.fx.get_at((int(qx), int(qy) - 14))[3], 0)
+
+
 class TestPalette(unittest.TestCase):
     """The player-facing palette is a contract, not decoration."""
 
@@ -904,6 +1316,49 @@ class TestPalette(unittest.TestCase):
                 self.assertGreaterEqual(
                     self._contrast(getattr(P, name), P.NIGHT), 7.0)
         self.assertGreaterEqual(self._contrast(P.LINEN_FAINT, P.NIGHT), 4.5)
+
+
+class TestFrameViewZeroCopy(unittest.TestCase):
+    """A live pack is wrapped via get_frame_buffer + frombuffer + one convert
+    (the bytes path copied every frame three times); when the buffer path is
+    unavailable or declines, the bytes path still serves the frame."""
+
+    class _Cache:
+        def __init__(self, w, h, with_buffer):
+            import numpy as np
+            self.w, self.h = w, h
+            self.frame = np.full((h, w, 3), (10, 200, 30), dtype="uint8")
+            self.bytes_calls = 0
+            if with_buffer:
+                self.get_frame_buffer = lambda d, i: (self.frame, (w, h))
+
+        def get_frame_bytes(self, d, i):
+            self.bytes_calls += 1
+            return self.frame.tobytes(), (self.w, self.h)
+
+        def resolution(self):
+            return (self.w, self.h)
+
+    def _view(self, cache):
+        from engines.render_engine import FrameView
+        return FrameView(cache, Path("frames"), 3,
+                         lambda data, size:
+                         pygame.image.fromstring(data, size, "RGB").convert())
+
+    def test_pack_frames_skip_the_bytes_copy_chain(self):
+        pygame.display.set_mode((64, 64))
+        cache = self._Cache(16, 9, with_buffer=True)
+        surf = self._view(cache)[1]
+        self.assertEqual(surf.get_at((0, 0))[:3], (10, 200, 30))
+        self.assertEqual(cache.bytes_calls, 0,
+                         "live pack must use the zero-copy buffer path")
+
+    def test_bytes_path_still_serves_without_buffer_api(self):
+        pygame.display.set_mode((64, 64))
+        cache = self._Cache(16, 9, with_buffer=False)
+        surf = self._view(cache)[1]
+        self.assertEqual(surf.get_at((0, 0))[:3], (10, 200, 30))
+        self.assertEqual(cache.bytes_calls, 1)
 
 
 if __name__ == "__main__":

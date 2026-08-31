@@ -380,17 +380,33 @@
       <button class="m-close" id="export-close"><span class="msr">close</span></button>
     </div>
     <div id="export-body">
-      <p>The project file has been saved. To generate the BHR scenes tree (per-shot
-      <code>metadata.json</code> + <code>sequence.json</code> + extracted frames), run this from the
-      repo root:</p>
-      <code id="export-cmd">py -3.12 scripts/export_experience.py "project.bhrx.json"</code>
-      <p>Output goes to <code>export/generated/</code> — the runtime's default scenes root
-      (<code>py -3.12 main.py</code> runs it directly). Add <code>--no-frames</code> to skip ffmpeg
-      frame extraction and only write metadata (fast; good for a first look).</p>
+      <div id="export-run-ui" hidden>
+        <p>Exports the current project to <code>export/generated/</code> — the runtime's default
+        scenes root (<code>py -3.12 main.py</code> runs it directly). The project is saved to
+        <code>BHR_Experience.bhrx.json</code> first, so the file on disk always matches what
+        was exported.</p>
+        <label style="display:flex;align-items:center;gap:8px;margin:8px 0;">
+          <input type="checkbox" id="export-no-frames">
+          Metadata only (<code>--no-frames</code> — fast; skips ffmpeg frame extraction)
+        </label>
+        <pre id="export-log" hidden></pre>
+      </div>
+      <div id="export-cmd-ui">
+        <p>The project file has been saved. To generate the runtime tree (per-scene
+        <code>metadata.json</code> + <code>sequence.json</code> + extracted frames), run this from the
+        repo root:</p>
+        <code id="export-cmd">py -3.12 scripts/export_experience.py "project.bhrx.json"</code>
+        <p>Output goes to <code>export/generated/</code> — the runtime's default scenes root
+        (<code>py -3.12 main.py</code> runs it directly). Add <code>--no-frames</code> to skip ffmpeg
+        frame extraction and only write metadata (fast; good for a first look).</p>
+        <p style="color:var(--text-faint);">Tip: run <code>py -3.12 scripts/builder_server.py</code> in a
+        terminal and this dialog gains a one-click <b>Run export</b> button.</p>
+      </div>
       <p id="export-warnings" style="color:var(--amber);"></p>
     </div>
     <div class="modal-foot">
-      <button class="tb-btn primary" id="export-ok">Done</button>
+      <button class="tb-btn primary" id="export-run" hidden>Run export</button>
+      <button class="tb-btn" id="export-ok">Done</button>
     </div>
   </div>
 </div>

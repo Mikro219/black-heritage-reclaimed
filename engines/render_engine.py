@@ -12,6 +12,7 @@ the debug overlay (D) and skeleton mini-panel (K).
 import math
 import os
 import random
+import threading
 import time
 import pygame
 from collections import OrderedDict, deque
@@ -80,13 +81,29 @@ class FrameView:
             self._surf.move_to_end(i)
             return surf
 
-        got = self._cache.get_frame_bytes(self._dir, i)
-        if got is None:
-            if self._blank is None:
-                self._blank = pygame.Surface(self._cache.resolution())
-            return self._blank
-        data, size = got
-        surf = self._convert(data, size)
+        surf = None
+        # Pack live: wrap the mmap slice and convert ONCE — the bytes path
+        # below copies the frame three times (tobytes -> fromstring parse ->
+        # convert). The frombuffer surface aliases the mmap only until
+        # .convert() returns its own pixels, and the priority shot's pack is
+        # never evicted while it plays, so that window is safe.
+        getbuf = getattr(self._cache, "get_frame_buffer", None)
+        if getbuf is not None:
+            view = getbuf(self._dir, i)
+            if view is not None:
+                try:
+                    surf = pygame.image.frombuffer(
+                        view[0], view[1], "RGB").convert()
+                except Exception:
+                    surf = None   # odd buffer/mock — the bytes path handles it
+        if surf is None:
+            got = self._cache.get_frame_bytes(self._dir, i)
+            if got is None:
+                if self._blank is None:
+                    self._blank = pygame.Surface(self._cache.resolution())
+                return self._blank
+            data, size = got
+            surf = self._convert(data, size)
         self._surf[i] = surf
         if len(self._surf) > self._cap:
             self._surf.popitem(last=False)   # evict least-recently-used
@@ -170,6 +187,11 @@ class RenderEngine:
         # the pause menu (Up/Down or dragging the slider).
         self._volume: float = float(config.get("audio", {}).get("master_volume", 1.0))
         self._sound_cache: OrderedDict = OrderedDict()   # path -> decoded Sound (LRU)
+        # Guards _sound_cache AND _clip_slices: the prefetch worker inserts
+        # from its own thread while the live path reads on the main thread
+        # (same pattern as audio_mixer._sounds_lock). A cached entry is never
+        # replaced — first decode wins.
+        self._sound_lock = threading.Lock()
         self._volume_slider_rect: Optional[pygame.Rect] = None  # set when drawn
 
         # Skeleton-in-corner display option (pause menu, K key) — shows the
@@ -177,11 +199,15 @@ class RenderEngine:
         self._show_skeleton: bool = False
 
         # Captions (Experience Builder authored / script-generated). Stashed per
-        # shot from Shot.captions; drawn against the shot playhead. Font + cache
-        # built lazily on first draw.
+        # shot from Shot.captions; drawn against the shot playhead. The font is
+        # built eagerly in init_display (a SysFont preference-chain lookup costs
+        # 20-60ms — it used to land on the first captioned frame), with a lazy
+        # fallback kept for surfaces created without init_display. The cache
+        # memoises finished caption CARDS keyed on (text, rect w, rect h) —
+        # re-wrapping + re-rendering every visible frame cost 1.5-4ms/frame.
         self._captions: list = []
         self._caption_font = None
-        self._caption_render_cache: dict = {}
+        self._caption_render_cache: OrderedDict = OrderedDict()
 
         # Hand-icon cursors (July 2026): illustrated hands from assets/hand_icons/
         # replace the old crosshair+label cursors. Keyed "open"/"fist"/"point"/
@@ -221,6 +247,12 @@ class RenderEngine:
         self._trail_particles: list = []
         self._trail_last_pos: dict = {"L": None, "R": None}
         self._fx_overlay: Optional[pygame.Surface] = None
+        # Dirty-rect latch for the draw-window FX composite: the rect that
+        # currently holds ink on _fx_overlay (last armed frame's draw bounds).
+        # Persists through window close — it is only swept (erased + replaced)
+        # on the next armed frame, so stale ink can never leak into a new
+        # window's blit region.
+        self._fx_dirty: Optional[pygame.Rect] = None
 
         # Play-through segment overshoot carry: when a non-loop FSM segment ends,
         # playback has typically run a fraction of a frame past the boundary by the
@@ -249,6 +281,10 @@ class RenderEngine:
         pygame.display.set_caption("Black Heritage Reclaimed")
         self._font = pygame.font.SysFont("monospace", 20, bold=True)
         self._small_font = pygame.font.SysFont("monospace", 14, bold=True)
+        # Caption font up front too: resolving its preference chain costs
+        # 20-60ms, which used to stall the first captioned frame (the lazy
+        # build in _draw_captions remains as a fallback).
+        self._caption_font = self._build_caption_font(h)
         # Cached fonts for the scene panel (avoids constructing SysFont per frame).
         # Pre-allocate the full-screen OI flash overlay once (reused each flash frame).
         self._flash_overlay = pygame.Surface((w, h), pygame.SRCALPHA)
@@ -487,6 +523,7 @@ class RenderEngine:
         columns = (
             ("PLAYBACK", (("Space", "resume"),
                           ("S", "skip prologue / epilogue"),
+                          ("R", "restart from the beginning"),
                           ("Esc", "quit"))),
             ("DISPLAY", (("C", f"captions  {cap_state}"),
                          ("K", "skeleton panel"),
@@ -791,10 +828,11 @@ class RenderEngine:
 
     def _load_sound(self, path) -> "pygame.mixer.Sound | None":
         key = str(path)
-        sound = self._sound_cache.get(key)
-        if sound is not None:
-            self._sound_cache.move_to_end(key)
-            return sound
+        with self._sound_lock:
+            sound = self._sound_cache.get(key)
+            if sound is not None:
+                self._sound_cache.move_to_end(key)
+                return sound
         t0 = time.perf_counter()
         try:
             sound = pygame.mixer.Sound(key)
@@ -802,11 +840,21 @@ class RenderEngine:
             print(f"[RenderEngine] audio load failed: {key}: {exc}")
             return None
         # Decoding a whole shot's audio.mp3 is hundreds of ms of PCM — never do
-        # it on a frame the visitor is watching.
-        warn_slow(f"decode {os.path.basename(key)}", t0)
-        self._sound_cache[key] = sound
-        while len(self._sound_cache) > self._SOUND_CACHE_MAX:
-            self._sound_cache.popitem(last=False)
+        # it on a frame the visitor is watching. (The prefetch worker takes
+        # exactly that hit off-thread, where it is fine — don't report it.)
+        if threading.current_thread() is threading.main_thread():
+            warn_slow(f"decode {os.path.basename(key)}", t0)
+        with self._sound_lock:
+            # The prefetch worker and the live path can race on the same file:
+            # first decode wins — a cached Sound may already be playing on a
+            # channel, so it is never replaced.
+            hit = self._sound_cache.get(key)
+            if hit is not None:
+                self._sound_cache.move_to_end(key)
+                return hit
+            self._sound_cache[key] = sound
+            while len(self._sound_cache) > self._SOUND_CACHE_MAX:
+                self._sound_cache.popitem(last=False)
         return sound
 
     def master_audio_offset_ms(self, shot_id=None) -> int:
@@ -988,9 +1036,88 @@ class RenderEngine:
             self._cache.prioritize(self._loading_dir)
 
     def _on_prefetch_shot(self, data: dict):
-        """No-op: the look-ahead cache already preloads every shot forward of the
-        current one. Retained because ShotSequencePlayer still emits prefetch_shot."""
-        return
+        """Pre-decode the NEXT shot's state-entry sounds while the current
+        shot is still playing (frames are already covered by the look-ahead
+        cache).
+
+        pygame.mixer.Sound() decodes the WHOLE file synchronously, so the
+        first on_enter_sfx / OI sfx / pick clip of a shot used to decode on
+        the main thread at the exact moment the FSM entered its state — a
+        picture hitch on the frame a prompt appears. Walks the interaction
+        metadata for every sound the FSM can fire at state entry and warms
+        _load_sound / _slice_sound on a throwaway daemon thread (never block
+        the bus — same pattern as audio_mixer's prefetch preload). Missing
+        files are skipped silently here; the live path already warns."""
+        shot = data.get("shot")
+        if shot is None:
+            return
+        jobs = self._collect_entry_sounds(shot)
+        if not jobs:
+            return
+        threading.Thread(target=self._prefetch_sounds_worker, args=(jobs,),
+                         daemon=True, name="RenderSfxPrefetch").start()
+
+    def _collect_entry_sounds(self, shot) -> list:
+        """(path, source_offset_s, duration_s) for every sound the shot's FSM
+        wiring can fire at state entry: on_enter_sfx and oi "sfx" names, the
+        shot-level interaction "sfx", and on_enter_audio pick/switch clips. A
+        plain sfx is (path, 0, 0) — _slice_sound hands that straight through
+        to _load_sound, so one job shape covers both."""
+        interaction = getattr(shot, "interaction", None) or {}
+        names, clips = [], []
+        if interaction.get("sfx"):
+            names.append(interaction["sfx"])
+        fsm = interaction.get("interaction_fsm") or {}
+        for state in (fsm.get("states") or {}).values():
+            if state.get("on_enter_sfx"):
+                names.append(state["on_enter_sfx"])
+            oi = state.get("oi") or {}
+            if oi.get("sfx"):
+                names.append(oi["sfx"])
+            clip = state.get("on_enter_audio")
+            if isinstance(clip, dict) and clip.get("file"):
+                clips.append(clip)
+
+        jobs = []
+        for name in names:
+            path = self._resolve_shot_sound(shot, name)
+            if path:
+                jobs.append((path, 0.0, 0.0))
+        for clip in clips:
+            path = self._resolve_shot_sound(shot, clip["file"])
+            if path:
+                # Same coercion as _on_play_clip, so the slice key warmed
+                # here is byte-identical to the one the live path computes.
+                jobs.append((path,
+                             float(clip.get("source_offset_s", 0.0) or 0.0),
+                             float(clip.get("duration_s", 0.0) or 0.0)))
+        return jobs
+
+    @staticmethod
+    def _resolve_shot_sound(shot, filename) -> Optional[str]:
+        """Mirror of the player's _resolve_sfx (audio/ subdir first, then the
+        shot root) — kept in lockstep so the path warmed at prefetch is the
+        path play_sfx / play_clip will carry at fire time."""
+        audio_dir = getattr(shot, "audio_dir", None)
+        if audio_dir:
+            p = Path(audio_dir) / filename
+            if p.exists():
+                return str(p)
+        frames_dir = getattr(shot, "frames_dir", None)
+        if frames_dir:
+            p = Path(frames_dir).parent / filename
+            if p.exists():
+                return str(p)
+        return None
+
+    def _prefetch_sounds_worker(self, jobs: list) -> None:
+        """Daemon-thread body: warm the LRUs. A failure here costs nothing —
+        the live path just decodes (and reports) as before."""
+        for path, offset, dur in jobs:
+            try:
+                self._slice_sound(path, offset, dur)
+            except Exception:
+                pass
 
     def _get_resolution(self) -> tuple[int, int]:
         display_cfg = self.config.get("_profile", {}).get("display", {})
@@ -1035,10 +1162,11 @@ class RenderEngine:
         if offset <= 0.0 and dur <= 0.0:
             return self._load_sound(path)
         key = (str(path), round(offset, 3), round(dur, 3))
-        hit = self._clip_slices.get(key)
-        if hit is not None:
-            self._clip_slices.move_to_end(key)
-            return hit
+        with self._sound_lock:
+            hit = self._clip_slices.get(key)
+            if hit is not None:
+                self._clip_slices.move_to_end(key)
+                return hit
         base = self._load_sound(path)
         if base is None:
             return None
@@ -1063,10 +1191,17 @@ class RenderEngine:
         except Exception as exc:
             print(f"[RenderEngine] clip slice failed: {exc}")
             return base
-        warn_slow(f"slice {os.path.basename(str(path))}", t0)
-        self._clip_slices[key] = sound
-        while len(self._clip_slices) > self._CLIP_SLICE_MAX:
-            self._clip_slices.popitem(last=False)
+        if threading.current_thread() is threading.main_thread():
+            warn_slow(f"slice {os.path.basename(str(path))}", t0)
+        with self._sound_lock:
+            # Same never-replace rule as _load_sound (prefetch worker race).
+            hit = self._clip_slices.get(key)
+            if hit is not None:
+                self._clip_slices.move_to_end(key)
+                return hit
+            self._clip_slices[key] = sound
+            while len(self._clip_slices) > self._CLIP_SLICE_MAX:
+                self._clip_slices.popitem(last=False)
         return sound
 
     def _on_play_clip(self, data: dict):
@@ -1175,6 +1310,28 @@ class RenderEngine:
             blocked = time.perf_counter() - t0_sync
             if blocked >= 0.005:
                 self._seg_anchor += blocked
+
+        # Warm the incoming segment's frames so its first reads (and a loop's
+        # wrap-around) come out of the pack instead of page-faulting / decode-
+        # falling-back on a frame the visitor is watching. Index space matches
+        # the fetch path exactly: update() reads _frames[_seg_start + local]
+        # with local in [0, seg_len), clamped to the frame count — i.e. the
+        # FrameView indices _seg_start.._seg_end. warm_segment is advisory
+        # (non-blocking, never raises), and older caches may not have it.
+        if (self._seg_start is not None and self._seg_end is not None
+                and self._current_frames_dir is not None
+                and self._cache is not None
+                and hasattr(self._cache, "warm_segment")):
+            start_idx, end_idx = self._seg_start, self._seg_end
+            if self._frames:
+                last = len(self._frames) - 1
+                start_idx = min(start_idx, last)
+                end_idx = min(end_idx, last)
+            try:
+                self._cache.warm_segment(self._current_frames_dir,
+                                         start_idx, end_idx)
+            except Exception:
+                pass   # a warm hint must never break playback
 
     # ------------------------------------------------------------------
     # Drawing helpers
@@ -1434,14 +1591,7 @@ class RenderEngine:
             return
         w, h = self._screen.get_size()
         if self._caption_font is None:
-            if not pygame.font.get_init():
-                pygame.font.init()
-            # Preference chain resolves to the first installed face; on the
-            # Windows kiosk that's Segoe UI Semibold (clean, wide counters —
-            # reads well against moving art on a projected wall).
-            self._caption_font = pygame.font.SysFont(
-                "segoeuisemibold,segoeui,trebuchetms,tahoma,arial",
-                max(18, int(h * 0.040)))
+            self._caption_font = self._build_caption_font(h)
         for cap in active:
             rect = cap.get("rect")
             if rect:
@@ -1452,16 +1602,57 @@ class RenderEngine:
                 rx, ry = (w - rw) // 2, int(h * 0.80)
             self._blit_caption(cap["text"], rx, ry, rw, rh)
 
+    @staticmethod
+    def _build_caption_font(h: int):
+        if not pygame.font.get_init():
+            pygame.font.init()
+        # Preference chain resolves to the first installed face; on the
+        # Windows kiosk that's Segoe UI Semibold (clean, wide counters —
+        # reads well against moving art on a projected wall).
+        return pygame.font.SysFont(
+            "segoeuisemibold,segoeui,trebuchetms,tahoma,arial",
+            max(18, int(h * 0.040)))
+
+    # Finished caption cards kept per (text, rect w, rect h) — a caption is on
+    # screen for seconds, and shots rarely carry more than a couple at once.
+    _CAPTION_CARD_MAX = 8
+
     def _blit_caption(self, text: str, rx: int, ry: int, rw: int, rh: int) -> None:
         """One caption card inside the placement rect: word-wrapped text on a
         rounded, semi-opaque panel sized to the text (not the whole rect),
-        centred in the rect, with a soft drop shadow under the glyphs."""
+        centred in the rect, with a soft drop shadow under the glyphs.
+
+        The finished card is memoised on (text, rect w, rect h): wrapping,
+        two font.render calls per line and a fresh SRCALPHA surface every
+        visible frame measured 1.5-4ms/frame. Only the blit position math
+        stays live."""
+        key = (str(text), rw, rh)
+        card = self._caption_render_cache.get(key)
+        if card is None:
+            card = self._render_caption_card(str(text), rw)
+            self._caption_render_cache[key] = card
+            while len(self._caption_render_cache) > self._CAPTION_CARD_MAX:
+                self._caption_render_cache.popitem(last=False)   # evict oldest
+        else:
+            self._caption_render_cache.move_to_end(key)
+
+        # Centre the card in the placement rect, clamped on-screen.
+        card_w, card_h = card.get_width(), card.get_height()
+        sw, sh = self._screen.get_size()
+        cx = rx + (rw - card_w) // 2
+        cy = ry + max(0, (rh - card_h) // 2)
+        cx = max(0, min(cx, sw - card_w))
+        cy = max(0, min(cy, sh - card_h))
+        self._screen.blit(card, (cx, cy))
+
+    def _render_caption_card(self, text: str, rw: int) -> pygame.Surface:
+        """Build one caption card surface for _blit_caption's memo."""
         font = self._caption_font
         pad_x = max(14, int(rw * 0.028))
         pad_y = max(8, pad_x // 2)
         maxw = max(1, rw - 2 * pad_x)
         lines, cur = [], ""
-        for word in str(text).split():
+        for word in text.split():
             trial = (cur + " " + word).strip()
             if not cur or font.size(trial)[0] <= maxw:
                 cur = trial
@@ -1492,14 +1683,7 @@ class RenderEngine:
             card.blit(shadow, (lx + 2, y + 2))
             card.blit(surf, (lx, y))
             y += lh
-
-        # Centre the card in the placement rect, clamped on-screen.
-        sw, sh = self._screen.get_size()
-        cx = rx + (rw - card_w) // 2
-        cy = ry + max(0, (rh - card_h) // 2)
-        cx = max(0, min(cx, sw - card_w))
-        cy = max(0, min(cy, sh - card_h))
-        self._screen.blit(card, (cx, cy))
+        return card
 
     # 8-way direction unit-ish vectors (screen space) shared by the draw
     # indicator and the debug arrows.
@@ -1646,6 +1830,12 @@ class RenderEngine:
     _TRAIL_MAX_PARTICLES = 200
     _TRAIL_MIN_MOVE_PX = 4.0
 
+    # Dirty-rect padding around the draw-indicator span: every piece of ink
+    # (guide line, start ring + pulse, arrowhead wings, comet glow, trail
+    # stars) hangs off the span line by well under this — generous on purpose
+    # so a tweak to a radius or stroke width can't clip.
+    _FX_PAD = 48
+
     def _draw_star_trail(self, pose_data=None,
                          gesture_debug: dict | None = None) -> None:
         """Hand feedback while a directional_draw window is armed (the tracked
@@ -1746,7 +1936,22 @@ class RenderEngine:
             fx = self._fx_overlay
             if fx is None:
                 return
-            fx.fill((0, 0, 0, 0))
+            # Dirty-rect composite: clear + blit only the region actually
+            # inked, not the whole overlay — a full-screen SRCALPHA fill+blit
+            # cost 8-18ms per frame at 1080p, every frame a draw window was
+            # armed. The work rect is THIS frame's draw bounds unioned with
+            # the PREVIOUS frame's (_fx_dirty latch), so ink left by a moving
+            # comet / re-authored span is erased cleanly before redrawing.
+            pad = self._FX_PAD
+            draw_rect = pygame.Rect(int(min(sx, ex) - pad),
+                                    int(min(sy, ey) - pad),
+                                    int(abs(ex - sx)) + 2 * pad,
+                                    int(abs(ey - sy)) + 2 * pad)
+            work = (draw_rect.union(self._fx_dirty)
+                    if self._fx_dirty is not None else draw_rect)
+            work = work.clip(fx.get_rect())
+            if work.w > 0 and work.h > 0:
+                fx.fill((0, 0, 0, 0), work)
 
             # Faint guide line (where the stroke goes) with a dark underlay.
             pygame.draw.line(fx, (0, 0, 0, 90), (sx, sy), (ex, ey), 7)
@@ -1794,7 +1999,10 @@ class RenderEngine:
             pygame.draw.circle(fx, (*P.NORTH_STAR, int(230 * a)),
                                (int(px), int(py)), 5)
 
-            self._screen.blit(fx, (0, 0))
+            if work.w > 0 and work.h > 0:
+                self._screen.blit(fx, work.topleft, work)
+            clipped = draw_rect.clip(fx.get_rect())
+            self._fx_dirty = clipped if clipped.w > 0 and clipped.h > 0 else None
             return
 
         if active_type in ("point_target_held", "forward_point"):
