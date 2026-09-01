@@ -1065,9 +1065,9 @@
       ],
       "choice_audio": {
         "sound": "s119",
-        "delay_s": 1,
-        "source_offset_s": 13,
-        "duration_s": 0,
+        "delay_s": 1.5,
+        "source_offset_s": 12.5,
+        "duration_s": 3,
         "gain": 1
       }
     },
@@ -1881,13 +1881,10 @@
         },
         {
           "id": "w_20_vi0",
-          "label": "Say gourd or follow",
+          "label": "Say follow the gourd",
           "detector": "voice",
           "params": {
-            "keyword": [
-              "gourd",
-              "follow"
-            ]
+            "keyword": "follow the gourd"
           },
           "region": null,
           "appears_s": 32.967,

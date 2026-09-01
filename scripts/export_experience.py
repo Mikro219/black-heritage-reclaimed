@@ -517,8 +517,9 @@ def choice_audio_spec(block: dict, sounds_by_id: dict) -> dict | None:
 
     Authored in the Builder's inspector (Choice Block -> Pick / switch audio):
     {sound, delay_s, source_offset_s, duration_s, gain}. When present it
-    REPLACES the built-in CHOICE_HOLD_SFX on every pick and switch state —
-    playing both would double up on the same beat.
+    plays IN ADDITION to the state's built-in CHOICE_HOLD_SFX click — the
+    click answers the gesture instantly, the authored clip (typically a
+    delayed dialogue line) follows it.
 
     delay_s / source_offset_s / duration_s are honoured at RUNTIME (the render
     engine slices the decoded PCM), so they can be retuned in the Builder and
@@ -755,19 +756,31 @@ def choice_metadata(block: dict, shot_id: str, n_frames: int, fps: int,
                 {"from": "confirm_right", "on": "segment_end", "to": "__advance__"},
             ],
         }
-    # Authored pick/switch sound. Every state but these two is entered by a
-    # detection or a switch, so all of them take it:
+    # Authored pick/switch sound — stamped ONLY on states the visitor's action
+    # enters (an incoming point_*/voice_* transition). Excluded:
     #   waiting     — the idle loop, never a detection
     #   wrong_path  — a wrong-way redirect says "not that way", not "picked".
     #                 It keeps its buzzer (sound-only model) or its own folded
     #                 redirect audio (animated model).
+    #   segment_end-only states — the animated hold model's `*_switch_hold`
+    #                 rest states are the TAIL of the switch animation whose
+    #                 entering state (left_to_right/right_to_left) already
+    #                 played the clip; stamping them too made every switch
+    #                 play the sound twice (the live shot-09 switch-hold
+    #                 states were made silent for exactly this reason).
     pick_audio = choice_audio_spec(block, sounds_by_id or {})
     if pick_audio:
+        entered_by_action = {t["to"] for t in body["transitions"]
+                             if t.get("on") != "segment_end"}
         stamped = []
         for sid, st in body["states"].items():
-            if sid in ("waiting", "wrong_path"):
+            if sid in ("waiting", "wrong_path") or sid not in entered_by_action:
                 continue
-            st.pop("on_enter_sfx", None)
+            # LAYERED with the built-in click, not replacing it: the state's
+            # CHOICE_HOLD_SFX answers the gesture instantly and the authored
+            # clip (typically a delayed dialogue line) follows it — the field
+            # ask is "change-path sound, then the dialogue right after".
+            # The runtime fires on_enter_sfx and on_enter_audio independently.
             st["on_enter_audio"] = dict(pick_audio)
             stamped.append(sid)
         print(f"  choice {block.get('name')!r}: pick/switch audio "
@@ -1067,6 +1080,29 @@ def plan_bed_chains(project: dict) -> dict:
     return plans
 
 
+def _match_prev_render(pool: Path, src: Path, offset_s: float,
+                       speed: float) -> Path | None:
+    """A previous export's render of this source at this offset+speed, found
+    when the exact trim_name can't be recomputed (ffprobe missing, so the
+    duration half of the name tag is unknown). A render's duration is
+    deterministic per (source, offset, speed) — it always ran to the end of
+    the file — so a prefix match identifies the exact file."""
+    prefix = f"{src.stem}__t{int(round(offset_s * 1000))}_"
+    speed_tag = "" if speed == 1.0 else f"_x{speed:g}".replace(".", "p")
+    try:
+        candidates = sorted(pool.iterdir())
+    except OSError:
+        return None
+    for p in candidates:
+        if p.suffix != ".ogg" or not p.name.startswith(prefix):
+            continue
+        rest = p.name[len(prefix):-len(".ogg")]
+        dur_part, sep, tail = rest.partition("_")
+        if dur_part.isdigit() and (sep + tail if tail else "") == speed_tag:
+            return p
+    return None
+
+
 def block_audio_events(block: dict, sounds_by_id: dict, project_path: Path,
                        pool: Path, ffmpeg: str | None,
                        rendered: dict[str, Path],
@@ -1114,6 +1150,13 @@ def block_audio_events(block: dict, sounds_by_id: dict, project_path: Path,
             # speed×dur seconds of source.
             cut = (dur is not None and natural is not None
                    and float(dur) * speed < natural - TRIM_TAIL_S)
+            if dur is not None and natural is None and not cut:
+                # ffprobe missing: the clip can't be compared against the
+                # source's natural length — but a render cut by a previous
+                # (ffprobe-equipped) export proves it ends short of the file.
+                # Without this an ffprobe-less export silently shipped the
+                # RAW full-length file over an existing trimmed render.
+                cut = (pool / trim_name(src, offset, float(dur), speed)).exists()
             render_dur = float(dur) if dur is not None else \
                 (max(0.05, (natural - offset) / speed) if natural else 1.0)
             need_render = (offset > TRIM_OFFSET_S or cut
@@ -1122,6 +1165,15 @@ def block_audio_events(block: dict, sounds_by_id: dict, project_path: Path,
         if need_render:
             name = trim_name(src, render_offset, render_dur, speed)
             out = pool / name
+            if name not in rendered and not out.exists() and natural is None:
+                # render_dur above fell back to a placeholder (ffprobe
+                # missing), so the computed name can't match the real render.
+                # Adopt a previous export's render of the same source/offset/
+                # speed instead — bed chains especially must keep referencing
+                # the ONE shared render or the mixer's handover key breaks.
+                prev = _match_prev_render(pool, src, render_offset, speed)
+                if prev is not None:
+                    name, out = prev.name, prev
             if name not in rendered:
                 # A render left by a previous export is reused as-is — no
                 # ffmpeg needed for a metadata-only re-export.

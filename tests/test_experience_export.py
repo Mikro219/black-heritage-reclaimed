@@ -430,6 +430,65 @@ class TestClipSpeedExport(unittest.TestCase):
         fake_render.assert_not_called()
 
 
+class TestRenderReuseWithoutFfprobe(unittest.TestCase):
+    """An ffprobe-less export (the WSL builder server) can't recompute the
+    duration half of a render's name tag — it must still adopt renders left
+    by a previous (ffmpeg-equipped) export instead of silently degrading the
+    metadata to raw untrimmed files (field incident: every Builder export on
+    the WSL server swapped 13 scenes' trimmed OGG refs back to raw mp3s)."""
+
+    def _events(self, clip_extra, pool_files=()):
+        import unittest.mock as mock
+        block = {"id": "b1", "type": "playback", "name": "B",
+                 "range_s": [0.0, 60.0],
+                 "audio": [{"id": "a1", "sound": "s3", "role": "music",
+                            "at_s": 0.0, "duration_s": None,
+                            "source_offset_s": 0, "gain": 1.0,
+                            "fade_in_ms": 0, "fade_out_ms": 0,
+                            "sustain": True, "continues": False,
+                            **clip_extra}]}
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            (tmp / "crinkle.mp3").write_bytes(b"x")
+            pool = tmp / "_audio"
+            pool.mkdir()
+            for name in pool_files:
+                (pool / name).write_bytes(b"r")
+            sounds = {"s3": {"id": "s3", "name": "crinkle.mp3"}}
+            with mock.patch.object(export_experience, "probe_duration",
+                                   return_value=None):
+                evs = export_experience.block_audio_events(
+                    block, sounds, tmp / "p.bhrx.json", pool, None, {})
+        return evs
+
+    def test_offset_clip_adopts_previous_render_by_prefix(self):
+        # duration unknown (ffprobe missing) -> exact name unknowable; the
+        # render at the same source/offset/speed IS the render.
+        evs = self._events({"source_offset_s": 43.2},
+                           pool_files=["crinkle__t43200_80550.ogg"])
+        self.assertEqual(evs[0]["file"], "crinkle__t43200_80550.ogg")
+
+    def test_prefix_match_respects_offset_and_speed(self):
+        # a longer offset that merely starts with the same digits, and a
+        # speed-tagged variant, must NOT be adopted for a speed-1 clip
+        evs = self._events({"source_offset_s": 43.2},
+                           pool_files=["crinkle__t432000_80550.ogg",
+                                       "crinkle__t43200_80550_x1p2.ogg"])
+        self.assertEqual(evs[0]["file"], "crinkle.mp3")   # raw fallback
+
+    def test_authored_dur_cut_detected_from_existing_render(self):
+        # offset 0 + authored duration: without ffprobe the natural-length
+        # comparison is impossible, but the exact-named render proves the cut
+        evs = self._events({"duration_s": 0.467, "sustain": False,
+                            "role": "sfx"},
+                           pool_files=["crinkle__t0_467.ogg"])
+        self.assertEqual(evs[0]["file"], "crinkle__t0_467.ogg")
+
+    def test_no_previous_render_still_ships_raw(self):
+        evs = self._events({"source_offset_s": 43.2})
+        self.assertEqual(evs[0]["file"], "crinkle.mp3")
+
+
 class TestExperienceExport(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -934,20 +993,51 @@ class TestChoicePickAudio(unittest.TestCase):
         self.assertEqual(wrong["on_enter_sfx"], export_experience.RETRY_WRONG_SFX)
         self.assertNotIn("on_enter_audio", wrong)
 
-    def test_hold_model_switch_states_replace_the_default_click(self):
+    def test_hold_model_states_layer_the_clip_over_the_click(self):
         """In the voice-confirmed hold model the pick AND switch states carry
-        CHOICE_HOLD_SFX by default; the authored clip replaces it so the beat
-        doesn't double up."""
+        CHOICE_HOLD_SFX by default; the authored clip plays IN ADDITION — the
+        click answers the gesture instantly, the (typically delayed) dialogue
+        follows it. Field report: replacing the click lost the change-path
+        sound that the dialogue was authored to come right after."""
         block = _confirm_choice_block(None)
         block["choice_audio"] = {"sound": "s3", "duration_s": 1.5}
         meta = export_experience.choice_metadata(block, "02", 900, 30, self.SOUNDS)
         states = meta["interaction"]["interaction_fsm"]["states"]
         for sid in ("left_selected", "right_selected"):
-            self.assertNotIn("on_enter_sfx", states[sid])
+            self.assertEqual(states[sid]["on_enter_sfx"],
+                             export_experience.CHOICE_HOLD_SFX, sid)
             self.assertEqual(states[sid]["on_enter_audio"],
                              {"file": "crinkle.mp3", "duration_s": 1.5})
-        self.assertFalse(any(s.get("on_enter_sfx") == export_experience.CHOICE_HOLD_SFX
-                             for s in states.values()))
+        # sound-only model: a flip lands DIRECTLY on the other side's switch
+        # hold (no animation state in between), so those states are the switch
+        # action itself and carry both the click and the clip
+        for sid in ("left_switch_hold", "right_switch_hold"):
+            self.assertEqual(states[sid]["on_enter_sfx"],
+                             export_experience.CHOICE_HOLD_SFX, sid)
+            self.assertEqual(states[sid]["on_enter_audio"],
+                             {"file": "crinkle.mp3", "duration_s": 1.5}, sid)
+
+    def test_animated_switch_holds_do_not_replay_the_clip(self):
+        """One switch gesture enters left_to_right (plays the clip) and then
+        right_switch_hold via segment_end — stamping the rest state too made
+        every switch play the pick sound TWICE (field report, shot 02). Only
+        states a visitor's action enters take the clip; the segment_end tails
+        stay silent, matching the live shot-09 silent switch-hold fix."""
+        block = _confirm_choice_block(dict(_HOLD_SEGMENTS))
+        block["choice_audio"] = {"sound": "s3", "delay_s": 1.0}
+        meta = export_experience.choice_metadata(block, "02", 1300, 30,
+                                                 self.SOUNDS)
+        states = meta["interaction"]["interaction_fsm"]["states"]
+        for sid in ("left_selected", "right_selected",
+                    "left_to_right", "right_to_left"):
+            self.assertEqual(states[sid]["on_enter_audio"],
+                             {"file": "crinkle.mp3", "delay_s": 1.0}, sid)
+            # the built-in click survives — the clip layers over it
+            self.assertEqual(states[sid]["on_enter_sfx"],
+                             export_experience.CHOICE_HOLD_SFX, sid)
+        for sid in ("left_switch_hold", "right_switch_hold"):
+            self.assertNotIn("on_enter_audio", states[sid], sid)
+            self.assertNotIn("on_enter_sfx", states[sid], sid)
 
     def test_clip_file_is_collected_for_shipping(self):
         """on_enter_audio files must be copied into the shot's audio/ dir like
